@@ -49,7 +49,7 @@ public sealed class ModCenterPlugin : BasePlugin
 
         FocusTick.Reset(); // 任务 8：清上一轮键盘门自证文件（每轮运行从空文件开始）
 
-        DllDisabler.ScanOnLoad(); // 任务 16：[DisabledTp] 残留检测（强杀自愈：补拉分离进程+toast 暂存）
+        DllDisabler.ScanOnLoad(); // 任务 4/T16：[DisabledTp] 对照（改名执行已迁启动清理器——此处仅预 Bind 保键 + 清理器未跑时的软停重放登记）
 
         // 任务 16：退出双钩子（幂等互备）——MonoBehaviour OnApplicationQuit 消息 + Application.quitting 事件。
         // 后者在某些退出路径（如引擎内部请求退出）可能先到/独到；两钩同函数，_quitDone 守卫只跑一次。
@@ -106,16 +106,16 @@ internal sealed class ModCenterTicker : MonoBehaviour
     private float _kbAcc; // 任务 8：键盘门巡检节拍（0.3s，unscaled——暂停菜单打开也要照走）
     private bool _residueSoftDone; // 任务 16：残留软停重放只跑一次（首帧=Chainloader 全插件就绪后）
 
-    // 任务 16：退出钩子——先把全部脏 cfg 落盘（[DisabledTp] marker 必须先于分离进程上盘），
-    // 再拉分离进程等本进程退出后改名 .disabled（运行中 dll 被锁，此刻改必败；详见 DllDisabler）。
-    // 强杀（taskkill/断电）不会到这里——残留由下次启动 ScanOnLoad 自愈。
+    // 任务 4：退出钩子只剩落盘——停用 dll 改名已迁启动清理器（MCCleaner；v1 退出分离进程机械退役）。
+    // 落盘仍关键：[DisabledTp] 意图必须上盘，下次启动清理器才能读到（MC_CLOSE 已即时 Flush，
+    // 此处兜底防抖残留）。强杀（taskkill/断电）漏过本钩也一样成立——只要意图已落盘
+    // （面板关闭即 Flush），下次启动清理器先于加载执行改名。
     private static bool _quitDone; // 双钩子（MonoBehaviour 消息 + Application.quitting）幂等守卫
     internal static void RunQuitHooks()
     {
         if (_quitDone) return;
         _quitDone = true;
         try { ConfigBridge.FlushDirty(); } catch (Exception e) { ModCenterPlugin.Log("warn quit 落盘异常: " + e.Message); }
-        DllDisabler.OnQuit();
     }
 
     private void OnApplicationQuit() => RunQuitHooks();

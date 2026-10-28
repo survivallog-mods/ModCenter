@@ -338,7 +338,7 @@ internal static class ConfigBridge
     /// <see cref="ThirdParty.Apply"/>——插件程序集内嵌 modcenter.json（mcSpec 1）有效时
     /// display/summary/groups/label/badge/min-max-step/order 全量覆盖为中文定制页
     /// （清单没列的键不出现；清单键不在 cfg → 该项隐藏），无效时保持 Tier 0 形态。
-    /// 任务 16：启停真值源=DllDisabler [DisabledTp] marker 取反（退出改名，下次启动不加载）；
+    /// 任务 16：启停真值源=DllDisabler [DisabledTp] marker 取反（下次启动由启动清理器改名不加载，T4）；
     /// Tier 2 软停能力标记（约定类型在场或清单 softDisable）与 QueryStates 状态回报随后合入。
     /// </summary>
     private static ModInfo BuildTpMod(BepInEx.PluginInfo info)
@@ -431,8 +431,8 @@ internal static class ConfigBridge
 
     /// <summary>第三方启停（任务 16 分流，指南 §五）：套件→直写 General.Enabled（上方主流程）；
     /// 第三方→Tier 2 软停回调优先（OnEnabledChanged 返回 true=行为已立即停止），清单 softDisable
-    /// 次之（自实现 gate）；两者都无=重启级。三层统一写 [DisabledTp] marker（退出时 dll 改名
-    /// .disabled，下次启动不加载——Tier 2 行的"下次启动不加载"由此兜底），区别只在面板文案语义。</summary>
+    /// 次之（自实现 gate）；两者都无=重启级。三层统一写 [DisabledTp] marker（下次启动由启动清理器
+    /// 改名 .disabled 不加载，T4——Tier 2 行的"下次启动不加载"由此兜底），区别只在面板文案语义。</summary>
     private static void SetTpEnabled(BepInEx.PluginInfo tp, bool enabled)
     {
         var self = ModCenterPlugin.Instance;
@@ -454,7 +454,7 @@ internal static class ConfigBridge
             Log($"toggle(tp) {name} → 停用（"
                 + (soft ? "Tier2 软停回调已处理，行为立即停止"
                         : viaManifest ? "清单 softDisable：对方自实现 gate（面板按软停语义展示）"
-                                      : "重启级：本会话仍在运行，退出时 dll 改名 .disabled")
+                                      : "重启级：本会话仍在运行，下次启动清理器改名 .disabled")
                 + $"；marker [{dllRel}]=true）");
         }
     }
@@ -635,12 +635,7 @@ internal static class ConfigBridge
                         case "MC_OPEN":
                             FocusTick.NotifyOpen(); // 任务 8：面板开⇒键盘门交给网页（FocusTick 0.3s 沿触发）
                             PushRender(BuildSnapshot().ToJson());
-                            // 任务 16：强杀残留提示（一轮）：Load 检出"标记停用但 dll 未改名"时，面板首次打开告知
-                            var residue = DllDisabler.ConsumeToast();
-                            if (residue != null)
-                                PushEvent("{\"type\":\"MC_TOAST\",\"main\":"
-                                    + JsonW.Str("\u26a0 \u4e0a\u6b21\u505c\u7528\u672a\u5b8c\u6210")
-                                    + ",\"small\":" + JsonW.Str(residue) + "}");
+                            // 任务 4：v1"上次停用未完成"残留 toast 已删——改名执行迁启动清理器，无残留概念
                             break;
                         case "MC_CLOSE": // 面板关闭：键盘门双还原（任务 8）+ 立即落盘全部脏 cfg（防抖收口）
                             FocusTick.NotifyClose();
