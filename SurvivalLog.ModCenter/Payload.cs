@@ -58,6 +58,7 @@ public sealed class ModInfo
     public List<GroupInfo> Groups = new();
     public List<OvrInfo> Ovr; // 仅动作加速挂（其他.Overrides 解析结果）；null 不输出该字段
     public List<BagOvrInfo> BagOvr; // 仅柜子容量挂（个性化 Global.BagOverrides 解析结果，T20）；null 不输出该字段
+    public List<IcInfo> Ics; // 行内图标徽标（v2 任务 7）：null/空表不输出该字段（快照协议向后兼容——老 panel.js 无感）
 
     internal void Write(StringBuilder sb)
     {
@@ -96,6 +97,16 @@ public sealed class ModInfo
                 sb.Append("{\"id\":").Append(BagOvr[i].Id.ToString(CultureInfo.InvariantCulture))
                   .Append(",\"w\":").Append(BagOvr[i].W.ToString(CultureInfo.InvariantCulture))
                   .Append(",\"h\":").Append(BagOvr[i].H.ToString(CultureInfo.InvariantCulture)).Append('}');
+            }
+            sb.Append(']');
+        }
+        if (Ics != null && Ics.Count > 0) // v2 任务 7：行内图标徽标（空表不输出——老面板/夹具断言零影响）
+        {
+            sb.Append(",\"ics\":[");
+            for (var i = 0; i < Ics.Count; i++)
+            {
+                if (i > 0) sb.Append(',');
+                Ics[i].Write(sb);
             }
             sb.Append(']');
         }
@@ -187,6 +198,31 @@ public sealed class BagOvrInfo
     public int Id;
     public int W;
     public int H;
+}
+
+/// <summary>
+/// 行内图标徽标（v2 生命周期任务 7，七形：⚠红冲突/⇄橙碰撞/◎灰同域/↑蓝可更新/↓橙可降级/⊘橙版本告警/⟳琥珀待生效）。
+/// k=色级（小写 red|orange|gray|blue|amber）；tip=悬停 title 全文；click=点击路由
+/// （cf=冲突详情弹窗 / upd=更新确认弹窗；null/空=纯状态不输出，如 ⟳）；g=可选字形符——
+/// ↓与⊘同为 orange+upd，无 g 无法消歧（缺省按 k+click 推断：red→⚠ / orange+cf→⇄ / gray→◎ /
+/// blue→↑ / orange+upd→↓ / amber→⟳；T8 喂 ⊘ 时带 g:"⊘"）。
+/// T7 只接真数据 ⟳ 待生效（pending.json）；冲突/更新/降级/告警四形由 T8/T11/T12 喂。
+/// </summary>
+public sealed class IcInfo
+{
+    public string K;     // red | orange | gray | blue | amber（小写）
+    public string Tip;   // 悬停 title 全文（原型：悬停 title 全文）
+    public string Click; // cf | upd；null/空 不输出（纯状态）
+    public string G;     // 可选字形符（↓/⊘ 消歧）；null 不输出
+
+    internal void Write(StringBuilder sb)
+    {
+        sb.Append("{\"k\":").Append(JsonW.Str(K))
+          .Append(",\"tip\":").Append(JsonW.Str(Tip));
+        if (!string.IsNullOrEmpty(Click)) sb.Append(",\"click\":").Append(JsonW.Str(Click));
+        if (!string.IsNullOrEmpty(G)) sb.Append(",\"g\":").Append(JsonW.Str(G));
+        sb.Append('}');
+    }
 }
 
 /// <summary>手写 JSON 片段工具（转义 + 不变文化数字）。</summary>

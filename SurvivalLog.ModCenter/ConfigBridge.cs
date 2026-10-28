@@ -21,6 +21,8 @@ namespace SurvivalLog.ModCenter;
 /// 任务 16 起换 dll .disabled 真禁用））/ 消息分发（MC_OPEN→__mcRender 快照；MC_SET→TrySet→
 /// __mcEvent MC_SET_OK；MC_TOGGLE_MOD→回新快照）/ Save 防抖（首写 SaveOnConfigSet=false，
 /// 3s 节流 + MC_CLOSE 立即落盘后恢复原值）。
+/// v2 生命周期任务 7：待生效清单汇总——BuildSnapshot 前主线程读 pending.json（mtime 节流），
+/// 归属到的 mod 行挂 ics ⟳ 徽标；Pump 每 2s 巡检，摘要变化推 MC_PENDING_SUMMARY（底部待生效条）。
 /// 线程纪律：全部 cfg 读写与分发都在 Ticker 主线程（Pump）；outbox 回调线程只入队。
 /// </summary>
 internal static class ConfigBridge
@@ -36,14 +38,25 @@ internal static class ConfigBridge
     private static float _dirtyAge = -1f; // -1 = 空闲
     private const float FlushInterval = 3f;
 
+    // ---- v2 任务 7：待生效清单（pending.json）汇总——行内 ⟳ + 底部待生效条数据 ----
+    // 全部主线程（Pump/BuildSnapshot 上下文）；mtime 节流读（Pump 每 2s 查一次，
+    // 变了才重读），BuildSnapshot 前强制重读一次（MC_OPEN/MC_TOGGLE 均走快照）。
+    private static List<McPending.Op> _pendOps = new();
+    private static long _pendStamp = -1;   // pending.json LastWriteTimeUtc.Ticks（不存在=0）；-1=未读过
+    private static string _pendSig;        // 摘要签名（变化才推送）；null=首拍未同步（只同步不推，MC_OPEN 会补推）
+    private static float _pendAcc;         // Pump 2s 节拍累加器
+
     private static readonly string EvidencePath =
         System.IO.Path.Combine(Paths.BepInExRootPath, "ModCenter_evidence.txt");
 
     // ============ 对外契约（任务 7/13/14 消费） ============
 
-    /// <summary>全量快照：{self:{ver}, mods:[ModInfo], tp:[ModInfo]}（tp=第三方 Tier 0 通用页，任务 14）。</summary>
+    /// <summary>全量快照：{self:{ver}, mods:[ModInfo], tp:[ModInfo]}（tp=第三方 Tier 0 通用页，任务 14）。
+    /// v2 任务 7：快照前强制重读 pending.json，归属到的 mod 行挂 ⟳ 待生效徽标（ics:[{k:"amber",tip}]）。</summary>
     internal static Snapshot BuildSnapshot()
     {
+        RefreshPending(true);
+        var pendByRow = PendingTipsByRow(); // guid（小写）→ 行内 ⟳ tip
         var snap = new Snapshot { Self = new SelfInfo { Ver = ModCenterPlugin.Version } };
         foreach (var mm in Meta.Mods)
         {
@@ -63,9 +76,11 @@ internal static class ConfigBridge
             }
             if (mm.OvrHost != null) mi.Ovr = ReadOvr(cfg, mm.OvrHost);
             if (mm.BagOvrHost != null) mi.BagOvr = ReadBagOvr(cfg, mm.BagOvrHost);
+            if (pendByRow.TryGetValue(mm.Guid, out var pendTip))
+                mi.Ics = new List<IcInfo> { new() { K = "amber", Tip = pendTip } }; // ⟳ 纯状态（无 click）
             snap.Mods.Add(mi);
         }
-        BuildTp(snap); // 任务 14：Tier 0 第三方通用页
+        BuildTp(snap, pendByRow); // 任务 14：Tier 0 第三方通用页
         return snap;
     }
 
@@ -278,7 +293,7 @@ internal static class ConfigBridge
     /// （section 分组沿用对方 cfg 节名；徽标一律 cfg；Description→note）；无 entry →
     /// 仅启停形态（空 groups + desc 说明，同灾前加速页）。按 Name 排序稳定输出。
     /// </summary>
-    private static void BuildTp(Snapshot snap)
+    private static void BuildTp(Snapshot snap, Dictionary<string, string> pendByRow)
     {
         Dictionary<string, PluginInfo> plugins = null;
         try { plugins = IL2CPPChainloader.Instance?.Plugins; } catch { }
@@ -293,7 +308,7 @@ internal static class ConfigBridge
                 var md = info?.Metadata;
                 if (md == null || string.IsNullOrEmpty(md.GUID) || info.Instance == null) continue;
                 if (TpExempt(md.GUID, md.Name)) continue;
-                snap.Tp.Add(BuildTpMod(info));
+                snap.Tp.Add(BuildTpMod(info, pendByRow));
             }
             catch (Exception e) { Log("warn tp 构建跳过 " + (info?.Metadata?.GUID ?? "?") + ": " + e.Message); }
         }
@@ -341,7 +356,7 @@ internal static class ConfigBridge
     /// 任务 16：启停真值源=DllDisabler [DisabledTp] marker 取反（下次启动由启动清理器改名不加载，T4）；
     /// Tier 2 软停能力标记（约定类型在场或清单 softDisable）与 QueryStates 状态回报随后合入。
     /// </summary>
-    private static ModInfo BuildTpMod(BepInEx.PluginInfo info)
+    private static ModInfo BuildTpMod(BepInEx.PluginInfo info, Dictionary<string, string> pendByRow)
     {
         var md = info.Metadata;
         var dllRel = DllDisabler.DllRelOf(info);
@@ -353,6 +368,8 @@ internal static class ConfigBridge
             Enabled = dllRel == null || !DllDisabler.MarkerOf(dllRel), // 任务 16：[DisabledTp] marker 取反
             Desc = "第三方 mod（Tier 0 自动识别）：通用页由其 cfg 自动生成；写入即触发其 SettingChanged，生效视该 mod。",
         };
+        if (pendByRow.TryGetValue(md.GUID, out var pendTip)) // v2 任务 7：GUID 命名 cfg 意图归属到 tp 行
+            mi.Ics = new List<IcInfo> { new() { K = "amber", Tip = pendTip } };
         ConfigFile cfg = null;
         try { if (info.Instance is BasePlugin bp) cfg = bp.Config; } catch { }
 
@@ -598,6 +615,159 @@ internal static class ConfigBridge
         catch { return false; }
     }
 
+    // ============ 待生效清单汇总（v2 任务 7：行内 ⟳ + MC_PENDING_SUMMARY 推送） ============
+
+    /// <summary>读 pending.json 到 <see cref="_pendOps"/>（主线程）。force=true 无条件读（BuildSnapshot 前）；
+    /// 否则 mtime 未变跳过（Pump 2s 节拍）。文件不存在=空清单（stamp 0）；坏文件按空清单展示并 Warn。</summary>
+    private static void RefreshPending(bool force)
+    {
+        long stamp = 0;
+        try
+        {
+            if (System.IO.File.Exists(McPending.File))
+                stamp = System.IO.File.GetLastWriteTimeUtc(McPending.File).Ticks;
+        }
+        catch { }
+        if (!force && stamp == _pendStamp) return;
+        _pendStamp = stamp;
+        try { _pendOps = McPending.Load(McPending.File); }
+        catch (Exception e)
+        {
+            Log("warn pending.json 解析失败（按空清单展示）: " + e.Message);
+            _pendOps = new List<McPending.Op>();
+        }
+    }
+
+    /// <summary>待生效分组：按归属行（guid）合并 ops——同 mod 的 dll+cfg 两条 delete 合成一档
+    /// "卸载 X"；归属不到行（第三方 dll 路径等）按目标文件自成一组，仍进底部条摘要。</summary>
+    private sealed class PendGroup
+    {
+        public string RowKey;            // 归属行键（guid 小写）；null=不归属任何行
+        public string Name;              // 显示名（Meta 中文名 / GUID 尾段 / 文件名）
+        public readonly List<string> Verbs = new(); // 动作词（有序去重）
+    }
+
+    private static readonly string[] PendVerbOrder = { "卸载", "安装", "更新", "停用", "启用" };
+
+    private static List<PendGroup> PendGroups()
+    {
+        var groups = new List<PendGroup>();
+        var byKey = new Dictionary<string, PendGroup>(StringComparer.Ordinal);
+        foreach (var op in _pendOps)
+        {
+            var rowKey = PendRowKeyOf(op.Target);
+            var gkey = rowKey ?? "#" + (op.Target ?? "").Replace('/', '\\').ToLowerInvariant();
+            if (!byKey.TryGetValue(gkey, out var g))
+            {
+                g = new PendGroup
+                {
+                    RowKey = rowKey,
+                    Name = rowKey != null ? PendDisplayName(rowKey) : PendFileName(op.Target),
+                };
+                byKey[gkey] = g;
+                groups.Add(g);
+            }
+            var verb = op.Type switch
+            {
+                McPending.TypeDelete => "卸载",
+                McPending.TypeInstall => "安装",
+                McPending.TypeReplace => "更新",
+                McPending.TypeDisable => "停用",
+                McPending.TypeEnable => "启用",
+                _ => null,
+            };
+            if (verb != null && !g.Verbs.Contains(verb)) g.Verbs.Add(verb);
+        }
+        return groups;
+    }
+
+    /// <summary>组标签（底部待生效条 + 行内 ⟳ tip 复用）：动词+名（多动词按既定序 "、" 连接）。</summary>
+    private static string PendLabel(PendGroup g)
+    {
+        var ordered = PendVerbOrder.Where(g.Verbs.Contains).ToList();
+        if (ordered.Count == 0) ordered = g.Verbs.ToList();
+        return string.Join("、", ordered.Select(v => v + " " + g.Name));
+    }
+
+    /// <summary>行归属：Target（BepInEx 根相对）→ guid（小写）。套件 dll（plugins/SurvivalLog.&lt;仓键&gt;.dll，
+    /// RepoDecision.DllRelOf 同款布局）与 GUID 命名 cfg（config/&lt;guid&gt;.cfg，T4 实证命名）可归属；
+    /// 第三方 dll 名不映射 GUID——留空只进底部条摘要（T8 后如需行归属再扩）。</summary>
+    private static string PendRowKeyOf(string target)
+    {
+        if (string.IsNullOrEmpty(target)) return null;
+        var t = target.Replace('/', '\\').Trim().TrimStart('\\').ToLowerInvariant();
+        const string plugins = "plugins\\", config = "config\\";
+        if (t.StartsWith(plugins, StringComparison.Ordinal))
+        {
+            var f = t.Substring(plugins.Length);
+            if (!f.EndsWith(".dll", StringComparison.Ordinal)) return null;
+            var stem = f.Substring(0, f.Length - 4);
+            return stem.StartsWith("survivallog.", StringComparison.Ordinal)
+                ? "com.local.survivallog." + stem.Substring("survivallog.".Length)
+                : null;
+        }
+        if (t.StartsWith(config, StringComparison.Ordinal) && t.EndsWith(".cfg", StringComparison.Ordinal))
+        {
+            var stem = t.Substring(config.Length, t.Length - config.Length - 4);
+            return stem.IndexOf('.') == -1 ? null : stem; // GUID 命名 cfg（含点）；无点=旧式文件名不归属
+        }
+        return null;
+    }
+
+    /// <summary>guid → 显示名：Meta 九表中文名优先，其次 GUID 尾段（如 modcenter）。</summary>
+    private static string PendDisplayName(string guidLower)
+    {
+        foreach (var mm in Meta.Mods)
+            if (string.Equals(mm.Guid, guidLower, StringComparison.OrdinalIgnoreCase)) return mm.Name;
+        var ix = guidLower.LastIndexOf('.');
+        return ix == -1 ? guidLower : guidLower.Substring(ix + 1);
+    }
+
+    /// <summary>目标文件名（去扩展名）——归属不到行时的组名。</summary>
+    private static string PendFileName(string target)
+    {
+        if (string.IsNullOrEmpty(target)) return "?";
+        var n = target.Replace('/', '\\');
+        var ix = n.LastIndexOf('\\');
+        if (ix != -1) n = n.Substring(ix + 1);
+        ix = n.LastIndexOf('.');
+        return ix > 0 ? n.Substring(0, ix) : n;
+    }
+
+    /// <summary>guid（任意大小写）→ 行内 ⟳ tip 文案（"待生效：…（重启后应用）"）。</summary>
+    private static Dictionary<string, string> PendingTipsByRow()
+    {
+        var map = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var g in PendGroups())
+            if (g.RowKey != null)
+                map[g.RowKey] = "待生效：" + PendLabel(g) + "（重启后应用）";
+        return map;
+    }
+
+    /// <summary>摘要签名（条数+标签串）——变化才推送。</summary>
+    private static string PendingSig()
+    {
+        var gs = PendGroups();
+        return gs.Count.ToString(CultureInfo.InvariantCulture) + "\u0001"
+               + string.Join("\u0001", gs.Select(PendLabel));
+    }
+
+    /// <summary>推 MC_PENDING_SUMMARY（__mcEvent）：{type,n,labels[]}。条数&gt;0 面板显底部待生效条。</summary>
+    private static void PushPendingSummary()
+    {
+        var gs = PendGroups();
+        var sb = new StringBuilder(128);
+        sb.Append("{\"type\":\"MC_PENDING_SUMMARY\",\"n\":")
+          .Append(gs.Count.ToString(CultureInfo.InvariantCulture)).Append(",\"labels\":[");
+        for (var i = 0; i < gs.Count; i++)
+        {
+            if (i > 0) sb.Append(',');
+            sb.Append(JsonW.Str(PendLabel(gs[i])));
+        }
+        sb.Append("]}");
+        PushEvent(sb.ToString());
+    }
+
     // ============ 消息泵（主线程，Ticker 每帧调） ============
 
     internal static void EnqueueOutboxJson(string json) => Inbox.Enqueue(json);
@@ -611,6 +781,21 @@ internal static class ConfigBridge
             {
                 _dirtyAge += dt;
                 if (_dirtyAge >= FlushInterval) FlushDirty();
+            }
+            // v2 任务 7：pending.json 2s 节拍巡检（mtime 变才重读；摘要变化才推送；
+            // 首拍只同步签名不推——面板未开，MC_OPEN 分支必补推一轮初始态）
+            _pendAcc += dt;
+            if (_pendAcc >= 2f)
+            {
+                _pendAcc = 0f;
+                RefreshPending(false);
+                var sig = PendingSig();
+                if (_pendSig == null) _pendSig = sig;
+                else if (sig != _pendSig)
+                {
+                    _pendSig = sig;
+                    PushPendingSummary();
+                }
             }
         }
         catch (Exception e) { Log("warn 桥泵异常: " + e.Message); }
@@ -635,6 +820,9 @@ internal static class ConfigBridge
                         case "MC_OPEN":
                             FocusTick.NotifyOpen(); // 任务 8：面板开⇒键盘门交给网页（FocusTick 0.3s 沿触发）
                             PushRender(BuildSnapshot().ToJson());
+                            // v2 任务 7：开门即推待生效摘要（面板底部条初始态；BuildSnapshot 内已刷新 _pendOps）
+                            _pendSig = PendingSig();
+                            PushPendingSummary();
                             // 任务 4：v1"上次停用未完成"残留 toast 已删——改名执行迁启动清理器，无残留概念
                             break;
                         case "MC_CLOSE": // 面板关闭：键盘门双还原（任务 8）+ 立即落盘全部脏 cfg（防抖收口）

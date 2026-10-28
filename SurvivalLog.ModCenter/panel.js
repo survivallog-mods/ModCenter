@@ -1,6 +1,13 @@
 /* ModCenter 面板 JS（内嵌资源 SurvivalLog.ModCenter.panel.js）。
  * 任务 7 = 完整面板（原型 v4 移植：docs/superpowers/specs/2026-10-24-modcenter-prototype.html
  * 的 <style> 面板段 + renderSide/renderCfg/ctl/toast/toggle/ovr 逻辑；场景模拟与 demo-bar 不迁）。
+ * v2 生命周期任务 7 = 图标徽标系统 + 待生效条（原型 2026-10-28-modcenter-v2-prototype.html
+ * 移植，样式值照抄）：mod 行内 ics 容器（mod.ics=[{k,tip,click?,g?}]，k=red|orange|gray|
+ * blue|amber 18px 圆片七形，悬停 title 全文，click 路由 cf=冲突详情弹窗/upd=更新确认弹窗壳，
+ * 无 click=纯状态如 ⟳ 待生效）；底部待生效条（__mcEvent MC_PENDING_SUMMARY{n,labels}，n>0
+ * 显示，撤销/立即重启占位禁用待 T13）；弹窗=面板内浮层（.mc-modal-bg/.mc-modal 同款，
+ * ESC/点底关闭，弹窗开着时 ESC 先关弹窗再关面板）。ics 缺省时行渲染与 v1 完全一致
+ * （快照协议向后兼容）。
  *
  * 注入落点：Root 文档（C# WebBridge.ExecuteJavaScript 上下文）。__McInstalled 守卫幂等。
  * 全局契约（C# Ticker / MenuEntryInjector 对齐）：__McInstalled / __mcOutbox / __mcDrain /
@@ -48,9 +55,11 @@
   var SELF_EN = 'ModCenter\uff08\u672c\u9762\u677f\uff09';
   var OVR_SECTION = '\u5176\u4ed6', OVR_KEY = 'Overrides'; // 与 C# Meta.OvrSection/OvrKey 同源
 
-  /* ---- 状态：host/root=宿主文档与面板根；snap=最近快照；sel='__self'|guid ---- */
-  var S = { host: null, root: null, side: null, cfg: null, sub: null, toastEl: null };
-  var ST = { snap: null, sel: null };
+  /* ---- 状态：host/root=宿主文档与面板根；snap=最近快照；sel='__self'|guid ----
+   * v2 任务 7：pend=最近 MC_PENDING_SUMMARY（底部待生效条数据，跨开关面板保留）；
+   * pendEl/pendTx/mbg/mdl=待生效条与浮层弹窗元素（随面板建/拆）。 */
+  var S = { host: null, root: null, side: null, cfg: null, sub: null, toastEl: null, pendEl: null, pendTx: null, mbg: null, mdl: null };
+  var ST = { snap: null, sel: null, pend: null };
   var TH = Object.create(null); // 滑条 100ms 节流句柄表
 
   var CSS = ''
@@ -138,12 +147,45 @@
     + '#__mc_overlay .__mc-foot{display:flex;align-items:center;gap:18px;padding:9px 18px;border-top:1px solid #2a2f3d;background:#1d212c;font-size:12px;color:#6b7180;}'
     + '#__mc_overlay .__mc-foot .__mc-lg{display:flex;gap:14px;}'
     + '#__mc_overlay .__mc-foot .__mc-foot-note{margin-left:auto;}'
-    /* toast（挂在 overlay 内右下角） */
-    + '#__mc_overlay .__mc-toast{position:absolute;right:18px;bottom:16px;background:rgba(15,18,25,.94);border:1px solid #4ade80;color:#e8e6e0;border-radius:10px;padding:10px 16px;font-size:13px;display:none;box-shadow:0 8px 30px rgba(0,0,0,.63);line-height:1.5;max-width:60%;}'
+    /* toast（挂在 overlay 内右下角；z-index:10=原型 .mc-toast 层序——浮层弹窗(9)/待生效条(5)之上） */
+    + '#__mc_overlay .__mc-toast{position:absolute;right:18px;bottom:16px;background:rgba(15,18,25,.94);border:1px solid #4ade80;color:#e8e6e0;border-radius:10px;padding:10px 16px;font-size:13px;display:none;box-shadow:0 8px 30px rgba(0,0,0,.63);line-height:1.5;max-width:60%;z-index:10;}'
     + '#__mc_overlay .__mc-toast.__mc-show{display:block;}'
     + '#__mc_overlay .__mc-toast.__mc-err{border-color:#f87171;}'
     + '#__mc_overlay .__mc-toast small{color:#9aa0ad;display:block;font-size:11.5px;}'
     + '#__mc_overlay .__mc-loading{padding:40px 0;text-align:center;color:#6b7180;font-size:13px;letter-spacing:1px;}'
+    /* ---- v2 任务 7：行内图标徽标（原型 .mc-ics/.mc-ic 及色级，样式值照抄） ----
+     * 18px 圆片：⚠红冲突/⇄橙碰撞/◎灰同域/↑蓝可更新/↓橙可降级/⊘橙版本告警/⟳琥珀待生效。
+     * span 非 button：图标落在 mod 行（div+data-interactive）矩形内，点击可达性由行承载。 */
+    + '#__mc_overlay .__mc-ics{display:flex;align-items:center;gap:3px;flex-shrink:0;}'
+    + '#__mc_overlay .__mc-ic{width:18px;height:18px;border-radius:50%;display:inline-flex;align-items:center;justify-content:center;font-size:9.5px;line-height:1;border:1px solid;cursor:pointer;font-family:"Segoe UI Symbol",inherit;position:relative;}'
+    + '#__mc_overlay .__mc-ic:hover{filter:brightness(1.25);}'
+    + '#__mc_overlay .__mc-ic.__mc-red{color:#f87171;border-color:rgba(248,113,113,.45);background:rgba(248,113,113,.1);}'
+    + '#__mc_overlay .__mc-ic.__mc-orange{color:#fbbf24;border-color:rgba(251,191,36,.45);background:rgba(251,191,36,.08);}'
+    + '#__mc_overlay .__mc-ic.__mc-gray{color:#8a90a0;border-color:rgba(138,144,160,.4);background:rgba(138,144,160,.08);}'
+    + '#__mc_overlay .__mc-ic.__mc-blue{color:#60a5fa;border-color:rgba(96,165,250,.5);background:rgba(96,165,250,.1);}'
+    + '#__mc_overlay .__mc-ic.__mc-amber{color:#e8a33d;border-color:rgba(232,163,61,.5);background:rgba(232,163,61,.1);cursor:default;}'
+    /* ---- v2 任务 7：通用按钮（原型 .btn/.pri/.mini；弹窗与待生效条共用，T8 仓库页复用） ---- */
+    + '#__mc_overlay .__mc-btn{background:#0f1219;border:1px solid #2a2f3d;color:#9aa0ad;border-radius:7px;padding:6px 14px;font-size:12.5px;cursor:pointer;font-family:inherit;}'
+    + '#__mc_overlay .__mc-btn:hover{border-color:#e8a33d;color:#e8a33d;}'
+    + '#__mc_overlay .__mc-btn.__mc-btn-pri{border-color:rgba(232,163,61,.5);color:#e8a33d;background:rgba(232,163,61,.1);}'
+    + '#__mc_overlay .__mc-btn.__mc-btn-pri:hover{background:rgba(232,163,61,.18);}'
+    + '#__mc_overlay .__mc-btn:disabled{opacity:.4;cursor:not-allowed;}'
+    + '#__mc_overlay .__mc-btn.__mc-btn-mini{padding:3px 10px;font-size:11.5px;}'
+    /* ---- v2 任务 7：底部待生效条（原型 .mc-pending；面板内绝对定位，压在底栏图例上） ---- */
+    + '#__mc_overlay .__mc-pending{position:absolute;left:0;right:0;bottom:0;display:none;align-items:center;gap:12px;padding:9px 18px;background:#1d212c;border-top:1px solid rgba(232,163,61,.4);font-size:12.5px;z-index:5;}'
+    + '#__mc_overlay .__mc-pending.__mc-show{display:flex;}'
+    + '#__mc_overlay .__mc-sp{flex:1;}'
+    /* ---- v2 任务 7：面板内浮层弹窗（原型 .mc-modal-bg/.mc-modal；inset:0 展开为四向 0 长属性，
+     * 计算值相同——旧 CEF 不识别 inset 简写） ---- */
+    + '#__mc_overlay .__mc-modal-bg{position:absolute;left:0;top:0;right:0;bottom:0;background:rgba(5,6,10,.66);display:none;align-items:center;justify-content:center;z-index:9;}'
+    + '#__mc_overlay .__mc-modal-bg.__mc-show{display:flex;}'
+    + '#__mc_overlay .__mc-modal{width:520px;max-width:92%;max-height:86%;overflow-y:auto;background:#1d212c;border:1px solid #2a2f3d;border-radius:12px;padding:18px 20px;box-shadow:0 22px 80px rgba(0,0,0,.8);}'
+    + '#__mc_overlay .__mc-modal h3{font-size:15.5px;margin-bottom:4px;display:flex;align-items:center;gap:8px;}'
+    + '#__mc_overlay .__mc-m-sub{font-size:11.5px;color:#6b7180;margin-bottom:12px;}'
+    + '#__mc_overlay .__mc-m-sec{margin-top:12px;}'
+    + '#__mc_overlay .__mc-m-h{font-size:11.5px;color:#e8a33d;letter-spacing:2px;margin-bottom:6px;}'
+    + '#__mc_overlay .__mc-m-txt{font-size:12.5px;color:#9aa0ad;line-height:1.75;}'
+    + '#__mc_overlay .__mc-m-acts{display:flex;gap:8px;flex-wrap:wrap;margin-top:14px;}'
     + '#__mc_overlay .__mc-side::-webkit-scrollbar,#__mc_overlay .__mc-cfg::-webkit-scrollbar{width:8px;}'
     + '#__mc_overlay .__mc-side::-webkit-scrollbar-thumb,#__mc_overlay .__mc-cfg::-webkit-scrollbar-thumb{background:#2a2f3d;border-radius:4px;}';
 
@@ -198,7 +240,24 @@
     var toastEl = doc.createElement('div');
     toastEl.className = '__mc-toast'; toastEl.id = '__mc_toast';
 
-    pn.appendChild(head); pn.appendChild(body); pn.appendChild(foot); pn.appendChild(toastEl);
+    /* v2 任务 7：底部待生效条（原型 #pend 同构；撤销/立即重启占位禁用——T13 接真） */
+    var pendEl = doc.createElement('div');
+    pendEl.className = '__mc-pending'; pendEl.id = '__mc_pending';
+    pendEl.innerHTML = '<span aria-hidden="true">\u27f3</span>'
+      + '<span class="__mc-pend-tx" id="__mc_pend_tx"></span><span class="__mc-sp"></span>'
+      + '<button type="button" class="__mc-btn __mc-btn-mini" data-x="undo" disabled title="T13 \u63a5\u5165">\u64a4\u9500</button>'
+      + '<button type="button" class="__mc-btn __mc-btn-pri __mc-btn-mini" data-x="reboot" disabled title="T13 \u63a5\u5165">\u7acb\u5373\u91cd\u542f</button>';
+
+    /* v2 任务 7：面板内浮层弹窗（裁定 1：绝对定位+半透明底，不用 window.alert；ESC/点底关闭） */
+    var mbg = doc.createElement('div');
+    mbg.className = '__mc-modal-bg'; mbg.id = '__mc_modal_bg';
+    var mdl = doc.createElement('div');
+    mdl.className = '__mc-modal'; mdl.id = '__mc_modal';
+    mbg.appendChild(mdl);
+    mbg.addEventListener('click', function (e) { if (e.target === mbg) closeModal(); });
+
+    pn.appendChild(head); pn.appendChild(body); pn.appendChild(foot);
+    pn.appendChild(pendEl); pn.appendChild(mbg); pn.appendChild(toastEl);
     ov.appendChild(pn);
     /* 点遮罩空白处关闭（面板本体不关） */
     ov.addEventListener('click', function (e) { if (e.target === ov) window.__mcClose(); });
@@ -207,6 +266,7 @@
     wireCfg(cfg);
 
     S.side = side; S.cfg = cfg; S.sub = sub; S.toastEl = toastEl;
+    S.pendEl = pendEl; S.pendTx = pendEl.querySelector('#__mc_pend_tx'); S.mbg = mbg; S.mdl = mdl;
     return ov;
   }
 
@@ -241,6 +301,37 @@
       + attrs + ' aria-checked="' + !!on + '"></button>';
   }
 
+  /* ================= v2 任务 7：行内图标徽标 ================= */
+
+  /* 字形推断：g 显式优先；orange 需 click 消歧（cf=⇄碰撞 / upd=↓降级）；其余按色级。
+   * （↓ 与 ⊘ 同为 orange+upd——喂 ⊘ 时 DTO 带 g:"⊘"，见 Payload.IcInfo） */
+  function icGlyph(ic) {
+    if (ic.g) return ic.g;
+    if (ic.k === 'orange') return ic.click === 'cf' ? '\u21c4' : '\u2193'; // ⇄ / ↓
+    if (ic.k === 'red') return '\u26a0';       // ⚠ 冲突
+    if (ic.k === 'gray') return '\u25ce';      // ◎ 同域
+    if (ic.k === 'blue') return '\u2191';      // ↑ 可更新
+    if (ic.k === 'amber') return '\u27f3';     // ⟳ 待生效（纯状态，无 click）
+    return '\u26a0';
+  }
+
+  /* mod 行 ics 容器（原型 appendRow 的 '<span class="mc-ics">' 段）：空/缺省 ics 返回 ''
+   * —— 行渲染与 v1 完全一致（快照协议向后兼容硬门槛）。 */
+  function icsHtml(m) {
+    var ics = m && m.ics;
+    if (!ics || !ics.length) return '';
+    var h = '<span class="__mc-ics">';
+    for (var i = 0; i < ics.length; i++) {
+      var ic = ics[i];
+      if (!ic || !ic.k || !ic.tip) continue;
+      h += '<span class="__mc-ic __mc-' + esc(ic.k) + '" data-guid="' + esc(m.guid) + '"'
+        + (ic.click ? ' data-click="' + esc(ic.click) + '"' : '')
+        + ' title="' + esc(ic.tip) + '" aria-label="' + esc(ic.tip) + '">'
+        + esc(icGlyph(ic)) + '</span>';
+    }
+    return h + '</span>';
+  }
+
   function renderSide() {
     if (!S.side) return;
     var ms = mods(), ts = tps();
@@ -250,6 +341,7 @@
       h += '<div class="__mc-mod-row' + (m.enabled ? '' : ' __mc-off')
         + (ST.sel === m.guid ? ' __mc-sel' : '') + '" data-interactive data-guid="' + esc(m.guid) + '">'
         + '<span class="__mc-st"></span><span class="__mc-nm">' + esc(m.name) + '</span>'
+        + icsHtml(m)
         + swBtn(m.enabled, ' data-act="toggle" data-guid="' + esc(m.guid) + '"') + '</div>';
     }
     h += '<div class="__mc-cat">\u9762\u677f\u81ea\u8eab</div>';
@@ -266,6 +358,7 @@
         h += '<div class="__mc-mod-row' + (t.enabled ? '' : ' __mc-off')
           + (ST.sel === t.guid ? ' __mc-sel' : '') + '" data-interactive data-guid="' + esc(t.guid) + '">'
           + '<span class="__mc-st"></span><span class="__mc-nm">' + esc(t.name) + '</span>'
+          + icsHtml(t)
           + swBtn(t.enabled, ' data-act="toggle" data-guid="' + esc(t.guid) + '"') + '</div>';
       }
     }
@@ -276,6 +369,20 @@
     side.addEventListener('click', function (e) {
       var sw = e.target.closest ? e.target.closest('[data-act="toggle"]') : null;
       if (sw) { e.stopPropagation(); toggleMod(sw.getAttribute('data-guid')); return; }
+      /* v2 任务 7：图标点击路由（原型 wireSide 同款 stopPropagation——不选行）。
+       * cf=冲突详情弹窗（T11 前兜底文案）/ upd=更新确认弹窗壳（T8 前兜底文案）；
+       * 无 data-click（⟳ 纯状态，cursor:default）不弹窗不选行（点 ⟳ 无弹窗）。 */
+      var ic = e.target.closest ? e.target.closest('.__mc-ic') : null;
+      if (ic) {
+        e.stopPropagation();
+        var click = ic.getAttribute('data-click');
+        if (!click) return;
+        var m = findMod(ic.getAttribute('data-guid'));
+        if (!m) return;
+        if (click === 'cf') openModal(cfModalHtml(m));
+        else if (click === 'upd') openModal(updModalHtml(m));
+        return;
+      }
       var row = e.target.closest ? e.target.closest('.__mc-mod-row') : null;
       if (row) { ST.sel = row.getAttribute('data-guid'); renderSide(); renderCfg(); }
     });
@@ -471,6 +578,62 @@
     toast._h = setTimeout(function () {
       if (S.toastEl) S.toastEl.className = '__mc-toast';
     }, 3400);
+  }
+
+  /* ================= v2 任务 7：浮层弹窗 + 底部待生效条 ================= */
+
+  /* 弹窗头装饰图标（原型 h3 内联款：cursor:default 不可点） */
+  function chipHtml(k, glyph) {
+    return '<span class="__mc-ic __mc-' + k + '" style="cursor:default" aria-hidden="true">' + glyph + '</span>';
+  }
+
+  /* 冲突详情弹窗（click:"cf"）——T11 体检接入前的兜底文案（数据空时占位） */
+  function cfModalHtml(m) {
+    return '<h3>' + chipHtml('red', '\u26a0') + '\u51b2\u7a81 \u00b7 ' + esc(m.name) + '</h3>'
+      + '<div class="__mc-m-sub">\u4f53\u68c0\u8be6\u60c5\uff08L1 \u5df2\u77e5\u51b2\u7a81\u5e93 / L2 \u8865\u4e01\u78b0\u649e / L3 \u529f\u80fd\u57df\uff09</div>'
+      + '<div class="__mc-m-sec"><div class="__mc-m-h">\u8be6\u60c5</div>'
+      + '<div class="__mc-m-txt">T11 \u63a5\u5165\u540e\u5c55\u793a\u8be6\u60c5\uff08\u51b2\u7a81\u5bf9\u8c61\u3001\u539f\u56e0\u3001\u5904\u7f6e\u5efa\u8bae\u4e0e\u98ce\u9669\u6587\u6848\uff09\u3002</div></div>'
+      + '<div class="__mc-m-acts"><button type="button" class="__mc-btn __mc-btn-mini" data-mact="close">\u5173\u95ed</button></div>';
+  }
+
+  /* 更新确认弹窗壳（click:"upd"）——T8 仓库页接入前的兜底文案（仓库数据加载中/暂不可用） */
+  function updModalHtml(m) {
+    return '<h3>' + chipHtml('blue', '\u2191') + '\u66f4\u65b0 \u00b7 ' + esc(m.name) + '</h3>'
+      + '<div class="__mc-m-sub">\u5957\u4ef6\u4ed3\u5e93</div>'
+      + '<div class="__mc-m-sec"><div class="__mc-m-h">\u7248\u672c</div>'
+      + '<div class="__mc-m-txt">\u4ed3\u5e93\u6570\u636e\u52a0\u8f7d\u4e2d / \u6682\u4e0d\u53ef\u7528\uff08\u5957\u4ef6\u4ed3\u5e93\u9875\u4efb\u52a1 8 \u63a5\u5165\u540e\u5c55\u793a\u7248\u672c\u5bf9\u6bd4\u4e0e\u786e\u8ba4\u64cd\u4f5c\uff09\u3002</div></div>'
+      + '<div class="__mc-m-acts"><button type="button" class="__mc-btn __mc-btn-mini" data-mact="close">\u53d6\u6d88</button>'
+      + '<button type="button" class="__mc-btn __mc-btn-pri" disabled>\u66f4\u65b0</button></div>';
+  }
+
+  function openModal(html) {
+    if (!S.mdl || !S.mbg || !S.mbg.isConnected) return;
+    S.mdl.innerHTML = html;
+    S.mbg.className = '__mc-modal-bg __mc-show';
+    var closes = S.mdl.querySelectorAll('[data-mact="close"]');
+    for (var i = 0; i < closes.length; i++)
+      closes[i].addEventListener('click', function (e) { e.stopPropagation(); closeModal(); });
+  }
+
+  function closeModal() {
+    if (S.mbg) S.mbg.className = '__mc-modal-bg';
+  }
+
+  function modalOpen() {
+    return !!(S.mbg && S.mbg.className.indexOf('__mc-show') !== -1);
+  }
+
+  /* 底部待生效条（MC_PENDING_SUMMARY{n,labels}；n>0 显示——原型 renderPending 同款文案） */
+  function renderPending() {
+    if (!S.pendEl || !S.pendEl.isConnected) return;
+    var p = ST.pend;
+    if (!p || !p.n || !(p.labels && p.labels.length)) {
+      S.pendEl.className = '__mc-pending';
+      return;
+    }
+    S.pendEl.className = '__mc-pending __mc-show';
+    if (S.pendTx) S.pendTx.textContent =
+      '\u5f85\u751f\u6548 ' + p.labels.length + ' \u9879\uff08' + p.labels.join(' \u00b7 ') + '\uff09\u00b7 \u91cd\u542f\u6e38\u620f\u540e\u5e94\u7528';
   }
 
   /* ================= 消息发送 ================= */
@@ -731,6 +894,7 @@
     if (S.sub && ST.snap && ST.snap.self) S.sub.textContent = 'v' + ST.snap.self.ver + ' \u00b7 \u6539\u52a8\u5b9e\u65f6\u5199\u5165 cfg \u00b7 \u65e0\u9700\u91cd\u542f';
     renderSide();
     renderCfg();
+    renderPending(); // v2 任务 7：面板重开时按已存摘要恢复底部待生效条
   }
 
   window.__mcRender = function (snapshot) {
@@ -751,6 +915,12 @@
     if (event && event.type === 'MC_TOAST') {
       toastRaw(event.main || '', event.small || '');
     }
+    /* v2 任务 7：待生效清单摘要（pending.json 泵 2s 巡检推送；面板关着时只存 ST.pend，
+     * 重开面板 renderAll 恢复底部条） */
+    if (event && event.type === 'MC_PENDING_SUMMARY') {
+      ST.pend = event;
+      renderPending();
+    }
   };
 
   /* ================= 开关 ================= */
@@ -769,6 +939,7 @@
     if (!S.root) return;
     var el = S.root;
     S.root = null; S.side = S.cfg = S.sub = S.toastEl = null;
+    S.pendEl = null; S.pendTx = null; S.mbg = null; S.mdl = null; // v2 任务 7：弹窗/待生效条随面板拆
     if (el.isConnected && el.parentNode) el.parentNode.removeChild(el);
     /* 关闭即清节流句柄（评审备忘 3）：撤销未触发的 trailing 补发，面板关闭后不再发消息 */
     for (var id in TH) if (TH[id] && TH[id].timer != null) clearTimeout(TH[id].timer);
@@ -777,7 +948,10 @@
   };
   window.__mcEsc = function (e) {
     if (e && e.key !== 'Escape') return;
-    if (S.root) window.__mcClose();
+    if (!S.root) return;
+    /* v2 任务 7（裁定 1）：弹窗开着时 ESC 先关弹窗（不关面板）；再按才关面板 */
+    if (modalOpen()) { closeModal(); return; }
+    window.__mcClose();
   };
 
   /* Root 文档自身的 ESC（焦点在 Root 时兜底；host doc 的 ESC 由 MenuEntryInjector wireKey 转发；
@@ -802,6 +976,7 @@
     } catch (e) { alive = false; }
     if (alive) return;
     S.root = null; S.side = S.cfg = S.sub = S.toastEl = null;
+    S.pendEl = null; S.pendTx = null; S.mbg = null; S.mdl = null; // v2 任务 7
     for (var id in TH) if (TH[id] && TH[id].timer != null) clearTimeout(TH[id].timer);
     TH = Object.create(null);
     window.__mcOutbox.push({ type: 'MC_CLOSE', why: 'host-doc-gone' });
