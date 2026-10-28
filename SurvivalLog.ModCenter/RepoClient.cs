@@ -18,7 +18,9 @@ namespace SurvivalLog.ModCenter;
 /// 线程纪律（控制器裁定 1）：本类全部 HTTP 调用只在后台线程跑（调用方 Task.Run 起任务，
 /// Ticker 主线程收割——探针参考 ConfigBridge.Pump 模式），任何同步阻塞主线程 = 缺陷。
 /// 失败语义（裁定 4）：任何异常（网络/解析/资产缺失）→ <see cref="FetchLatest"/> 返回 null /
-/// <see cref="DownloadAsset"/> 抛出，调用方降级；类内不做任何重试。
+/// <see cref="DownloadAsset"/> 抛出，调用方降级；类内不做任何重试。fetch 异常留一行 warn 日志
+/// （Log 静态门，评审 I-1）——失败原因（超时/403/404/解析）可排障；结构性 null（资产/字段缺失）
+/// 由调用方按"无更新信息"降级展示。
 ///
 /// cfg 键（绑定在 ModCenterPlugin.Load，Network 节）：MirrorPrefix（默认空 = 直连）、
 /// CheckTimeoutMs=5000、DownloadTimeoutMs=60000。镜像前缀语义（裁定 2）：非空时对
@@ -33,20 +35,18 @@ public static class RepoClient
     private const string UpdateJsonName = "update.json";
     private const string OrgPrefix = "https://api.github.com/repos/survivallog-mods/";
 
-    private static HttpClient _http;
+    // 懒初始化线程安全（评审 M-1）：Lazy 默认 ExecutionAndPublication 双检锁闭环，
+    // T6/T8 并发 fetch 时只会有一个 HttpClient 实例（否则各 new 一个且孤儿不 Dispose）。
+    private static readonly Lazy<HttpClient> HttpLazy = new(() =>
+    {
+        var c = new HttpClient();
+        c.DefaultRequestHeaders.TryAddWithoutValidation("User-Agent", UserAgent);
+        c.Timeout = Timeout.InfiniteTimeSpan;
+        return c;
+    });
 
     /// <summary>单例客户端（默认跟随系统代理；总超时无限——超时由每次请求的 CTS 按 cfg 键控制）。</summary>
-    private static HttpClient Http
-    {
-        get
-        {
-            if (_http != null) return _http;
-            var c = new HttpClient();
-            c.DefaultRequestHeaders.TryAddWithoutValidation("User-Agent", UserAgent);
-            c.Timeout = Timeout.InfiniteTimeSpan;
-            return _http = c;
-        }
-    }
+    private static HttpClient Http => HttpLazy.Value;
 
     private static int CheckTimeoutMs
     {
@@ -129,9 +129,13 @@ public static class RepoClient
             info.AssetUrl = zipUrl;
             return info;
         }
-        catch (Exception)
+        catch (Exception e)
         {
-            return null; // 快速失败（超时/拒绝/DNS/解析），语义=调用方降级；类内零重试
+            // 快速失败（超时/拒绝/DNS/解析），语义=调用方降级；类内零重试。
+            // 评审 I-1：留痕失败原因（超时/403 限流/404/JSON 坏等）——玩家"更新不可用"排障
+            // 与 README 换镜像前缀指引依赖此行；走既有 Log 静态门（NetProbe.P 同款用法）。
+            ModCenterPlugin.Log($"warn fetch {repoName} 失败: {e.GetType().Name} {e.Message}");
+            return null;
         }
     }
 
