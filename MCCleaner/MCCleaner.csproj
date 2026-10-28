@@ -16,6 +16,11 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <!-- 两端共用契约（T2）：物理归属插件项目，此处仅 link 编译同一文件 -->
+    <Compile Include="../SurvivalLog.ModCenter/Contracts/McPending.cs" />
+  </ItemGroup>
+
+  <ItemGroup>
     <Reference Include="0Harmony">
       <HintPath>E:\SteamLibrary\steamapps\common\Survival Log\BepInEx\core\0Harmony.dll</HintPath>
       <Private>false</Private>
