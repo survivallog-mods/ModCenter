@@ -1,10 +1,15 @@
 using System;
 using System.Collections.Generic;
 using System.IO;
+using System.Linq;
+using System.Reflection;
 using System.Security.Cryptography;
 using System.Text;
 using BepInEx;
+using BepInEx.Bootstrap;
 using BepInEx.Preloader.Core.Patching;
+using BepInEx.Unity.IL2CPP;
+using HarmonyLib;
 using SurvivalLog.ModCenter;
 
 namespace MCCleaner;
@@ -16,9 +21,12 @@ namespace MCCleaner;
 /// 见 spec §4.7（双槽同装已被 CLR 程序集身份合并证伪，Ruling 8）。
 /// T2：Initialize 依次执行——①序列化自证（标记文件 BepInEx\ModCenter\selftest.flag 触发，
 /// 裁定 2：补丁器阶段 cfg 读取不可靠，弃 cfg 键 Debug.SelfTest 改标记文件）；②pending 执行器
-/// （幂等 / MD5 校验 / 失败保留 / 原子重写，spec §3）。后续任务继续追加（加载序改挂 / 停用迁移）。
+/// （幂等 / MD5 校验 / 失败保留 / 原子重写，spec §3）。T3：③挂 BaseChainloader&lt;BasePlugin&gt;.
+/// ModifyLoadOrder postfix 实现加载序覆盖（pending.order 驱动 + 硬依赖保护，纯内存不写文件）。
+/// 后续任务继续追加（停用迁移）。
 /// 自证文件（硬规则，不依赖 LogOutput.log）：BepInEx\MCCleaner_loaded.txt（T1 生命周期）
-/// + BepInEx\MCCleaner_ops.txt（T2 起 op 执行证据，追加行：时间/操作/结果/原因）。
+/// + BepInEx\MCCleaner_ops.txt（T2 起 op 执行证据，追加行：时间/操作/结果/原因；
+/// T3 起加载序对拍：[ORDER] #NN guid 一行一项 + [ORDER-PROTECTED] guid(依赖 dep)）。
 /// </summary>
 [PatcherPluginInfo("com.local.survivallog.mccleaner", "MC Cleaner", "1.0.0")]
 public class CleanerPatcher : BasePatcher
@@ -67,24 +75,33 @@ public class CleanerPatcher : BasePatcher
         // 生命周期自证：时间戳 + 本 dll 实际加载位置（Assembly.Location 原值）
         Ev("Initialize reached, dll=" + typeof(CleanerPatcher).Assembly.Location);
 
-        RunSelfTestIfFlagged(); // T2 Step1：McPending 序列化自证（标记文件触发）
+        RunSelfTestIfFlagged(); // T2 Step1：McPending 序列化自证；T3：加载序重排自证（同标记触发）
         RunPendingOps();        // T2 Step2：pending 执行器
+        InstallOrderOverride(); // T3：挂 ModifyLoadOrder postfix（order 读取在 postfix 内，晚于全部 op 落地）
 
-        // ---- 后续任务在此之后追加执行段（加载序改挂 / 停用迁移，停用翻译须在 RunPendingOps 之前，Ruling 1）----
+        // ---- 后续任务在此之后追加执行段（停用翻译须在 RunPendingOps 之前，Ruling 1）----
     }
 
     // ==================== T2 Step 1：序列化自证 ====================
 
     /// <summary>
-    /// 标记文件存在即对含引号/反斜杠/换行/中文/空格的 ops 与 order 做 Save→Load 往返对拍，
-    /// 结果写 ops 证据，随后删除标记与临时文件。全程不触碰真实 pending.json。
+    /// 标记文件存在即跑两轮自证，结果各写一行 ops 证据，随后删除标记与临时文件：
+    /// ①序列化往返（含引号/反斜杠/换行/中文/空格的 ops 与 order 的 Save→Load 对拍）；
+    /// ②加载序重排（T3，构造数据喂 OrderReorder.Apply：对调/前置/幽灵 GUID/硬依赖保护/软依赖不保护）。
+    /// 全程不触碰真实 pending.json。
     /// </summary>
     private static void RunSelfTestIfFlagged()
     {
+        if (!File.Exists(SelfTestFlagPath)) return;
+        SelfTestSerialize();
+        SelfTestOrder();
+        try { File.Delete(SelfTestFlagPath); } catch { }
+    }
+
+    private static void SelfTestSerialize()
+    {
         try
         {
-            if (!File.Exists(SelfTestFlagPath)) return;
-
             var ops = new List<McPending.Op>
             {
                 new()
@@ -120,11 +137,76 @@ public class CleanerPatcher : BasePatcher
             OpsEv("SELFTEST " + (ok ? "OK" : "FAIL") + " 往返对拍 " + ops.Count + " ops / " +
                   order.Count + " order 项（含引号/反斜杠/换行/中文/空格）" + (why.Length > 0 ? " — " + why : ""));
             try { File.Delete(tmp); } catch { }
-            File.Delete(SelfTestFlagPath);
         }
         catch (Exception ex)
         {
             OpsEv("SELFTEST FAIL 异常: " + ex.Message);
+        }
+    }
+
+    /// <summary>
+    /// T3 自证：构造 7 项加载表喂 <see cref="OrderReorder.Apply"/>（裁定 3 放宽——PluginInfo be.788
+    /// 公共面为无参 ctor + 只读 Metadata/Dependencies，无法注入 GUID/依赖，故用轻量 Node 记录；
+    /// 投影层 PluginInfo→Node 由装机对拍覆盖）。断言：order 命中项前置且无依赖对调生效、
+    /// 幽灵 GUID 忽略、硬依赖冲突项被拉回依赖项之后（被保护）、软依赖不保护、输入表不被改动（纯函数）。
+    /// </summary>
+    private static void SelfTestOrder()
+    {
+        try
+        {
+            OrderReorder.Node Mk(string g, params (string Guid, bool Hard)[] deps) =>
+                new() { Guid = g, Deps = deps.ToList() };
+
+            // 原始序（BepInEx 拓扑序，依赖健全）：a.base → b.lib → c.feature → d.standalone → e.soft → f.pad → g.pad
+            var current = new List<OrderReorder.Node>
+            {
+                Mk("a.base"),
+                Mk("b.lib", ("a.base", true)),
+                Mk("c.feature", ("b.lib", true)),
+                Mk("d.standalone"),
+                Mk("e.soft", ("d.standalone", false)), // 软依赖：不参与保护
+                Mk("f.pad"),
+                Mk("g.pad"),
+            };
+            var before = current.Select(x => x.Guid).ToList();
+
+            // order：c.feature 抢首（硬依赖冲突→应被保护）、h.ghost 幽灵项、e.soft 前置于其软依赖（允许）、
+            // g.pad 前置于 f.pad（两个无依赖项对调生效）
+            var order = new List<string> { "c.feature", "h.ghost", "a.base", "e.soft", "d.standalone", "g.pad" };
+
+            var applied = OrderReorder.Apply(current, order, out var protected_);
+
+            // 期望（Kahn 优先级拓扑）：a.base(序1)→e.soft(序2,软依赖放行)→d.standalone(序3)→g.pad(序4,
+            // 对调生效)→b.lib(依赖 a.base 已放置)→c.feature(保护：拉回依赖 b.lib 之后)→f.pad(其余原相对序)
+            var expected = new[] { "a.base", "e.soft", "d.standalone", "g.pad", "b.lib", "c.feature", "f.pad" };
+            var expectedProtected = new[] { "c.feature(依赖 b.lib)" };
+
+            var why = "";
+            var ok = true;
+            var got = applied.Select(x => x.Guid).ToList();
+            if (!got.SequenceEqual(expected))
+            { ok = false; why = "输出序不符: " + string.Join(",", got); }
+            if (ok && !protected_.SequenceEqual(expectedProtected))
+            { ok = false; why = "被保护项不符: " + string.Join(";", protected_); }
+            if (ok && !current.Select(x => x.Guid).SequenceEqual(before))
+            { ok = false; why = "输入表被改动（非纯函数）"; }
+            if (ok)
+            {
+                // 通用不变量：最终序中每个硬依赖项仍在其全部在场硬依赖之后
+                var pos = got.Select((g, i) => (g, i)).ToDictionary(t => t.g, t => t.i);
+                foreach (var node in current)
+                    foreach (var d in node.Deps)
+                        if (d.Hard && pos.TryGetValue(d.Guid, out var di) && di > pos[node.Guid])
+                        { ok = false; why = "硬依赖 " + d.Guid + " 仍排在 " + node.Guid + " 之后"; }
+            }
+
+            OpsEv("SELFTEST-ORDER " + (ok ? "OK" : "FAIL") + " 7 项构造序（order 6 项含 1 幽灵）：无依赖对调生效、" +
+                  "硬依赖保护 1 项(c.feature←b.lib)、软依赖(e.soft←d.standalone)不保护、输入表未改动；" +
+                  "输出序 " + string.Join(",", got) + (why.Length > 0 ? " — " + why : ""));
+        }
+        catch (Exception ex)
+        {
+            OpsEv("SELFTEST-ORDER FAIL 异常: " + ex.Message);
         }
     }
 
@@ -290,5 +372,220 @@ public class CleanerPatcher : BasePatcher
         using var md5 = MD5.Create();
         using var fs = File.OpenRead(path);
         return Convert.ToHexString(md5.ComputeHash(fs)).ToLowerInvariant();
+    }
+
+    // ==================== T3：加载序覆盖（Harmony 改序 + 依赖保护） ====================
+
+    /// <summary>Harmony 实例 ID（补丁器阶段自用，与插件侧 Harmony ID 无冲突）。</summary>
+    private const string OrderHarmonyId = "com.local.survivallog.mccleaner.order";
+
+    /// <summary>
+    /// 补丁器阶段挂 BaseChainloader&lt;BasePlugin&gt;.ModifyLoadOrder 的 postfix（spec §2 教训：
+    /// 必须封闭泛型，开放泛型会让 Il2CppInterop Harmony 后端炸 ContainsGenericParameters）。
+    /// 仅挂补丁不做任何 IO；失败记一行 ops 证据后放弃覆盖（不阻断启动）。
+    /// </summary>
+    private static void InstallOrderOverride()
+    {
+        try
+        {
+            var original = AccessTools.Method(
+                typeof(BaseChainloader<BasePlugin>), "ModifyLoadOrder");
+            if (original == null)
+            {
+                OpsEv("[ORDER] HOOK-FAIL 未解析到 BaseChainloader<BasePlugin>.ModifyLoadOrder，加载序覆盖不生效");
+                return;
+            }
+            var postfix = new HarmonyMethod(typeof(CleanerPatcher).GetMethod(
+                nameof(ModifyLoadOrderPostfix),
+                BindingFlags.NonPublic | BindingFlags.Static));
+            new Harmony(OrderHarmonyId).Patch(original, postfix: postfix);
+        }
+        catch (Exception ex)
+        {
+            OpsEv("[ORDER] HOOK-FAIL " + ex.GetType().Name + ": " + ex.Message);
+        }
+    }
+
+    /// <summary>
+    /// ModifyLoadOrder postfix（spec §2 验证签名）：读 pending.order → OrderReorder.Apply（纯内存，
+    /// 不写任何文件——幂等不变量，order 由插件侧维护，清理器只消费）→ 依结果对 __result
+    /// <b>原位</b>重排（先在副本上映射齐全再 Clear+Add，绝不替换 __result 引用——chainloader
+    /// 后续用同一 list 对象）。无 order / order 空时零动作零证据；任何异常不阻断加载。
+    /// </summary>
+    private static void ModifyLoadOrderPostfix(object __instance, IList<PluginInfo> __result)
+    {
+        try
+        {
+            if (__result == null || __result.Count == 0) return;
+
+            List<string> order;
+            try { order = McPending.LoadOrder(McPending.File); }
+            catch (Exception ex)
+            {
+                OpsEv("[ORDER] SKIP pending 解析失败: " + ex.Message);
+                return;
+            }
+            if (order == null || order.Count == 0) return;
+
+            // PluginInfo → Node 投影（GUID + 全量依赖及硬/软标志），并留 Node→PluginInfo 反查（引用键）
+            var ownerOf = new Dictionary<OrderReorder.Node, PluginInfo>(__result.Count);
+            var projected = new List<OrderReorder.Node>(__result.Count);
+            var guids = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            foreach (var p in __result)
+            {
+                var node = new OrderReorder.Node { Guid = p?.Metadata?.GUID };
+                if (p?.Dependencies != null)
+                {
+                    foreach (var d in p.Dependencies)
+                    {
+                        if (d == null || string.IsNullOrEmpty(d.DependencyGUID)) continue;
+                        node.Deps.Add((d.DependencyGUID,
+                            (d.Flags & BepInDependency.DependencyFlags.HardDependency) != 0));
+                    }
+                }
+                projected.Add(node);
+                ownerOf[node] = p;
+                if (!string.IsNullOrEmpty(node.Guid)) guids.Add(node.Guid);
+            }
+
+            var applied = OrderReorder.Apply(projected, order, out var protected_);
+
+            // 映射回 PluginInfo 并原位重排（applied 是输入同实例的排列，逐一映射必齐全）
+            var reordered = new List<PluginInfo>(applied.Count);
+            foreach (var node in applied)
+                if (ownerOf.TryGetValue(node, out var p)) reordered.Add(p);
+            if (reordered.Count != __result.Count)
+            {
+                OpsEv("[ORDER] SKIP 内部异常：重排映射不完整 " + reordered.Count + "/" + __result.Count);
+                return;
+            }
+            __result.Clear();
+            foreach (var p in reordered) __result.Add(p);
+
+            // 对拍证据：order 命中统计 + 最终加载序（一行一项）+ 被保护项
+            var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            var hits = 0;
+            var misses = new List<string>();
+            foreach (var og in order)
+            {
+                if (string.IsNullOrEmpty(og) || !seen.Add(og)) continue;
+                if (guids.Contains(og)) hits++;
+                else misses.Add(og);
+            }
+            OpsEv("[ORDER] 加载序覆盖生效：插件 " + __result.Count + " 个，order " + order.Count +
+                  " 项（命中 " + hits + (misses.Count > 0
+                      ? "，未命中 " + misses.Count + ": " + string.Join(",", misses)
+                      : "") + "）");
+            for (var i = 0; i < __result.Count; i++)
+                OpsEv("[ORDER] #" + i.ToString("00") + " " + (__result[i]?.Metadata?.GUID ?? "?"));
+            if (protected_.Count == 0) OpsEv("[ORDER-PROTECTED] none");
+            else foreach (var s in protected_) OpsEv("[ORDER-PROTECTED] " + s);
+        }
+        catch (Exception ex)
+        {
+            OpsEv("[ORDER] FAIL " + ex.GetType().Name + ": " + ex.Message);
+        }
+    }
+}
+
+/// <summary>
+/// 加载序稳定重排纯函数（裁定 3：纯静态、零 IO，SelfTest 喂构造数据断言）。
+/// 语义：order 命中项按 order 序前置，其余保持原相对序；硬依赖保护优先于 order——
+/// 朴素序中排到某硬依赖之前的项被拓扑约束拉回其全部硬依赖之后（跟随依赖项位置，保持依赖在前）。
+/// 算法：优先级 = order 命中序（重复/幽灵跳过）或 orderCount+原始下标（保证唯一），
+/// Kahn 拓扑排序每步取"硬依赖已全部放置"的项中优先级最小者；依赖环兜底按原相对序尾置
+/// （ModifyLoadOrder 输入本身拓扑成立，正常不可达）。软依赖不参与。
+/// protected_ 输出被保护项名单（"guid(依赖 dep1,dep2)"，朴素序里排到硬依赖之前的项）。
+/// </summary>
+internal static class OrderReorder
+{
+    /// <summary>PluginInfo 的轻量投影：GUID + 全量依赖（含硬/软标志；Apply 只认硬依赖）。</summary>
+    internal sealed class Node
+    {
+        public string Guid;                               // null=不可排序，保持原相对序
+        public List<(string Guid, bool Hard)> Deps = new();
+    }
+
+    public static List<Node> Apply(IList<Node> current, List<string> order, out List<string> protected_)
+    {
+        protected_ = new List<string>();
+        var n = current.Count;
+        if (n == 0) return new List<Node>();
+
+        // guid → 下标（OrdinalIgnoreCase，与手写 order 的容错一致；重复 guid 首个为准）
+        var idx = new Dictionary<string, int>(n, StringComparer.OrdinalIgnoreCase);
+        for (var i = 0; i < n; i++)
+        {
+            var g = current[i].Guid;
+            if (!string.IsNullOrEmpty(g) && !idx.ContainsKey(g)) idx[g] = i;
+        }
+
+        // 优先级：order 命中 = 命中序 0..k-1；未命中 = k + 原始下标（全表唯一 → 稳定全序）
+        var prio = new int[n];
+        for (var i = 0; i < n; i++) prio[i] = -1;
+        var k = 0;
+        if (order != null)
+            foreach (var og in order)
+            {
+                if (string.IsNullOrEmpty(og)) continue;
+                if (idx.TryGetValue(og, out var hit) && prio[hit] < 0) prio[hit] = k++;
+            }
+        for (var i = 0; i < n; i++)
+            if (prio[i] < 0) prio[i] = k + i;
+
+        // 硬依赖边（仅两端均在场的硬依赖；自依赖/重复边忽略）
+        var deps = new List<int>[n];
+        var indeg = new int[n];
+        for (var i = 0; i < n; i++)
+        {
+            deps[i] = new List<int>(4);
+            if (current[i].Deps == null) continue;
+            foreach (var d in current[i].Deps)
+            {
+                if (!d.Hard || string.IsNullOrEmpty(d.Guid)) continue;
+                if (idx.TryGetValue(d.Guid, out var j) && j != i && !deps[i].Contains(j))
+                {
+                    deps[i].Add(j);
+                    indeg[i]++;
+                }
+            }
+        }
+
+        // 朴素序（order 前置 + 其余原相对序）→ 判定被保护项（排到自身硬依赖之前的项）
+        var naive = new List<int>(n);
+        for (var i = 0; i < n; i++) naive.Add(i);
+        naive.Sort((a, b) => prio[a].CompareTo(prio[b]));
+        var naivePos = new int[n];
+        for (var t = 0; t < n; t++) naivePos[naive[t]] = t;
+        for (var i = 0; i < n; i++)
+        {
+            var violated = new List<string>();
+            foreach (var j in deps[i])
+                if (naivePos[i] < naivePos[j]) violated.Add(current[j].Guid);
+            if (violated.Count > 0)
+                protected_.Add(current[i].Guid + "(依赖 " + string.Join(",", violated) + ")");
+        }
+
+        // Kahn 优先级拓扑：每步取可放置项（在场硬依赖已全放置）中优先级最小者
+        var result = new List<Node>(n);
+        var remaining = (int[])indeg.Clone();
+        var placed = new bool[n];
+        while (result.Count < n)
+        {
+            var best = -1;
+            for (var i = 0; i < n; i++)
+            {
+                if (placed[i] || remaining[i] > 0) continue;
+                if (best < 0 || prio[i] < prio[best]) best = i;
+            }
+            if (best < 0) break; // 依赖环兜底：剩余项按原相对序尾置（正常不可达）
+            placed[best] = true;
+            result.Add(current[best]);
+            for (var i = 0; i < n; i++)
+                if (!placed[i] && deps[i].Contains(best)) remaining[i]--;
+        }
+        for (var i = 0; i < n; i++)
+            if (!placed[i]) result.Add(current[i]);
+        return result;
     }
 }
