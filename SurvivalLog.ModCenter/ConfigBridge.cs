@@ -30,6 +30,13 @@ namespace SurvivalLog.ModCenter;
 /// 250ms 节流推 MC_DL）→ zip MD5 对 update.json → 解包 BepInEx/plugins/*.dll 暂存 → 主线程
 /// PendingWriter.AddUpdate）→ 快照刷新（行内 ⟳ 出现、↑/↓ 消失）。GitHub 匿名 60 次/h：一轮
 /// 12 次，绝不后台轮询。
+/// v2 生命周期任务 9：加载排序模式——MC_ORDER_GET（组装生效序：pending.order 命中项按序
+/// 前置 + 其余 GUID 字母序，与清理器 OrderReorder 语义一致）→ 推 MC_ORDER_DATA
+/// {guids[],rows[],def[]}；MC_ORDER_SAVE 校验（白名单=当前 Plugins 键、元素不重不漏=与可排序
+/// 集精确相等，失败整单拒绝 MC_ORDER_FAIL）→ PendingWriter.SetOrder 整替 → 摘要即时推
+/// （待生效条"加载顺序调整"，order==默认序不进摘要——与"删除 order 字段"等效，裁定 1）→
+/// MC_ORDER_OK。T8 遗留三项顺手修（评审转交）：fetch 后台异常复位检查锁（Kind 5）/解包与
+/// 链中途失败清暂存/面板 ST.dl 复位条件（panel.js 侧）。
 /// 线程纪律：全部 cfg 读写与分发都在 Ticker 主线程（Pump）；outbox 回调线程只入队；
 /// 仓库 fetch/下载在后台 Task，结果经 RepoQueue 回主线程收割（PendingWriter 主线程唯一写者）。
 /// </summary>
@@ -50,6 +57,7 @@ internal static class ConfigBridge
     // 全部主线程（Pump/BuildSnapshot 上下文）；mtime 节流读（Pump 每 2s 查一次，
     // 变了才重读），BuildSnapshot 前强制重读一次（MC_OPEN/MC_TOGGLE 均走快照）。
     private static List<McPending.Op> _pendOps = new();
+    private static List<string> _pendOrder = new(); // v2 任务 9：pending.order（排序面/待生效摘要消费；空=无覆盖）
     private static long _pendStamp = -1;   // pending.json LastWriteTimeUtc.Ticks（不存在=0）；-1=未读过
     private static string _pendSig;        // 摘要签名（变化才推送）；null=首拍未同步（只同步不推，MC_OPEN 会补推）
     private static float _pendAcc;         // Pump 2s 节拍累加器
@@ -57,7 +65,7 @@ internal static class ConfigBridge
     // ---- v2 任务 8：仓库页状态（全部主线程持有/变更；后台任务只经 RepoQueue 回传） ----
     private sealed class RepoUi
     {
-        public int Kind;                          // 1=fetch 完成 2=下载进度 3=单仓链结果 4=链收尾
+        public int Kind;                          // 1=fetch 完成 2=下载进度 3=单仓链结果 4=链收尾 5=fetch 异常收尾（T9 顺手修）
         public List<RepoRow> Rows;                // 1
         public Dictionary<string, RepoClient.UpdateInfo> Infos; // 1
         public string RepoKey;                    // 2/3
@@ -675,11 +683,16 @@ internal static class ConfigBridge
         catch { }
         if (!force && stamp == _pendStamp) return;
         _pendStamp = stamp;
-        try { _pendOps = McPending.Load(McPending.File); }
+        try
+        {
+            _pendOps = McPending.Load(McPending.File);
+            _pendOrder = McPending.LoadOrder(McPending.File); // v2 任务 9：order 与 ops 同文件同拍读
+        }
         catch (Exception e)
         {
             Log("warn pending.json 解析失败（按空清单展示）: " + e.Message);
             _pendOps = new List<McPending.Op>();
+            _pendOrder = new List<string>();
         }
     }
 
@@ -690,6 +703,7 @@ internal static class ConfigBridge
         public string RowKey;            // 归属行键（guid 小写）；null=不归属任何行
         public string Name;              // 显示名（Meta 中文名 / GUID 尾段 / 文件名）
         public readonly List<string> Verbs = new(); // 动作词（有序去重）
+        public string FixedLabel;        // 整档固定标签（v2 任务 9：order 覆盖="加载顺序调整"，绕过动词拼装）
     }
 
     private static readonly string[] PendVerbOrder = { "卸载", "安装", "更新", "停用", "启用" };
@@ -723,12 +737,17 @@ internal static class ConfigBridge
             };
             if (verb != null && !g.Verbs.Contains(verb)) g.Verbs.Add(verb);
         }
+        // v2 任务 9：order 覆盖档——RowKey=null（全局非单 mod：行内 ⟳ 永不挂行，底部条承载）；
+        // order==默认序（GUID 字母序）不进摘要——"恢复默认存字母序"与删除 order 字段等效（裁定 1/5）。
+        if (_pendOrder.Count > 0 && !OrderEqualsDefault(_pendOrder))
+            groups.Add(new PendGroup { RowKey = null, FixedLabel = "加载顺序调整" });
         return groups;
     }
 
     /// <summary>组标签（底部待生效条 + 行内 ⟳ tip 复用）：动词+名（多动词按既定序 "、" 连接）。</summary>
     private static string PendLabel(PendGroup g)
     {
+        if (g.FixedLabel != null) return g.FixedLabel; // v2 任务 9：order 整档固定标签
         var ordered = PendVerbOrder.Where(g.Verbs.Contains).ToList();
         if (ordered.Count == 0) ordered = g.Verbs.ToList();
         return string.Join("、", ordered.Select(v => v + " " + g.Name));
@@ -882,7 +901,7 @@ internal static class ConfigBridge
 
     /// <summary>起一轮后台 fetch：本地快照/游戏基线主线程取好（IL2CPP/文件通道契约），
     /// _repoFetching 置位即推 checking 快照（fetch 期间 _repoRows 保持旧值，后台改自己的副本，
-    /// 完成后主线程整体替换——零跨线程行读写）。</summary>
+    /// 完成后主线程整体替换——零跨线程行读写）。异常路径经 Kind 5 收尾复位检查锁（T8 遗留修①）。</summary>
     private static void StartRepoFetch()
     {
         var rows = RepoDecision.SnapshotLocal(); // 主线程（IL2CPPChainloader 契约）
@@ -891,15 +910,23 @@ internal static class ConfigBridge
         PushRepoData();
         System.Threading.Tasks.Task.Run(async () =>
         {
-            var infos = new Dictionary<string, RepoClient.UpdateInfo>(StringComparer.Ordinal);
-            foreach (var r in rows) // 顺序温和（一轮 12 次 API 请求，不连环多轮）
+            try
             {
-                var info = await RepoClient.FetchLatest(r.RepoKey);
-                if (info == null) { r.Remote = null; r.Gamekb = null; } // 失败留痕已在 RepoClient warn
-                else { r.Remote = info.Version; r.Gamekb = info.Gamekb; infos[r.RepoKey] = info; }
+                var infos = new Dictionary<string, RepoClient.UpdateInfo>(StringComparer.Ordinal);
+                foreach (var r in rows) // 顺序温和（一轮 12 次 API 请求，不连环多轮）
+                {
+                    var info = await RepoClient.FetchLatest(r.RepoKey);
+                    if (info == null) { r.Remote = null; r.Gamekb = null; } // 失败留痕已在 RepoClient warn
+                    else { r.Remote = info.Version; r.Gamekb = info.Gamekb; infos[r.RepoKey] = info; }
+                }
+                RepoDecision.Build(rows, local); // 纯函数，后台可调
+                RepoQueue.Enqueue(new RepoUi { Kind = 1, Rows = rows, Infos = infos });
             }
-            RepoDecision.Build(rows, local); // 纯函数，后台可调
-            RepoQueue.Enqueue(new RepoUi { Kind = 1, Rows = rows, Infos = infos });
+            catch (Exception e) // T8 遗留修①：异常也收尾——Kind 5 回主线程复位 _repoFetching（防永久"检查中"）
+            {
+                Log("warn repo fetch 异常: " + e.Message);
+                RepoQueue.Enqueue(new RepoUi { Kind = 5, Err = e.GetType().Name + ": " + e.Message });
+            }
         });
     }
 
@@ -982,6 +1009,7 @@ internal static class ConfigBridge
             foreach (var (row, info) in jobs)
             {
                 string zipPath = null;
+                string stagedDll = null; // T8 遗留修②：链中途失败连已解包暂存 dll 一并清理（不留半成品/孤儿暂存）
                 try
                 {
                     RepoQueue.Enqueue(new RepoUi { Kind = 2, RepoKey = row.RepoKey, Pct = 0, Stage = "down" });
@@ -1003,13 +1031,17 @@ internal static class ConfigBridge
                     RepoQueue.Enqueue(new RepoUi { Kind = 2, RepoKey = row.RepoKey, Pct = 100, Stage = "unzip" });
                     var dll = ExtractPluginDll(zipPath);
                     if (dll == null) throw new InvalidDataException("zip 内未找到 BepInEx/plugins/*.dll（打包布局异常）");
+                    stagedDll = dll;
                     try { System.IO.File.Delete(zipPath); } catch { } // dll 已暂存，zip 即刻清理
+                    zipPath = null;
                     RepoQueue.Enqueue(new RepoUi { Kind = 2, RepoKey = row.RepoKey, Pct = 100, Stage = "write" });
                     RepoQueue.Enqueue(new RepoUi { Kind = 3, RepoKey = row.RepoKey, Ok = true, Row = row, Info = info, Staged = dll });
+                    stagedDll = null; // 已交主线程 AddUpdate 消费（写清单成功后暂存留存=清理器执行语义）
                 }
                 catch (Exception e)
                 {
                     if (zipPath != null) { try { System.IO.File.Delete(zipPath); } catch { } } // 失败清 staging
+                    if (stagedDll != null) { try { System.IO.File.Delete(stagedDll); } catch { } } // T8 遗留修②
                     RepoQueue.Enqueue(new RepoUi { Kind = 3, RepoKey = row.RepoKey, Ok = false, Err = e.Message });
                 }
             }
@@ -1032,11 +1064,13 @@ internal static class ConfigBridge
             if (lower.IndexOf('/', prefix.Length) != -1) continue; // 只取 plugins 直下（防子目录夹带）
             var dest = Path.Combine(McPending.StagingDir, n.Substring(prefix.Length));
             // 流式解出（不用 ExtractToFile 扩展——它住在 System.IO.Compression.FileSystem，
-            // 游戏运行时在場性未实证；ZipArchive/Open 为 System.IO.Compression 本体，net6 内置）
+            // 游戏运行时在場性未实证；ZipArchive/Open 为 System.IO.Compression 本体，net6 内置）。
+            // T8 遗留修②（T9 落地）：解包中途异常把半写 dest 一并删除再抛（不留残缺 dll 冒充暂存）。
             using (var src = e.Open())
             using (var dst = new FileStream(dest, FileMode.Create, FileAccess.Write, FileShare.None, 65536))
             {
-                src.CopyTo(dst);
+                try { src.CopyTo(dst); }
+                catch { try { System.IO.File.Delete(dest); } catch { } throw; }
             }
             return dest;
         }
@@ -1104,6 +1138,12 @@ internal static class ConfigBridge
                 _dlKey = null; _dlPct = 0; _dlStage = null;
                 PushRepoData();
                 break;
+            case 5: // T8 遗留修①（T9 落地）：fetch 后台异常收尾——复位检查锁（旧 _repoRows 保留自愈），推数据+toast
+                _repoFetching = false;
+                PushRepoData();
+                PushEvent("{\"type\":\"MC_TOAST\",\"main\":" + JsonW.Str("检查更新失败")
+                    + ",\"small\":" + JsonW.Str((ui.Err ?? "未知异常") + " · 已保留上次数据，可稍后重试") + "}");
+                break;
         }
     }
 
@@ -1131,6 +1171,163 @@ internal static class ConfigBridge
         }
         if (_dlKey != null) { d.DlKey = _dlKey; d.DlPct = _dlPct; d.DlStage = _dlStage; }
         PushEvent(d.ToJson());
+    }
+
+    // ============ 加载排序模式（v2 任务 9：MC_ORDER_GET / MC_ORDER_SAVE） ============
+
+    /// <summary>可排序插件全集（GUID）：当前 Chainloader 插件去掉探针族（TpProbeNames——面板
+    /// 不可见的开发探针，原型 MODS 同样不含），按 GUID 字母序（=默认加载序，原型注释定稿）。
+    /// 套件 9 + ModCenter 自身 + 第三方全在内（含 Meta 未登记的第一方 mod——排序面对其可见）。</summary>
+    private static List<string> OrderableGuids()
+    {
+        var list = new List<string>();
+        foreach (var info in LoadedPlugins())
+        {
+            var md = info?.Metadata;
+            if (md == null || string.IsNullOrEmpty(md.GUID)) continue;
+            if (IsProbeName(md.Name)) continue;
+            list.Add(md.GUID);
+        }
+        list.Sort(StringComparer.OrdinalIgnoreCase);
+        return list;
+    }
+
+    private static List<BepInEx.PluginInfo> LoadedPlugins()
+    {
+        var list = new List<BepInEx.PluginInfo>();
+        try
+        {
+            var plugins = IL2CPPChainloader.Instance?.Plugins;
+            if (plugins != null) list.AddRange(plugins.Values);
+        }
+        catch { }
+        return list;
+    }
+
+    private static bool IsProbeName(string name)
+    {
+        if (string.IsNullOrEmpty(name)) return false;
+        foreach (var p in TpProbeNames)
+            if (name.IndexOf(p, StringComparison.OrdinalIgnoreCase) >= 0) return true;
+        return false;
+    }
+
+    /// <summary>order 是否等于默认序（条目集与序都同，大小写不敏感）——摘要档抑制判定用。</summary>
+    private static bool OrderEqualsDefault(List<string> order)
+    {
+        var def = OrderableGuids();
+        if (order.Count != def.Count) return false;
+        for (var i = 0; i < order.Count; i++)
+            if (!string.Equals(order[i], def[i], StringComparison.OrdinalIgnoreCase)) return false;
+        return true;
+    }
+
+    /// <summary>MC_ORDER_GET：推 MC_ORDER_DATA。guids=生效序（pending.order 命中项按序前置 +
+    /// 其余按 GUID 字母序——与清理器 OrderReorder "命中前置、其余原相对序" 语义一致，链上基线
+    /// 即字母序）；rows=同序显示元数据 {guid,name,ver}（name=Meta 中文名优先，ModCenter 自身给
+    /// 面板名，其余插件自报名；ver=插件版本——快照 ModInfo 不带版本，行内版本列数据源）；
+    /// def=默认序（面板"恢复默认"本地重排用，裁定 1：不另做协议）。</summary>
+    private static void HandleOrderGet()
+    {
+        var def = OrderableGuids();
+        RefreshPending(false);
+        var effective = new List<string>(def.Count);
+        var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var defSet = new HashSet<string>(def, StringComparer.OrdinalIgnoreCase);
+        foreach (var g in _pendOrder) // 幽灵 GUID/重复项丢弃（清理器同语义）
+            if (!string.IsNullOrEmpty(g) && seen.Add(g) && defSet.Contains(g)) effective.Add(g);
+        foreach (var g in def)
+            if (!seen.Contains(g)) effective.Add(g);
+
+        var nameOf = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var mm in Meta.Mods) nameOf[mm.Guid] = mm.Name;
+        var plugins = LoadedPlugins();
+
+        var sb = new StringBuilder(2048);
+        sb.Append("{\"type\":\"MC_ORDER_DATA\",\"guids\":[");
+        for (var i = 0; i < effective.Count; i++)
+        {
+            if (i > 0) sb.Append(',');
+            sb.Append(JsonW.Str(effective[i]));
+        }
+        sb.Append("],\"rows\":[");
+        for (var i = 0; i < effective.Count; i++)
+        {
+            if (i > 0) sb.Append(',');
+            var g = effective[i];
+            var name = ResolveOrderRowName(g, nameOf, plugins);
+            var ver = string.Empty;
+            foreach (var p in plugins)
+                if (string.Equals(p?.Metadata?.GUID, g, StringComparison.OrdinalIgnoreCase))
+                { try { ver = p.Metadata.Version?.ToString() ?? string.Empty; } catch { } break; }
+            sb.Append("{\"guid\":").Append(JsonW.Str(g))
+              .Append(",\"name\":").Append(JsonW.Str(name))
+              .Append(",\"ver\":").Append(JsonW.Str(ver)).Append('}');
+        }
+        sb.Append("],\"def\":[");
+        for (var i = 0; i < def.Count; i++)
+        {
+            if (i > 0) sb.Append(',');
+            sb.Append(JsonW.Str(def[i]));
+        }
+        sb.Append("]}");
+        PushEvent(sb.ToString());
+        Log("order data 推送: " + effective.Count + " 项（默认 " + def.Count + "，覆盖 "
+            + _pendOrder.Count + " 条）");
+    }
+
+    private static string ResolveOrderRowName(string guid, Dictionary<string, string> metaNames,
+        List<BepInEx.PluginInfo> plugins)
+    {
+        if (metaNames.TryGetValue(guid, out var n) && !string.IsNullOrEmpty(n)) return n; // Meta 中文名
+        if (string.Equals(guid, ModCenterPlugin.Guid, StringComparison.OrdinalIgnoreCase)) return "Mod 管理中心";
+        foreach (var p in plugins)
+            if (string.Equals(p?.Metadata?.GUID, guid, StringComparison.OrdinalIgnoreCase)
+                && !string.IsNullOrEmpty(p.Metadata?.Name)) return p.Metadata.Name;
+        var ix = guid.LastIndexOf('.');
+        return ix == -1 ? guid : guid.Substring(ix + 1); // GUID 尾段兜底
+    }
+
+    /// <summary>MC_ORDER_SAVE {guids[]}：校验（白名单=当前 Plugins 键；元素不重不漏=与可排序集
+    /// 精确相等——探针族不入排序面故不在期望集）→ PendingWriter.SetOrder 整替（ops 原样保留）→
+    /// 摘要即时推（order==默认序时摘要档自动缺席）→ MC_ORDER_OK；任何不符整单拒绝 MC_ORDER_FAIL。</summary>
+    private static void HandleOrderSave(JsonElement el)
+    {
+        var guids = new List<string>();
+        if (el.TryGetProperty("guids", out var arr) && arr.ValueKind == JsonValueKind.Array)
+            foreach (var g in arr.EnumerateArray())
+                if (g.ValueKind == JsonValueKind.String && !string.IsNullOrEmpty(g.GetString()))
+                    guids.Add(g.GetString());
+
+        var def = OrderableGuids();
+        var defSet = new HashSet<string>(def, StringComparer.OrdinalIgnoreCase);
+        string why = null;
+        if (guids.Count == 0) why = "空顺序表";
+        else if (guids.Count != def.Count)
+            why = "条数不符（收 " + guids.Count.ToString(CultureInfo.InvariantCulture)
+                  + " 项，期望 " + def.Count.ToString(CultureInfo.InvariantCulture) + "）";
+        else
+        {
+            var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            foreach (var g in guids)
+            {
+                if (!seen.Add(g)) { why = "重复项 " + g; break; }
+                if (!defSet.Contains(g)) { why = "白名单外/未知插件 " + g; break; }
+            }
+        }
+        if (why != null)
+        {
+            Log("order save 拒绝：" + why);
+            PushEvent("{\"type\":\"MC_ORDER_FAIL\",\"err\":" + JsonW.Str(why) + "}");
+            return;
+        }
+        PendingWriter.SetOrder(guids); // 主线程唯一写者；ops 原样保留（T6 契约）
+        Log("order save：顺序覆盖整替 " + guids.Count.ToString(CultureInfo.InvariantCulture) + " 项"
+            + (OrderEqualsDefault(guids) ? "（=默认序，等效无覆盖）" : ""));
+        RefreshPending(true);
+        _pendSig = PendingSig();
+        PushPendingSummary();
+        PushEvent("{\"type\":\"MC_ORDER_OK\"}");
     }
 
     // ============ 消息泵（主线程，Ticker 每帧调） ============
@@ -1219,6 +1416,13 @@ internal static class ConfigBridge
                             break;
                         case "MC_UPDALL":
                             HandleRepoUpd(null, all: true);
+                            break;
+                        // v2 任务 9：加载排序模式（进模式拉序 / 保存顺序覆盖——校验+整替在专门节）
+                        case "MC_ORDER_GET":
+                            HandleOrderGet();
+                            break;
+                        case "MC_ORDER_SAVE":
+                            HandleOrderSave(el);
                             break;
                         case "MC_EVIDENCE": // 验证辅助（只读）：写证据文件供装机断言（见 DESIGN §6.4）
                             WriteEvidence(GetStr(el, "tag"));

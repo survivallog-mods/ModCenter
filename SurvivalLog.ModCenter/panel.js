@@ -15,6 +15,13 @@
  * D7 降级红字 + D8 版本告警红字 + 橙"降级到 X"/琥珀"更新到 X"主钮）→ 确认后 MC_UPD/MC_INST
  * → 弹窗内联进度条（__mcEvent MC_DL{repoKey,pct,stage} 就地更新，弹窗不重建）；MC_REPO_DATA
  * （rows+lastCheck+checking+dl）驱动视图与入口卡计数；⊘ 图标消歧 g:"kbw"。
+ * v2 生命周期任务 9 = 加载排序模式（原型排序段照抄）：侧栏底部按钮切换（ST.ord 面板内状态，
+ * 不新开键盘门——与 MC_OPEN/MC_CLOSE 共存）；排序模式侧栏平铺全列表（不分分组，按当前
+ * order 序：行=拖柄 ⋮⋮+序号+名+版本+冲突 chip（显示无 click，裁定 4；⟳/↑↓/⊘ 不显示）），
+ * HTML5 DnD（dragstart 记源/dragover 上下半区琥珀插入线/drop 重排，事件委托挂 side 免重挂）
+ * + 键盘替代（行 tabindex=0 聚焦 ↑↓ 移动，WCAG 2.2 AA）；工具条（说明+恢复默认+保存顺序）；
+ * MC_ORDER_GET 拉序（MC_ORDER_DATA{guids[],rows[],def[]}）→ 本地重排 → MC_ORDER_SAVE{guids[]}
+ * → MC_ORDER_OK 退出排序模式+toast / MC_ORDER_FAIL 整单拒绝 toast。
  *
  * 注入落点：Root 文档（C# WebBridge.ExecuteJavaScript 上下文）。__McInstalled 守卫幂等。
  * 全局契约（C# Ticker / MenuEntryInjector 对齐）：__McInstalled / __mcOutbox / __mcDrain /
@@ -66,9 +73,14 @@
    * v2 任务 7：pend=最近 MC_PENDING_SUMMARY（底部待生效条数据，跨开关面板保留）；
    * pendEl/pendTx/mbg/mdl=待生效条与浮层弹窗元素（随面板建/拆）。
    * v2 任务 8：repo=仓库视图开着；repoData=最近 MC_REPO_DATA（跨开关保留）；dl=当前下载链
-   * {repoKey,pct,stage}；mdlRepoKey=更新确认弹窗归属仓（MC_DL 进度归属判定）。 */
+   * {repoKey,pct,stage}；mdlRepoKey=更新确认弹窗归属仓（MC_DL 进度归属判定）。
+   * v2 任务 9：ord=排序模式开着（面板内状态，跨开关保留同 repo）；order=本地工作序
+   * （guids[]，进排序模式拉 MC_ORDER_DATA 填充；未保存的本地重排跨开关面板保留）；
+   * ordRows=最近 MC_ORDER_DATA（含 rows 显示元数据与 def 默认序）；ordSaving=保存
+   * 回执（MC_ORDER_OK/FAIL）在途防连点。ORD.src=DnD 源行下标（拖拽会话期）。 */
   var S = { host: null, root: null, side: null, cfg: null, sub: null, toastEl: null, pendEl: null, pendTx: null, mbg: null, mdl: null, mdlRepoKey: null };
-  var ST = { snap: null, sel: null, pend: null, repo: false, repoData: null, dl: null };
+  var ST = { snap: null, sel: null, pend: null, repo: false, repoData: null, dl: null, ord: false, order: null, ordRows: null, ordSaving: false };
+  var ORD = { src: null }; // v2 任务 9：拖拽源下标（null=无拖拽会话）
   var TH = Object.create(null); // 滑条 100ms 节流句柄表
 
   var CSS = ''
@@ -83,7 +95,8 @@
     + '#__mc_overlay .__mc-close:hover{border-color:#f87171;color:#f87171;}'
     /* 主体：左列 + 右区 */
     + '#__mc_overlay .__mc-body{flex:1;display:flex;min-height:0;}'
-    + '#__mc_overlay .__mc-side{width:230px;flex-shrink:0;border-right:1px solid #2a2f3d;overflow-y:auto;padding:8px;}'
+    + '#__mc_overlay .__mc-side{width:230px;flex-shrink:0;border-right:1px solid #2a2f3d;overflow-y:auto;padding:8px;display:flex;flex-direction:column;}' /* v2 任务 9：flex column（原型 .mc-side 同构，底部按钮 margin-top:auto 沉底） */
+    + '#__mc_overlay .__mc-side>*{flex-shrink:0;}' /* 子项不压缩（溢出走滚动，防行被压扁） */
     + '#__mc_overlay .__mc-side .__mc-cat{font-size:11px;color:#6b7180;letter-spacing:2px;padding:8px 10px 4px;}'
     + '#__mc_overlay .__mc-mod-row{display:flex;align-items:center;gap:9px;padding:9px 10px;border-radius:8px;cursor:pointer;border:1px solid transparent;}'
     + '#__mc_overlay .__mc-mod-row:hover{background:rgba(255,255,255,.03);}'
@@ -226,6 +239,19 @@
     + '#__mc_overlay .__mc-kv .__mc-kvv{font-family:Consolas,monospace;font-size:12.5px;}'
     + '#__mc_overlay .__mc-dlbar{height:6px;border-radius:3px;background:#0f1219;border:1px solid #2a2f3d;overflow:hidden;margin-top:8px;}'
     + '#__mc_overlay .__mc-dlbar i{display:block;height:100%;background:#e8a33d;width:0;transition:width .2s;}'
+    /* ---- v2 任务 9：加载排序模式（原型 .mc-ordbar/.mc-side-foot/.mc-grip/.mc-row.dragging/
+     * .drop-above/.drop-below/.ver——样式值照抄，类名 __mc 化；插入线=琥珀 box-shadow 上下缘） ---- */
+    + '#__mc_overlay .__mc-ordbar{margin:4px 6px 8px;padding:9px 12px;border-radius:10px;border:1px dashed rgba(232,163,61,.45);font-size:11px;color:#9aa0ad;line-height:1.7;}'
+    + '#__mc_overlay .__mc-ordbar .__mc-ord-acts{display:flex;gap:6px;margin-top:7px;}'
+    + '#__mc_overlay .__mc-side-foot{margin-top:auto;padding:8px 6px 4px;border-top:1px solid #2a2f3d;}'
+    + '#__mc_overlay .__mc-side-foot button{width:100%;background:#0f1219;border:1px solid #2a2f3d;color:#9aa0ad;border-radius:8px;padding:7px 0;font-size:12px;cursor:pointer;font-family:inherit;}'
+    + '#__mc_overlay .__mc-side-foot button:hover{border-color:#e8a33d;color:#e8a33d;}'
+    + '#__mc_overlay .__mc-grip{color:#4b5261;font-size:11px;letter-spacing:-2px;cursor:grab;flex-shrink:0;padding:0 2px;}'
+    + '#__mc_overlay .__mc-mod-row.__mc-ord-row.__mc-dragging{opacity:.35;}'
+    + '#__mc_overlay .__mc-mod-row.__mc-ord-row.__mc-dragging .__mc-grip{cursor:grabbing;}'
+    + '#__mc_overlay .__mc-mod-row.__mc-ord-row.__mc-drop-above{box-shadow:0 -2px 0 0 #e8a33d;}'
+    + '#__mc_overlay .__mc-mod-row.__mc-ord-row.__mc-drop-below{box-shadow:0 2px 0 0 #e8a33d;}'
+    + '#__mc_overlay .__mc-ver{font-size:10.5px;color:#6b7180;font-family:Consolas,monospace;flex-shrink:0;}' /* 序号+版本两用（原型 .ver） */
     + '#__mc_overlay .__mc-side::-webkit-scrollbar,#__mc_overlay .__mc-cfg::-webkit-scrollbar{width:8px;}'
     + '#__mc_overlay .__mc-side::-webkit-scrollbar-thumb,#__mc_overlay .__mc-cfg::-webkit-scrollbar-thumb{background:#2a2f3d;border-radius:4px;}';
 
@@ -409,6 +435,7 @@
 
   function renderSide() {
     if (!S.side) return;
+    if (ST.ord) { renderSideOrder(); return; } // v2 任务 9：排序模式=侧栏完整变体分支
     var ms = mods(), ts = tps();
     var h = repoEntryHtml(); // v2 任务 8：仓库入口卡（置顶，计数随 MC_REPO_DATA 刷新）
     h += '<div class="__mc-cat">\u5957\u4ef6 MOD\uff08' + ms.length + '\uff09</div>';
@@ -438,11 +465,149 @@
           + swBtn(t.enabled, ' data-act="toggle" data-guid="' + esc(t.guid) + '"') + '</div>';
       }
     }
+    h += sideFootHtml(false); // v2 任务 9：底部"加载排序模式"入口（两模式常驻，原型同款）
     S.side.innerHTML = h;
+  }
+
+  /* ---- v2 任务 9：排序模式侧栏（原型排序段照抄） ---- */
+
+  /* 底部按钮（常驻两模式；文字随模式切换——原型 fb.textContent 同款） */
+  function sideFootHtml(ordMode) {
+    return '<div class="__mc-side-foot"><button type="button" data-act="ordtoggle">'
+      + (ordMode ? '\u9000\u51fa\u6392\u5e8f\u6a21\u5f0f' : '\u52a0\u8f7d\u6392\u5e8f\u6a21\u5f0f')
+      + '</button></div>';
+  }
+
+  /* 行显示元数据：名/启停态取快照行（mods∪tp，中文定制名），版本取 C# rows（快照 ModInfo
+   * 不带版本——MC_ORDER_DATA.rows 是行内版本列唯一数据源）；快照外的行（ModCenter 自身等）
+   * 名也回退 rows。 */
+  function ordInfoOf(guid) {
+    var name = guid, ver = '', enabled = true;
+    var rows = ST.ordRows && ST.ordRows.rows;
+    if (rows) for (var i = 0; i < rows.length; i++)
+      if (rows[i] && rows[i].guid === guid) { name = rows[i].name || guid; ver = rows[i].ver || ''; break; }
+    var m = findMod(guid);
+    if (m) { name = m.name; enabled = m.enabled !== false; }
+    return { m: m, name: name, ver: ver, enabled: enabled };
+  }
+
+  /* 排序行 ics：只留冲突 chip（click==="cf"：⚠红/⇄橙/◎灰），显示但无 click（裁定 4——
+   * cursor:default、不弹窗不选行）；⟳/↑/↓/⊘ 一律不显示（order 是全局意图，不挂行）。 */
+  function ordIcsHtml(info) {
+    var ics = info.m && info.m.ics;
+    if (!ics || !ics.length) return '';
+    var h = '';
+    for (var i = 0; i < ics.length; i++) {
+      var ic = ics[i];
+      if (!ic || !ic.k || !ic.tip || ic.click !== 'cf') continue;
+      h += '<span class="__mc-ic __mc-' + esc(ic.k) + '" style="cursor:default" title="' + esc(ic.tip)
+        + '" aria-label="' + esc(ic.tip) + '">' + esc(icGlyph(ic)) + '</span>';
+    }
+    return h ? '<span class="__mc-ics">' + h + '</span>' : '';
+  }
+
+  function renderSideOrder() {
+    var h = '<div class="__mc-ordbar">'
+      + '<b style="color:#e8a33d;font-weight:500">\u6392\u5e8f\u6a21\u5f0f</b> \u2014 \u62d6\u62fd\u884c\u8c03\u6574\u987a\u5e8f\uff1b\u9009\u4e2d\u884c\u540e\u4e5f\u53ef\u7528 \u2191 \u2193 \u952e\u79fb\u52a8\uff08\u65e0\u969c\u788d\u66ff\u4ee3\uff09\u3002\u786c\u4f9d\u8d56\u94fe\u6761\u76ee\u81ea\u52a8\u4fdd\u6301\u4f9d\u8d56\u5e8f\u3002'
+      + '<div class="__mc-ord-acts">'
+      + '<button type="button" class="__mc-btn __mc-btn-mini" data-act="ordreset">\u6062\u590d\u9ed8\u8ba4</button>'
+      + '<button type="button" class="__mc-btn __mc-btn-pri __mc-btn-mini" data-act="ordsave">\u4fdd\u5b58\u987a\u5e8f</button>'
+      + '</div></div>';
+    h += '<div class="__mc-cat">\u52a0\u8f7d\u987a\u5e8f\uff08\u9ed8\u8ba4 = \u6a21\u7ec4 ID \u5b57\u6bcd\u5e8f\uff09</div>';
+    if (!ST.order) {
+      h += '<div class="__mc-loading">\u6b63\u5728\u8bfb\u53d6\u52a0\u8f7d\u987a\u5e8f\u2026</div>';
+    } else {
+      for (var i = 0; i < ST.order.length; i++) {
+        var guid = ST.order[i], info = ordInfoOf(guid), n = i + 1;
+        h += '<div class="__mc-mod-row __mc-ord-row' + (info.enabled ? '' : ' __mc-off')
+          + '" data-interactive data-guid="' + esc(guid) + '" tabindex="0" draggable="true">'
+          + '<span class="__mc-grip" aria-hidden="true">\u22ee\u22ee</span>'
+          + '<span class="__mc-ver">' + (n < 10 ? '0' : '') + n + '</span>'
+          + '<span class="__mc-nm">' + esc(info.name) + '</span>'
+          + '<span class="__mc-ver">' + esc(info.ver) + '</span>'
+          + '<span class="__mc-sp"></span>'
+          + ordIcsHtml(info)
+          + '</div>';
+      }
+    }
+    h += sideFootHtml(true);
+    S.side.innerHTML = h;
+  }
+
+  /* 排序模式进出：进=关仓库视图+清本地序+拉 MC_ORDER_GET（MC_ORDER_DATA 到达填 ST.order）；
+   * 出=丢弃本地未保存重排。排序模式是面板内状态——不动键盘门（裁定 2）。 */
+  function ordToggle() {
+    if (ST.ord) {
+      ST.ord = false; ST.order = null; ST.ordSaving = false; ORD.src = null;
+      renderSide(); renderCfg();
+      return;
+    }
+    ST.ord = true; ST.repo = false; ST.order = null; ST.ordSaving = false; ORD.src = null;
+    renderSide(); renderCfg();
+    window.__mcOutbox.push({ type: 'MC_ORDER_GET' });
+  }
+
+  /* 恢复默认：纯本地重排（def=GUID 字母序，MC_ORDER_DATA 随序下发）——保存仍走"保存顺序"
+   *（裁定 1：存字母序与"删除 order 字段"等效，不另做协议）。 */
+  function ordReset() {
+    if (!ST.ordRows || !ST.ordRows.def || !ST.ordRows.def.length) return;
+    ST.order = ST.ordRows.def.slice();
+    renderSide();
+    toastRaw('\u5df2\u6062\u590d\u9ed8\u8ba4\u987a\u5e8f\uff08ID \u5b57\u6bcd\u5e8f\uff09',
+      '\u5c1a\u672a\u4fdd\u5b58\u2014\u2014\u70b9\u201c\u4fdd\u5b58\u987a\u5e8f\u201d\u540e\u5199\u5165\u5f85\u751f\u6548\u6e05\u5355');
+  }
+
+  function ordSave() {
+    if (!ST.order || !ST.order.length || ST.ordSaving) return;
+    ST.ordSaving = true; // 回执（OK/FAIL）前防连点
+    window.__mcOutbox.push({ type: 'MC_ORDER_SAVE', guids: ST.order.slice() });
+    toastRaw('\u6b63\u5728\u4fdd\u5b58\u52a0\u8f7d\u987a\u5e8f\u2026', '');
+  }
+
+  function ordIndexOf(guid) {
+    if (!ST.order) return -1;
+    for (var i = 0; i < ST.order.length; i++) if (ST.order[i] === guid) return i;
+    return -1;
+  }
+
+  /* 重排纯函数（原型 reorder 同款）：from 抽出插到 to，越界/原位不动；重渲染由调用方。 */
+  function ordReorderLocal(from, to) {
+    if (!ST.order) return;
+    if (from === to || from < 0 || to < 0 || from >= ST.order.length) return;
+    var g = ST.order.splice(from, 1)[0];
+    if (to > ST.order.length) to = ST.order.length;
+    ST.order.splice(to, 0, g);
+    renderSide();
+  }
+
+  function ordClearDrops() {
+    if (!S.side) return;
+    var rows = S.side.querySelectorAll('.__mc-ord-row');
+    for (var i = 0; i < rows.length; i++) {
+      rows[i].classList.remove('__mc-drop-above');
+      rows[i].classList.remove('__mc-drop-below');
+    }
+  }
+
+  function ordFocusRow(i) {
+    if (!S.side) return;
+    var rows = S.side.querySelectorAll('.__mc-ord-row');
+    if (rows[i]) rows[i].focus();
   }
 
   function wireSide(side) {
     side.addEventListener('click', function (e) {
+      /* v2 任务 9：排序模式动作（底按钮进出/工具条恢复默认/保存顺序）——先于行/图标分支 */
+      var oa = e.target.closest
+        ? e.target.closest('[data-act="ordtoggle"],[data-act="ordreset"],[data-act="ordsave"]') : null;
+      if (oa) {
+        e.stopPropagation();
+        var a = oa.getAttribute('data-act');
+        if (a === 'ordtoggle') ordToggle();
+        else if (a === 'ordreset') ordReset();
+        else if (a === 'ordsave') ordSave();
+        return;
+      }
       /* v2 任务 8：仓库入口卡 → 仓库视图（原型 ent.onclick 同款） */
       var ent = e.target.closest ? e.target.closest('[data-act="repo-open"]') : null;
       if (ent) { e.stopPropagation(); openRepoView(); return; }
@@ -464,8 +629,74 @@
         return;
       }
       var row = e.target.closest ? e.target.closest('.__mc-mod-row') : null;
-      /* 原型同款：仓库视图开着时点 mod 行 = 返回管理视图（选中该 mod） */
-      if (row) { ST.sel = row.getAttribute('data-guid'); ST.repo = false; renderSide(); renderCfg(); }
+      /* v2 任务 9（裁定 4）：排序模式行点击不选行（不进 mod 详情/不弹窗） */
+      if (row) {
+        if (ST.ord) return;
+        /* 原型同款：仓库视图开着时点 mod 行 = 返回管理视图（选中该 mod） */
+        ST.sel = row.getAttribute('data-guid'); ST.repo = false; renderSide(); renderCfg();
+      }
+    });
+
+    /* ---- v2 任务 9：拖拽（HTML5 DnD）+ 键盘替代（↑↓，WCAG 2.2 AA）----
+     * 事件委托挂 side（renderSide innerHTML 重建后无需逐行重挂——原型 wireDnD 逐行挂，
+     * 委托为等价实现）；仅 .__mc-ord-row 参与（draggable 只在排序行上置位）。
+     * dataTransfer 空判：合成事件（CDP 测试）不带 dataTransfer 不炸，真拖拽路径不受影响。 */
+    side.addEventListener('dragstart', function (e) {
+      if (!ST.ord || !ST.order) return;
+      var row = e.target.closest ? e.target.closest('.__mc-ord-row') : null;
+      if (!row) return;
+      ORD.src = ordIndexOf(row.getAttribute('data-guid'));
+      if (e.dataTransfer) {
+        try { e.dataTransfer.setData('text/plain', String(ORD.src)); } catch (_) {}
+        e.dataTransfer.effectAllowed = 'move';
+      }
+      row.classList.add('__mc-dragging');
+    });
+    side.addEventListener('dragend', function (e) {
+      var row = e.target.closest ? e.target.closest('.__mc-ord-row') : null;
+      if (row) row.classList.remove('__mc-dragging');
+      ordClearDrops();
+      ORD.src = null;
+    });
+    side.addEventListener('dragover', function (e) {
+      if (!ST.ord || ORD.src == null || !ST.order) return;
+      var row = e.target.closest ? e.target.closest('.__mc-ord-row') : null;
+      if (!row) return;
+      e.preventDefault();
+      if (e.dataTransfer) e.dataTransfer.dropEffect = 'move';
+      ordClearDrops();
+      var r = row.getBoundingClientRect();
+      row.classList.add(e.clientY < r.top + r.height / 2 ? '__mc-drop-above' : '__mc-drop-below');
+    });
+    side.addEventListener('dragleave', function (e) {
+      var row = e.target.closest ? e.target.closest('.__mc-ord-row') : null;
+      if (row) { row.classList.remove('__mc-drop-above'); row.classList.remove('__mc-drop-below'); }
+    });
+    side.addEventListener('drop', function (e) {
+      if (!ST.ord || ORD.src == null || !ST.order) return;
+      e.preventDefault();
+      ordClearDrops();
+      var row = e.target.closest ? e.target.closest('.__mc-ord-row') : null;
+      var src = ORD.src;
+      ORD.src = null;
+      if (!row || src < 0) return;
+      var r = row.getBoundingClientRect();
+      var below = e.clientY >= r.top + r.height / 2;
+      var to = ordIndexOf(row.getAttribute('data-guid')) + (below ? 1 : 0);
+      if (to > src) to--; // 目标行在源之后：抽出源后整体前移一位（原型同款）
+      ordReorderLocal(src, to);
+    });
+    side.addEventListener('keydown', function (e) {
+      if (!ST.ord || !ST.order) return;
+      if (e.key !== 'ArrowUp' && e.key !== 'ArrowDown') return;
+      var row = e.target.closest ? e.target.closest('.__mc-ord-row') : null;
+      if (!row) return;
+      e.preventDefault();
+      var i = ordIndexOf(row.getAttribute('data-guid'));
+      if (i < 0) return;
+      var to = e.key === 'ArrowUp' ? i - 1 : i + 1;
+      ordReorderLocal(i, to);
+      ordFocusRow(to); // 重渲染后焦点跟到移动后的行（原型 focusRow 同款）
     });
   }
 
@@ -1234,13 +1465,35 @@
      * 兄弟节点不受 renderCfg 影响（弹窗开着绝不重建，进度条由 MC_DL 就地更新——裁定 6） */
     if (event && event.type === 'MC_REPO_DATA') {
       ST.repoData = event;
+      /* T8 遗留修③（评审转交）：dl 缺位即下载链空闲——无条件复位（checking 只描述 fetch，
+       * 不再作为保留陈旧进度的理由；自愈语义=REPO_DATA 对 dl 态权威）。 */
       if (event.dl) ST.dl = { repoKey: event.dl.repoKey, pct: event.dl.pct, stage: event.dl.stage };
-      else if (!event.checking) ST.dl = null;
+      else ST.dl = null;
       renderSide();
       if (ST.repo && S.cfg && S.cfg.isConnected) renderCfg();
     }
     /* v2 任务 8：下载链进度/结果（MC_DL：down|check|unzip|write|ok|err） */
     if (event && event.type === 'MC_DL') onDlEvent(event);
+    /* v2 任务 9：排序数据（MC_ORDER_DATA：guids=生效序 / rows=显示元数据 / def=默认序）。
+     * 面板开着且在排序模式才重绘；数据本体存 ST.ordRows（重进排序模式前可参照）。 */
+    if (event && event.type === 'MC_ORDER_DATA') {
+      ST.ordRows = event;
+      if (ST.ord) { ST.order = event.guids ? event.guids.slice() : []; renderSide(); }
+    }
+    /* v2 任务 9（裁定 5）：保存成功 → 退出排序模式 + toast；待生效条"加载顺序调整"由
+     * C# 同批推的 MC_PENDING_SUMMARY 呈现；行内无 ⟳（order 全局非单 mod，不挂行）。 */
+    if (event && event.type === 'MC_ORDER_OK') {
+      ST.ordSaving = false;
+      if (ST.ord) { ST.ord = false; ST.order = null; renderSide(); renderCfg(); }
+      toastRaw('\u987a\u5e8f\u5df2\u4fdd\u5b58',
+        '\u91cd\u542f\u6e38\u620f\u540e\u7531\u542f\u52a8\u6e05\u7406\u5668\u5e94\u7528\uff08\u5e95\u90e8\u5f85\u751f\u6548\u6761\u53ef\u67e5\u770b\uff09');
+    }
+    /* v2 任务 9：整单拒绝（校验失败）——留在排序模式，本地调整不丢可重试 */
+    if (event && event.type === 'MC_ORDER_FAIL') {
+      ST.ordSaving = false;
+      toastRaw('\u4fdd\u5b58\u987a\u5e8f\u88ab\u62d2\u7edd',
+        (event.err || '\u6821\u9a8c\u5931\u8d25') + '\uff08\u8be6\u89c1 LogOutput\uff09\uff1b\u672a\u5199\u5165\uff0c\u53ef\u91cd\u8bd5');
+    }
   };
 
   /* ================= 开关 ================= */
@@ -1262,6 +1515,7 @@
     var el = S.root;
     S.root = null; S.side = S.cfg = S.sub = S.toastEl = null;
     S.pendEl = null; S.pendTx = null; S.mbg = null; S.mdl = null; S.mdlRepoKey = null; // v2 任务 7/8：弹窗/待生效条随面板拆
+    ORD.src = null; // v2 任务 9：面板拆=拖拽会话终止（重开面板需重新 dragstart）
     if (el.isConnected && el.parentNode) el.parentNode.removeChild(el);
     /* 关闭即清节流句柄（评审备忘 3）：撤销未触发的 trailing 补发，面板关闭后不再发消息 */
     for (var id in TH) if (TH[id] && TH[id].timer != null) clearTimeout(TH[id].timer);
@@ -1299,6 +1553,7 @@
     if (alive) return;
     S.root = null; S.side = S.cfg = S.sub = S.toastEl = null;
     S.pendEl = null; S.pendTx = null; S.mbg = null; S.mdl = null; S.mdlRepoKey = null; // v2 任务 7/8
+    ORD.src = null; // v2 任务 9
     for (var id in TH) if (TH[id] && TH[id].timer != null) clearTimeout(TH[id].timer);
     TH = Object.create(null);
     window.__mcOutbox.push({ type: 'MC_CLOSE', why: 'host-doc-gone' });
