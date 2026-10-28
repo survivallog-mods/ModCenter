@@ -579,7 +579,69 @@ mcSpec 99 双清单 → Tier 0 兜底（tier 省略/Secret 照常显示/反射�
 见 `.superpowers/sdd/2026-10-24-modcenter/task-16-report.md`（菜单断言组 + 正常退出改名 +
 重启不加载 + 再启用恢复 + taskkill 强杀残留 toast/自愈全链路）。
 
+## 6.11 网络层 RepoClient（v2 生命周期任务 5，2026-10-29）
+
+更新源契约 = 拆仓设计 §6/§7（冻结）：`GET https://api.github.com/repos/survivallog-mods/{repo}/releases/latest`
+→ release assets 里找 `update.json` 资产 → 下载解析五字段 {mod, version, asset, md5, gamekb}；
+zip 资产名 = update.json.asset 字段值。接口签名按任务 brief 冻结，T6/T8 消费。
+
+### 6.11.1 机制
+
+- **`RepoClient`（静态类）**：`FetchLatest(repoName)` 两跳（latest 元数据 + update.json，各受
+  CheckTimeout 约束）→ `UpdateInfo{Mod,Version,Asset,Md5,Gamekb,AssetUrl}`；五字段任一缺失 /
+  zip 资产不在场 / 网络/非 2xx/JSON 坏 → **返回 null**（不抛不重试）。`DownloadAsset(info, progress)`
+  下载 zip 到 `McPending.StagingDir`：先落 `<asset>.part`，成功后关流→清陈旧→`File.Move` 落位
+  `<asset>` 并返回绝对路径（T8 pending op 的 Staged 即其 BepInEx 根相对路径）；progress 在
+  下载线程每 64KB 回调（total<0=无 Content-Length），节流归调用方；任何失败清 .part 后**抛出**。
+  另供 `MapUrl`（internal，镜像映射）与 `Md5Of`（internal，小写十六进制，T8 校验消费）。
+- **UA 与头**：`User-Agent: survivallog-modcenter`（GitHub API 必带）常驻客户端默认头；API 请求
+  另附 `Accept: application/vnd.github+json`。单例 HttpClient（跟随系统代理；总超时无限——
+  超时由每次请求的 CTS 按 cfg 键控制，改 cfg 即时生效）。
+- **cfg（Network 节，绑定在 ModCenterPlugin.Load）**：`MirrorPrefix`（默认空=直连）、
+  `CheckTimeoutMs`=5000、`DownloadTimeoutMs`=60000（下限保护 500）。镜像前缀语义：非空时对
+  `https://api.github.com/...` 与 `https://github.com/...` 两族 URL 前置镜像域
+  （`<前缀>/https://github.com/.../xxx.zip` 形态，拆仓设计 §7），其余 URL 原样。
+- **线程纪律（控制器裁定）**：全部 HTTP 只在后台 Task 跑（调用方 Task.Run），任何同步阻塞
+  主线程=缺陷；探针自证走"后台写共享状态+证据文件，Ticker 主线程收割"（ConfigBridge.Pump 同款）。
+- **`NetProbe` 探针（cfg `Debug.NetSelfTest` 门控，默认关，一轮即终态）**：Ticker 10s 后拉起
+  后台 Task 对 `survivallog-mods/RobotSpeed` 跑 fetch（版本/md5/gamekb+耗时）→ 下载
+  （25% 台阶进度）→ MD5 对 update.json → **删 zip 不留残留**；Done 旗由 Ticker 收割打印。
+  证据 `BepInEx/ModCenter_netspeed.txt`（硬规则 9）。
+
+### 6.11.2 镜像选型实测（开放点 3 收口，2026-10-29 本机）
+
+| 前缀 | api.github.com | release 下载 | 结论 |
+|---|---|---|---|
+| （直连） | 200 | 200 | 默认取值（本机直连可达） |
+| `https://gh-proxy.com` | 200（真 JSON） | 200 | **README 示例取值**（双端点全通） |
+| `https://ghproxy.net` | 403 "Invalid input." | 200 | 只代理下载，不能作本键取值（fetch 必败） |
+| `https://ghfast.top` | 403 | 200 | 同上 |
+| `https://mirror.ghproxy.com` | 超时 | 超时 | 不可用 |
+| `https://gh.ddlc.top` | 429 | 429 | 限流不可用 |
+
+**默认值定案：空=直连**（本机及目标玩家群直连普遍可用；ghproxy 类镜像寿命/限流不稳，
+且多数只代理下载不代理 API）。README 记 `https://gh-proxy.com` 为示例并写明双端点要求。
+
+### 6.11.3 装机实测记录（2026-10-29 三轮 boot，主菜单阶段，探针证据）
+
+- **直连**：fetch OK 3054ms（version=1.7.0 / md5=3468ea…f5b6 / gamekb=2026-10-23_26157732，
+  与仓上 update.json 逐字一致）→ 下载 OK 825ms 22577B → MD5 match=PASS → zip 已删、staging 清空。
+- **镜像 gh-proxy.com**：fetch OK 2490ms + 下载 OK 744ms，md5 PASS，同上清理（两族 URL 均走镜像）。
+- **失败降级**（MirrorPrefix=https://127.0.0.1:9 不可达）：fetch=null @2069ms（< CheckTimeout
+  5000ms 上限，秒级失败零重试），staging 零触碰；LogOutput 顺序证明 Ticker 主线程全程存活
+  （后台 FAIL 行之后收割行照常打印），面板无卡顿。
+- 过程实坑（直连第 1 轮抓出即修）：`File.Move` 落位留在 FileStream 的 using 声明块内——
+  Windows 句柄锁使 100% 下载后 IOException（using 声明在块尾才释放）；改显式 using 块先关流
+  再 Move 后复验全绿。证据全文存 `.superpowers/sdd/2026-10-28-modcenter-v2-lifecycle/task-5-netspeed-*.txt`。
+
 ## 7. 迭代维护清单
+
+- 2026-10-29 v2 任务 5（网络层）：新增 `RepoClient.cs`（GitHub release 客户端：FetchLatest 两跳
+  解析 update.json 五字段，失败返 null；DownloadAsset 落 staging `.part`→原子落位，失败清件抛出；
+  MapUrl 镜像前缀映射 + Md5Of 供 T8）+ `ModCenterPlugin.cs` Network 节三键绑定与 `Debug.NetSelfTest`
+  探针（NetProbe：后台 Task fetch/下载/MD5/清理，Ticker 10s 拉起+Done 旗收割，证据
+  ModCenter_netspeed.txt）。镜像选型结论（默认空=直连，README 示例 gh-proxy.com）与三轮装机实测
+  见 §6.11；panel.js 零改动。
 
 - 2026-10-24 实机 UI 三修（bugfix round 2，作者试用三问题）：①ESC 入口出现慢（≤2s 轮询
   等待）→ `MenuEntryInjector.cs` 改事件驱动常驻：EntryJs 一次性安装 MutationObserver

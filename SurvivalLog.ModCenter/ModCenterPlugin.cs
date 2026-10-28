@@ -19,6 +19,8 @@ namespace SurvivalLog.ModCenter;
 /// 通道 + MenuEntryInjector 双锚点入口 + panel.js 面板壳 + outbox 轮询）；任务 6：配置桥
 /// （Meta 九表 + ConfigBridge 快照/写/消息协议/Save 防抖，面板 UI 任务 7 移植）；任务 8：
 /// 键盘门复用（FocusTick——面板开 SetKeyboardEnabled+IME On，关双还原，MC_OPEN/MC_CLOSE 驱动）。
+/// v2 生命周期任务 5：网络层 RepoClient（GitHub release 客户端：直连+可配镜像+快速失败，
+/// cfg Network 节三键）+ Debug.NetSelfTest 自诊断探针（NetProbe，证据 ModCenter_netspeed.txt）。
 /// </summary>
 [BepInPlugin(Guid, Name, Version)]
 public sealed class ModCenterPlugin : BasePlugin
@@ -37,6 +39,18 @@ public sealed class ModCenterPlugin : BasePlugin
     // 证据落 BepInEx/ModCenter_probe.txt；结论（确切 API/类型/坑）见 DESIGN.md。
     internal static ConfigEntry<bool> DebugProbe;
 
+    // v2 任务 5：网络层 cfg（Network 节，RepoClient 消费）。镜像前缀默认空=直连（选型结论见
+    // DESIGN §6.11：本机直连可达，gh-proxy.com 双端点可用作示例；ghproxy.net/ghfast.top 只代理
+    // 下载不代理 api.github.com，不能作本键取值）。
+    internal static ConfigEntry<string> NetworkMirrorPrefix;
+    internal static ConfigEntry<int> NetworkCheckTimeoutMs;    // 默认 5000
+    internal static ConfigEntry<int> NetworkDownloadTimeoutMs; // 默认 60000
+
+    // v2 任务 5：网络自诊断探针开关（默认关，仿 Debug.Probe）。true 时启动 10s 后对
+    // survivallog-mods/RobotSpeed 跑一轮 fetch+下载+MD5+清理（后台 Task，Ticker 主线程收割），
+    // 证据落 BepInEx/ModCenter_netspeed.txt（硬规则 9：不依赖 LogOutput）。
+    internal static ConfigEntry<bool> DebugNetSelfTest;
+
     public override void Load()
     {
         Instance = this;
@@ -46,6 +60,21 @@ public sealed class ModCenterPlugin : BasePlugin
             "反射桥 API 诊断探针（默认关，仅供开发验证）。true 时启动 30 秒后对 RobotSpeed『机器人提速/移速倍率』\n" +
             "执行一轮：枚举插件 → 取 ConfigFile → 读原值 → 写 3 → 等 5 秒验内存表热重写（真原值 2.4×3=7.2）→ 写回原值并落盘。\n" +
             "证据追加到 BepInEx/ModCenter_probe.txt。玩家长开无意义，验完请改回 false。");
+
+        // v2 任务 5：网络层三键（值语义见 RepoClient 头注；绑定在此、静态门读取）
+        NetworkMirrorPrefix = Config.Bind("Network", "MirrorPrefix", "",
+            "GitHub 访问镜像前缀（默认空 = 直连）。非空时形如 'https://gh-proxy.com'，\n" +
+            "对 api.github.com 与 github.com 的 release 资产 URL 生效（<前缀>/https://github.com/... 形态）。\n" +
+            "直连可用就不要填；镜像服务会迁移失效，换了只改这里不改代码。");
+        NetworkCheckTimeoutMs = Config.Bind("Network", "CheckTimeoutMs", 5000,
+            "检查更新（latest 元数据 + update.json 两跳）的单次超时，毫秒。超时即判失败降级，不重试。");
+        NetworkDownloadTimeoutMs = Config.Bind("Network", "DownloadTimeoutMs", 60000,
+            "下载 zip 资产的超时，毫秒。超时即失败降级（半成品 .part 会被清理），不重试。");
+
+        DebugNetSelfTest = Config.Bind("Debug", "NetSelfTest", false,
+            "网络自诊断探针（默认关，仅供开发验证）。true 时启动 10 秒后对 survivallog-mods/RobotSpeed\n" +
+            "跑一轮：fetch latest（版本/md5/gamekb + 耗时）→ 下载 zip 到 ModCenter\\staging → 校验 MD5 → 删 zip 不留残留。\n" +
+            "全程后台线程（不卡面板/主线程），证据写 BepInEx/ModCenter_netspeed.txt。验完请改回 false。");
 
         FocusTick.Reset(); // 任务 8：清上一轮键盘门自证文件（每轮运行从空文件开始）
 
@@ -124,9 +153,14 @@ internal sealed class ModCenterTicker : MonoBehaviour
     private int _probePhase;
     private float _probeAge;
 
+    // v2 任务 5：网络探针状态机：-1 未启用/已收割；0 等 10s；1 后台任务在跑等收割（Ticker 主线程只查旗）
+    private int _netPhase;
+    private float _netAge;
+
     public void Update()
     {
         ProbePump();
+        NetProbePump();
 
         if (!_residueSoftDone)
         {
@@ -181,6 +215,35 @@ internal sealed class ModCenterTicker : MonoBehaviour
                 _probeAge = 0f; BridgeProbe.PhaseB(); _probePhase = 2; break;
             case 2 when _probeAge >= 3f:
                 BridgeProbe.PhaseC(); _probePhase = -1; break;
+        }
+    }
+
+    /// <summary>
+    /// 网络探针泵（v2 任务 5）：等 10s 起 NetProbe（主线程只清证据文件+拉后台 Task——HttpClient
+    /// 调用全部后台线程，裁定 1），之后每帧查完成旗收割打印（ConfigBridge.Pump 同款"后台写共享
+    /// 状态+证据文件，Ticker 主线程收割"模式）。一轮即终态（-1），探针默认关。
+    /// </summary>
+    private void NetProbePump()
+    {
+        if (_netPhase < 0) return;
+        var gate = ModCenterPlugin.DebugNetSelfTest;
+        if (gate == null || !gate.Value) { _netPhase = -1; return; }
+
+        switch (_netPhase)
+        {
+            case 0:
+                _netAge += Time.unscaledDeltaTime;
+                if (_netAge < 10f) return;
+                _netPhase = 1;
+                NetProbe.Start();
+                break;
+            case 1:
+                if (NetProbe.Done)
+                {
+                    ModCenterPlugin.Log("netspeed 探针收割: " + NetProbe.Summary);
+                    _netPhase = -1;
+                }
+                break;
         }
     }
 }
@@ -289,5 +352,92 @@ internal static class BridgeProbe
             return sb.ToString().Trim();
         }
         catch (Exception e) { return "表读异常: " + e.Message; }
+    }
+}
+
+/// <summary>
+/// v2 任务 5 网络自诊断探针（cfg Debug.NetSelfTest 门控，Ticker 10s 后拉起，一轮即终态）。
+/// 靶：survivallog-mods/RobotSpeed（真实在线仓）。后台 Task 跑：fetch latest（版本/md5/gamekb
+/// + 耗时）→ 下载 zip 到 StagingDir → MD5 对 update.json → **删 zip 不留残留**；失败场景
+/// （如 MirrorPrefix 指向不可达地址）记录失败耗时（应秒级 &lt; CheckTimeout 上限）。
+/// 证据追加 BepInEx/ModCenter_netspeed.txt（硬规则 9）；Ticker 主线程只收割 Done 旗打印。
+/// </summary>
+internal static class NetProbe
+{
+    private const string TargetRepo = "RobotSpeed";
+
+    internal static volatile bool Done;
+    internal static string Summary = "";
+
+    private static string EvidencePath => System.IO.Path.Combine(Paths.BepInExRootPath, "ModCenter_netspeed.txt");
+
+    private static void P(string line)
+    {
+        try { System.IO.File.AppendAllText(EvidencePath, $"[{DateTime.Now:HH:mm:ss.fff}] {line}\n"); } catch { }
+        ModCenterPlugin.Log("netspeed " + line);
+    }
+
+    /// <summary>Ticker 主线程调：清旧证据 → 写头行 → 拉后台 Task（HTTP 全在后台，裁定 1）。</summary>
+    public static void Start()
+    {
+        Done = false;
+        Summary = "";
+        try { if (System.IO.File.Exists(EvidencePath)) System.IO.File.Delete(EvidencePath); } catch { }
+        var mirror = ModCenterPlugin.NetworkMirrorPrefix?.Value ?? "";
+        var check = ModCenterPlugin.NetworkCheckTimeoutMs?.Value ?? 5000;
+        var dl = ModCenterPlugin.NetworkDownloadTimeoutMs?.Value ?? 60000;
+        P($"probe start: target=survivallog-mods/{TargetRepo} mirror='{mirror}' checkTimeout={check}ms downloadTimeout={dl}ms");
+        System.Threading.Tasks.Task.Run(RunAsync);
+    }
+
+    private static async System.Threading.Tasks.Task RunAsync()
+    {
+        var watch = System.Diagnostics.Stopwatch.StartNew();
+        try
+        {
+            // ① fetch：latest → update.json → 五字段（失败=null 秒级返回，不抛）
+            var info = await RepoClient.FetchLatest(TargetRepo);
+            var fetchMs = watch.ElapsedMilliseconds;
+            if (info == null)
+            {
+                P($"FAIL fetch=null（网络/解析/资产缺失降级）耗时 {fetchMs}ms");
+                Summary = $"fetch FAIL {fetchMs}ms（探针一轮终态）";
+                return;
+            }
+            P($"fetch OK {fetchMs}ms: mod={info.Mod} version={info.Version} md5={info.Md5} gamekb={info.Gamekb}");
+            P($"fetch zip 资产: {info.Asset} ← {info.AssetUrl}");
+
+            // ② 下载到 staging 临时名（progress 25% 台阶落一行证据）
+            var lastStep = 0;
+            var path = await RepoClient.DownloadAsset(info, (done, total) =>
+            {
+                if (total <= 0) return;
+                var step = (int)(done * 100 / total) / 25;
+                if (step <= lastStep) return;
+                lastStep = step;
+                P($"download 进度 {done}/{total}B ({done * 100 / total}%)");
+            });
+            var dlMs = watch.ElapsedMilliseconds - fetchMs;
+            var size = new System.IO.FileInfo(path).Length;
+
+            // ③ MD5 对 update.json（下载完整性实证）
+            var md5 = RepoClient.Md5Of(path);
+            var match = string.Equals(md5, info.Md5, StringComparison.OrdinalIgnoreCase);
+            P($"download OK {dlMs}ms {size}B md5={md5} match={(match ? "PASS" : "MISMATCH 期望 " + info.Md5)}");
+
+            // ④ 测完即删（staging 不留测试残留）
+            System.IO.File.Delete(path);
+            P($"staging 清理: {System.IO.Path.GetFileName(path)} 已删");
+
+            Summary = match
+                ? $"OK fetch {fetchMs}ms + download {dlMs}ms {size}B md5 PASS（zip 已清）"
+                : $"FAIL md5 MISMATCH（zip 已清）";
+        }
+        catch (Exception e)
+        {
+            P($"FAIL {e.GetType().Name}: {e.Message} @{watch.ElapsedMilliseconds}ms");
+            Summary = $"FAIL {e.GetType().Name} {watch.ElapsedMilliseconds}ms（探针一轮终态）";
+        }
+        finally { Done = true; }
     }
 }

@@ -37,7 +37,11 @@
 
 | 节.键 | 默认 | 说明（人话） |
 |---|---|---|
+| Network.MirrorPrefix | （空） | GitHub 访问镜像前缀，默认空 = 直连。直连拉取/下载更新包正常就不要填；直连不通（如某些网络环境）时填一个镜像前缀，形如 `https://gh-proxy.com`（要求同时代理 api.github.com 与 release 下载，ghproxy.net/ghfast.top 只代理下载、不能用于本键）。镜像服务会迁移失效，失效换个前缀即可，不用改代码 |
+| Network.CheckTimeoutMs | 5000 | 检查更新（拉版本信息）的单次超时毫秒数。超时即判失败（当次更新不可用），不重试 |
+| Network.DownloadTimeoutMs | 60000 | 下载更新包的超时毫秒数。超时即失败并清理半成品文件，不重试 |
 | Debug.Probe | false | 开发诊断探针（对配置读写通道做一轮自检并把证据写到 BepInEx 目录的 ModCenter_probe.txt）。玩家长开无意义，验完请改回 false |
+| Debug.NetSelfTest | false | 网络自诊断探针（对 GitHub 更新源跑一轮 取版本→下载→校验→清理 并把证据写到 BepInEx 目录的 ModCenter_netspeed.txt）。玩家长开无意义，验完请改回 false |
 
 面板还会在自己的 cfg 里记录被禁用的第三方 dll 名单（`[DisabledTp]` 节，由面板自动维护，无需手改）。
 
@@ -56,7 +60,7 @@
 Survival Log (Steam AppID 4164790) + BepInEx 6 IL2CPP. Install the Full package (bundled BepInEx 6 base — extract into the game root, `steamapps\common\Survival Log`) or the PluginOnly package (drop `SurvivalLog.ModCenter.dll` into `BepInEx\plugins\` if BepInEx 6 is already installed). Uninstall = delete the DLL; the menu entries disappear and every mod keeps its current config. Third-party DLLs disabled through the panel stay renamed to `.disabled` — remove the suffix to re-enable them.
 
 **Configuration**
-Config file: `BepInEx\config\com.local.survivallog.modcenter.cfg`. The panel manages every other mod's config; the only local key is a debug probe that should stay false.
+Config file: `BepInEx\config\com.local.survivallog.modcenter.cfg`. The panel manages every other mod's config. Local keys: an optional GitHub mirror prefix (empty by default = direct; set e.g. `https://gh-proxy.com` only if direct connections fail — the mirror must proxy both api.github.com and release downloads), check/download timeouts, and two debug probes that should stay false.
 
 **Credits**
 By Night (Douyin 166660371). Free for personal use. Do NOT re-upload or redistribute anywhere without permission.
