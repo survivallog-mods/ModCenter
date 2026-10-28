@@ -25,7 +25,8 @@ namespace MCCleaner;
 /// ModifyLoadOrder postfix 实现加载序覆盖（pending.order 驱动 + 硬依赖保护，纯内存不写文件）。
 /// T4：④marker 翻译（Ruling 1，先翻译后执行）——读 ModCenter cfg [DisabledTp] 意图翻译为
 /// disable/enable 派生 op 当场改名（v1 的"退出时分离进程改名"退役；强杀残留概念消失：
-/// 意图在 cfg，每次启动先于插件加载执行，此阶段 dll 无锁直接 File.Move）。
+/// 意图在 cfg，每次启动先于插件加载执行，此阶段 dll 无锁直接 File.Move）。enable 仅认显式
+/// marker=false 键（Ruling 9：cfg 无键的手工禁用 .disabled 不动）。
 /// 后续任务继续追加（卸载/重启等）。
 /// 自证文件（硬规则，不依赖 LogOutput.log）：BepInEx\MCCleaner_loaded.txt（T1 生命周期）
 /// + BepInEx\MCCleaner_ops.txt（T2 起 op 执行证据，追加行：时间/操作/结果/原因；
@@ -409,7 +410,9 @@ public class CleanerPatcher : BasePatcher
     /// 直接走 T2 执行管线当场改名。清理器侧独立行级解析（照搬 DllDisabler.ParseMarkerTrues 的
     /// 解析规则），不动插件侧 cfg 绑定。规则：
     /// - marker=true 且 dll 在场 → disable op（改名 .disabled，本次启动即不加载）；
-    /// - marker=false（或无该键）且 dll.disabled 在场 → enable op（反向改名）；
+    /// - marker=false（**显式键**）且 dll.disabled 在场 → enable op（反向改名——面板"启用"写入的
+    ///   意图）；键不存在 + .disabled 在场 → **不翻译、不动文件**（Ruling 9：玩家手工禁用保持，
+    ///   面板侧 AbsentDisabled 缺席行仍供玩家显式启用，走 marker=false 路径）；
     /// - 持久 pending.json 已有同 target 的 op → 持久 op 优先，跳过翻译（避免双重执行冲突）；
     /// - 派生 op 执行完即弃：成功不写 pending.json（源=cfg marker），失败仅留 [MARKER] 证据
     ///   （下次启动按 marker 现值重译重试，自愈）。
@@ -426,11 +429,7 @@ public class CleanerPatcher : BasePatcher
                 if (!string.IsNullOrEmpty(op?.Target))
                     taken.Add(NormRel(op.Target));
 
-            var markers = ParseDisabledTp(McCfgPath());
-            var known = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-            foreach (var kv in markers) known.Add(kv.Key);
-
-            foreach (var kv in markers)
+            foreach (var kv in ParseDisabledTp(McCfgPath()))
             {
                 var target = "plugins/" + kv.Key.Replace('\\', '/');
                 var abs = ResolveRel(target);
@@ -445,7 +444,8 @@ public class CleanerPatcher : BasePatcher
                     continue;
                 }
                 // marker=true 且 dll 在场 → disable；dll 不在场 = 已改名（幂等）或惰性忽略（零动作）
-                // marker=false 且 .disabled 在场 → enable；不在场 = 已恢复（幂等）
+                // marker=false 且 .disabled 在场 → enable（显式意图）；不在场 = 已恢复（幂等）
+                // 无键 .disabled（手工禁用）不进本表——Ruling 9：不翻译、不动文件
                 var wantDisable = kv.Value ? File.Exists(abs) : File.Exists(abs + DisabledSuffix);
                 if (!wantDisable) continue;
                 derived.Add(new McPending.Op
@@ -453,23 +453,6 @@ public class CleanerPatcher : BasePatcher
                     Type = kv.Value ? McPending.TypeDisable : McPending.TypeEnable,
                     Target = target,
                 });
-                taken.Add(NormRel(target));
-            }
-
-            // 无键补扫：plugins 递归 *.dll.disabled（非第一方）且 cfg 无该键 → enable（缺席恢复）。
-            // （marker=false 的在场键上面已覆盖；此处补"键不在 cfg"的 .disabled——与插件侧
-            // AbsentDisabled 同规则：递归（BepInEx 递归加载子目录）、第一方 SurvivalLog.* 豁免。）
-            foreach (var rel in ScanDisabledPlugins())
-            {
-                if (known.Contains(rel)) continue; // 有键者已按 marker 值处理
-                var target = "plugins/" + rel.Replace('\\', '/');
-                if (ResolveRel(target) == null) continue;
-                if (taken.Contains(NormRel(target)))
-                {
-                    OpsEv("[MARKER] skip " + target + "（持久 op 同 target 优先，Ruling 1）");
-                    continue;
-                }
-                derived.Add(new McPending.Op { Type = McPending.TypeEnable, Target = target });
                 taken.Add(NormRel(target));
             }
         }
@@ -539,34 +522,6 @@ public class CleanerPatcher : BasePatcher
         {
             OpsEv("[MARKER] warn cfg 解析异常: " + ex.Message);
             return new List<KeyValuePair<string, bool>>();
-        }
-        return list;
-    }
-
-    /// <summary>plugins 递归扫描 <c>*.dll.disabled</c>（非第一方 SurvivalLog.*），返回 plugins 相对
-    /// dll 名（已剥 .disabled）——"cfg 无键但 .disabled 在场"的缺席恢复枚举源。</summary>
-    private static List<string> ScanDisabledPlugins()
-    {
-        var list = new List<string>();
-        try
-        {
-            var root = Paths.PluginPath.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
-            foreach (var f in Directory.GetFiles(root, "*", SearchOption.AllDirectories))
-            {
-                var name = Path.GetFileName(f);
-                if (!name.EndsWith(DisabledSuffix, StringComparison.OrdinalIgnoreCase)) continue;
-                var stem = name.Substring(0, name.Length - DisabledSuffix.Length);
-                if (!stem.EndsWith(".dll", StringComparison.OrdinalIgnoreCase)
-                    || stem.StartsWith("SurvivalLog.", StringComparison.OrdinalIgnoreCase)) continue;
-                var rel = f.StartsWith(root + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase)
-                    ? f.Substring(root.Length + 1) : name;
-                rel = rel.Substring(0, rel.Length - DisabledSuffix.Length); // 剥 .disabled → dll 相对名
-                if (ResolveRel("plugins/" + rel.Replace('\\', '/')) != null) list.Add(rel);
-            }
-        }
-        catch (Exception ex)
-        {
-            OpsEv("[MARKER] warn .disabled 补扫异常: " + ex.Message);
         }
         return list;
     }
