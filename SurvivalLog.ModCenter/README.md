@@ -42,6 +42,7 @@
 | Network.DownloadTimeoutMs | 60000 | 下载更新包的超时毫秒数。超时即失败并清理半成品文件，不重试 |
 | Debug.Probe | false | 开发诊断探针（对配置读写通道做一轮自检并把证据写到 BepInEx 目录的 ModCenter_probe.txt）。玩家长开无意义，验完请改回 false |
 | Debug.NetSelfTest | false | 网络自诊断探针（对 GitHub 更新源跑一轮 取版本→下载→校验→清理 并把证据写到 BepInEx 目录的 ModCenter_netspeed.txt）。玩家长开无意义，验完请改回 false |
+| Debug.RepoSelfTest | false | 仓库决策层自诊断探针（游戏版本通道 dump + 全部 12 仓拉版本并做五态决策自检，证据写 BepInEx 目录的 ModCenter_gamever.txt / ModCenter_reposelftest.txt）。一轮消耗 12 次 GitHub 匿名 API 请求，玩家长开无意义，验完请改回 false |
 
 面板还会在自己的 cfg 里记录被禁用的第三方 dll 名单（`[DisabledTp]` 节，由面板自动维护，无需手改）。
 

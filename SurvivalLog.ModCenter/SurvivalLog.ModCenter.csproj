@@ -31,6 +31,10 @@
       <HintPath>E:\SteamLibrary\steamapps\common\Survival Log\BepInEx\core\BepInEx.Core.dll</HintPath>
       <Private>false</Private>
     </Reference>
+    <Reference Include="SemanticVersioning">
+      <HintPath>E:\SteamLibrary\steamapps\common\Survival Log\BepInEx\core\SemanticVersioning.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
     <Reference Include="BepInEx.Unity.IL2CPP">
       <HintPath>E:\SteamLibrary\steamapps\common\Survival Log\BepInEx\core\BepInEx.Unity.IL2CPP.dll</HintPath>
       <Private>false</Private>

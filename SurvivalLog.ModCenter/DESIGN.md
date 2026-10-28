@@ -631,10 +631,105 @@ zip 资产名 = update.json.asset 字段值。接口签名按任务 brief 冻结
   5000ms 上限，秒级失败零重试），staging 零触碰；LogOutput 顺序证明 Ticker 主线程全程存活
   （后台 FAIL 行之后收割行照常打印），面板无卡顿。
 - 过程实坑（直连第 1 轮抓出即修）：`File.Move` 落位留在 FileStream 的 using 声明块内——
-  Windows 句柄锁使 100% 下载后 IOException（using 声明在块尾才释放）；改显式 using 块先关流
-  再 Move 后复验全绿。证据全文存 `.superpowers/sdd/2026-10-28-modcenter-v2-lifecycle/task-5-netspeed-*.txt`。
+  Windows 句柄锁使 100% 下载后 IOException（using 声明在块尾才释放）；改显式 using 块先关流再
+  Move 后复验全绿。证据全文存 `.superpowers/sdd/2026-10-28-modcenter-v2-lifecycle/task-5-netspeed-*.txt`。
+
+## 6.12 决策层 + gamekb 版本通道（v2 生命周期任务 6，2026-10-29）
+
+消费 T5 `RepoClient.FetchLatest`（失败=null）与 v1 §4.1① `IL2CPPChainloader.Instance.Plugins`；
+产出 `RepoDecision`（12 仓五态）+ `GameVersion`（本地游戏版本通道，spec §6 开放点 2 收口）+
+`PendingWriter`（pending 意图主线程唯一写者）。D7/D8 均**只告警不拦截**（作者拍板）。
+
+### 6.12.1 决策口径（五态与优先级）
+
+- 基态（D7）：未装=Install；本地>远端=Downgrade（Why="远端低于本地"，面板复用提示）；
+  远端>本地=Update；相等=Ok。版本比较走 SemanticVersioning（csproj 补引
+  `BepInEx\core\SemanticVersioning.dll`——PluginInfo.Metadata.Version 的类型所在程序集，
+  BepInEx.Core 只是转发引用不内嵌）；远端不可解析=Ok 保守不动作（自家管线不会发生）。
+- **Warn 覆盖**（D8）：仅对可动作态（Install/Update）判 gamekb——远端快照名 `_N` 后缀 ≠
+  本地基线 buildid → Warn（Why=原因文案，按钮仍可用）；Downgrade/Ok 不参与改态
+  （Downgrade 自身即告警态；Ok=同版本无动作面）。
+- **基线不可用**（通道失败/无法映射）：不判 Warn，`VerNote="未校验游戏版本：…"`（独立字段，
+  不占 Why——控制器裁定"Why 仅 warn 态非空"；fetch 成功行均可携带）。
+- **fetch 失败**：Remote=null + State=Ok（五态无 fail 态，不虚报 update/warn；面板按 Remote
+  null 渲染"检查失败"）。
+- `RepoRow.Status` 固定小写五值 `"ok"|"update"|"downgrade"|"warn"|"install"`（控制器裁定 2，
+  T7/T8 直接消费）。冻结面外增量字段：`Gamekb`（fetch 附带）与 `VerNote`。
+- 接口：`RepoDecision.RepoKeys`（12 仓键）/ `GuidOf`（=com.local.survivallog.<小写仓键>，已对
+  Meta.cs 九表 + config 目录实表核对）/ `DllRelOf`（plugins/SurvivalLog.<仓键>.dll，release.ps1
+  打包布局）/ `SnapshotLocal()`（**主线程**，IL2CPPChainloader）/ `Build(src, localGame=null)`
+  （纯函数任意线程；省略 localGame=ReadCached）。
+
+### 6.12.2 gamekb 通道选型（开放点 2 收口；证据 BepInEx/ModCenter_gamever.txt）
+
+两侧形态：远端 gamekb=快照目录名 `YYYY-MM-DD_<N>`，`N`=**Steam buildid**（快照 meta.json
+buildid 与目录名后缀逐字一致；release.ps1 L61 只取 `^\d{4}-\d{2}-\d{2}_\d+$` 最新快照）。
+本地四候选实测：
+
+| 候选 | 实测值 | 结论 |
+|---|---|---|
+| ①interop `UnityEngine.Application.version` | `1.1.19611`（=③复合版本，bundleVersion 即全量内容版本） | 与③互为佐证；无 buildid，不进基线 |
+| ②Steam appmanifest（gameRoot 上两级 `appmanifest_4164790.acf` 的 `"buildid" "N"`） | `26157732` | **定案主通道**：与快照名 `_N` 直接相等比较，零映射表 |
+| ③`SurvivalLog_Data\Version.txt`（1.1/19611/…） | 复合 `1.1.19611`（=快照 meta.json runtime_assets_version） | 后备展示通道；Baseline 需对照表（占位空表） |
+| ④`SurvivalLog.exe` FileVersionInfo | `6000.2.7.10444810`（Unity Player 版本） | 非游戏内容版本，弃用（依据落证据） |
+
+失败路径（全 null）：appmanifest 与 Version.txt 均不可读 → Baseline=null + Note=原因 →
+决策层不判 Warn、标"未校验游戏版本"（D8 照常放行）。appmanifest 在但 Version.txt 不在 →
+Baseline=buildid、Display="build N"（可比对不降级）。
+
+**映射方案（报告定稿，实现占位）**：appmanifest 通道失效场景（非 Steam 布局/文件被清）下，
+`AssetsToGamekb` 对照表（键=Version.txt 复合版本，值=快照名）由发版管线扫 `gamekb\*\meta.json`
+生成、随版内置插件——`GameVersion.ReadCore` 已留挂点；更优解是 release.ps1 在 update.json 增补
+`buildid` 字段（免表直比，五字段契约加一个可选键），T8 前二选一拍板。
+
+### 6.12.3 PendingWriter（控制器裁定 3）
+
+静态薄封装 McPending，**主线程唯一写者**（Ticker/消息分发上下文；后台写=缺陷）。三口：
+`AddUpdate(row, info, stagedAbs)`（install/replace 按本地在场与否；Target=DllRelOf；Staged=
+staging 绝对路径转根相对；Md5=update.json）、`AddDelete(dllRel, cfgRel)`（cfgRel 调用方传
+GUID 命名，T4 实证 BepInEx cfg 按 GUID 命名）、`SetOrder(order)`（T9，ops 原样）。合并语义：
+读旧→**旧 ops 在前新 ops 在后**→原子写，order 恒回传旧值不丢 T3 顺序覆盖；坏文件移存 `.bad`
+自愈后从空表开始。Save 防抖不必（写频率极低）。
+
+### 6.12.4 RepoSelfTest 探针（cfg `Debug.RepoSelfTest`，默认关，一轮即终态）
+
+Ticker 10s 拉起（NetProbe 同款三拍）：主线程跑 gamekb 四候选 dump（→ModCenter_gamever.txt，
+interop 候选须主线程）+ SnapshotLocal；后台 Task 一轮 12 仓顺序 fetch（匿名限流预算内，
+不连环多轮）→ 四档自证：**A** 真仓真基线 12 行五态分布；**B** 强制基线 null（Step 4：断言
+warn=0 不误报 + 未校验标注行数=fetch 成功行数）；**C** 合成分支自证（合成 RepoRow 走同一
+`Build` 路径——不碰本机枚举/网络，覆盖五态+形态异常+fetch 失败+通道失败翻转）；**D**
+PendingWriter 合并语义对临时文件 `selftest-pending.json` 自证（旧前新后+order 保留，
+验后即删——**真 pending.json 全程零触碰**）。证据 `BepInEx/ModCenter_reposelftest.txt`。
+
+### 6.12.5 装机实测记录（2026-10-29 01:58 boot 一轮，主菜单阶段，直连）
+
+- **通道**：四候选全 dump（gamever.txt 8 行）——①`Application.version='1.1.19611'`（主线程 interop
+  正常）②appmanifest buildid=`26157732` ③Version.txt 复合=`1.1.19611` ④exe=Unity 版本（弃用依据）；
+  定案 channel='appmanifest+versionfile' baseline='26157732' display='1.1.19611 (build 26157732)'。
+- **A 真仓真基线**：12/12 fetch OK @20.1s（全部 remote=1.7.0 gamekb=2026-10-23_26157732，与远端
+  release 逐字一致）；分布 `ok=11 update=0 downgrade=1 warn=0 install=0`——QuickAction 本地
+  2.1.2（Metadata.Version，dev 版领先）> 远端 1.7.0 → Downgrade + Why（D7 实证）。
+- **B 通道失败降级**（强制基线 null，Step 4）：warn=0（不误报）+ 未校验标注 12/12 行（= fetch
+  成功行数）→ PASS；QuickAction 保持 Downgrade（Why 不受影响）。
+- **C 合成分支自证**：10 用例全 PASS，五态覆盖 `ok=2 update=1 downgrade=1 warn=3 install=1`
+  （含快照名形态异常→Warn、fetch 失败→Ok+Remote null、通道失败→Install/Update+未校验不误报 Warn）。
+- **D PendingWriter 合并语义**（临时文件）：追加后 ops=3（旧2前新1后）+ order=2（g1,g2 保留）→
+  PASS；selftest-pending.json 验后即删；真 pending.json 与 staging 全程零触碰（BepInEx\ModCenter
+  目录不存在）。
+- Ticker 收割行（LogOutput）：`DONE A[ok=11 update=0 downgrade=1 warn=0 install=0] fetchFail=0 |
+  B 通道降级 PASS | C 五态分支 PASS | D 合并语义 PASS`；全程无 warn/error。
+- 证据全文存 `.superpowers/sdd/2026-10-28-modcenter-v2-lifecycle/task-6-gamever.txt` /
+  `task-6-reposelftest.txt`（BepInEx 侧原件已按惯例清，副本在 sdd 目录）。
 
 ## 7. 迭代维护清单
+
+- 2026-10-29 v2 任务 6（决策层 + gamekb 通道）：新增 `RepoDecision.cs`（RepoRow/五态 Build/
+  12 仓清单/GuidOf/DllRelOf/SnapshotLocal + PendingWriter 主线程唯一写者三口）与
+  `GameVersion.cs`（本地游戏版本通道：appmanifest buildid 主通道 ↔ gamekb 快照名 `_N` 直接
+  相等；Version.txt 复合版本后备展示；对照表占位；失败路径 Baseline=null→"未校验游戏版本"）；
+  `ModCenterPlugin.cs` 补 `Debug.RepoSelfTest` 键 + Ticker RepoProbePump + RepoProbe 探针
+  （A 真仓五态 / B 通道失败降级 / C 合成分支 / D 合并语义四档自证）；csproj 补引
+  SemanticVersioning.dll。通道选型/映射方案见 §6.12；panel.js 零改动。
 
 - 2026-10-29 v2 任务 5（网络层）：新增 `RepoClient.cs`（GitHub release 客户端：FetchLatest 两跳
   解析 update.json 五字段，失败返 null；DownloadAsset 落 staging `.part`→原子落位，失败清件抛出；

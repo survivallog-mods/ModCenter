@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Linq;
 using System.Text;
 using BepInEx;
@@ -21,6 +22,9 @@ namespace SurvivalLog.ModCenter;
 /// 键盘门复用（FocusTick——面板开 SetKeyboardEnabled+IME On，关双还原，MC_OPEN/MC_CLOSE 驱动）。
 /// v2 生命周期任务 5：网络层 RepoClient（GitHub release 客户端：直连+可配镜像+快速失败，
 /// cfg Network 节三键）+ Debug.NetSelfTest 自诊断探针（NetProbe，证据 ModCenter_netspeed.txt）。
+/// v2 生命周期任务 6：决策层 RepoDecision（12 仓五态 + gamekb 告警通道 D7/D8 只告警不拦截）+
+/// GameVersion 本地游戏版本通道（appmanifest buildid 定案）+ PendingWriter（pending 意图主线程
+/// 唯一写者）+ Debug.RepoSelfTest 探针（RepoProbe，证据 ModCenter_reposelftest.txt / ModCenter_gamever.txt）。
 /// </summary>
 [BepInPlugin(Guid, Name, Version)]
 public sealed class ModCenterPlugin : BasePlugin
@@ -51,6 +55,12 @@ public sealed class ModCenterPlugin : BasePlugin
     // 证据落 BepInEx/ModCenter_netspeed.txt（硬规则 9：不依赖 LogOutput）。
     internal static ConfigEntry<bool> DebugNetSelfTest;
 
+    // v2 任务 6：仓库决策层自诊断探针开关（默认关，仿 NetSelfTest）。true 时启动 10s 后跑一轮：
+    // 主线程 gamekb 通道四候选 dump（证据 ModCenter_gamever.txt）+ 12 仓 fetch → 五态决策
+    // （真基线 / 强制通道失败 / 合成分支自证三档）+ PendingWriter 合并语义（临时文件，验后即删）。
+    // 全程一轮 12 次 API 请求（匿名限流预算内），证据落 BepInEx/ModCenter_reposelftest.txt。
+    internal static ConfigEntry<bool> DebugRepoSelfTest;
+
     public override void Load()
     {
         Instance = this;
@@ -75,6 +85,12 @@ public sealed class ModCenterPlugin : BasePlugin
             "网络自诊断探针（默认关，仅供开发验证）。true 时启动 10 秒后对 survivallog-mods/RobotSpeed\n" +
             "跑一轮：fetch latest（版本/md5/gamekb + 耗时）→ 下载 zip 到 ModCenter\\staging → 校验 MD5 → 删 zip 不留残留。\n" +
             "全程后台线程（不卡面板/主线程），证据写 BepInEx/ModCenter_netspeed.txt。验完请改回 false。");
+
+        DebugRepoSelfTest = Config.Bind("Debug", "RepoSelfTest", false,
+            "仓库决策层自诊断探针（默认关，仅供开发验证）。true 时启动 10 秒后跑一轮（仅此一轮）：\n" +
+            "①游戏版本通道四候选 dump（证据 ModCenter_gamever.txt）→ ②后台 fetch 全部 12 仓 → 五态决策\n" +
+            "（真基线轮 + 强制通道失败轮 + 合成分支自证轮）→ ③PendingWriter 合并语义对临时文件自证（验后即删）。\n" +
+            "证据写 BepInEx/ModCenter_reposelftest.txt。一轮消耗 12 次 GitHub 匿名 API 请求，验完请改回 false。");
 
         FocusTick.Reset(); // 任务 8：清上一轮键盘门自证文件（每轮运行从空文件开始）
 
@@ -157,10 +173,15 @@ internal sealed class ModCenterTicker : MonoBehaviour
     private int _netPhase;
     private float _netAge;
 
+    // v2 任务 6：决策层探针状态机（同款三拍）：-1 未启用/已收割；0 等 10s；1 后台任务在跑等收割
+    private int _repoPhase;
+    private float _repoAge;
+
     public void Update()
     {
         ProbePump();
         NetProbePump();
+        RepoProbePump();
 
         if (!_residueSoftDone)
         {
@@ -242,6 +263,35 @@ internal sealed class ModCenterTicker : MonoBehaviour
                 {
                     ModCenterPlugin.Log("netspeed 探针收割: " + NetProbe.Summary);
                     _netPhase = -1;
+                }
+                break;
+        }
+    }
+
+    /// <summary>
+    /// 决策层探针泵（v2 任务 6，NetProbePump 同款三拍）：等 10s 起 RepoProbe——主线程段跑
+    /// gamekb 通道候选 dump（interop 候选须主线程）+ 本地插件快照（IL2CPPChainloader 主线程），
+    /// 再拉后台 Task 做 12 仓 fetch + 三档决策自证；Done 旗由本泵收割打印。一轮即终态。
+    /// </summary>
+    private void RepoProbePump()
+    {
+        if (_repoPhase < 0) return;
+        var gate = ModCenterPlugin.DebugRepoSelfTest;
+        if (gate == null || !gate.Value) { _repoPhase = -1; return; }
+
+        switch (_repoPhase)
+        {
+            case 0:
+                _repoAge += Time.unscaledDeltaTime;
+                if (_repoAge < 10f) return;
+                _repoPhase = 1;
+                RepoProbe.Start();
+                break;
+            case 1:
+                if (RepoProbe.Done)
+                {
+                    ModCenterPlugin.Log("reposelftest 探针收割: " + RepoProbe.Summary);
+                    _repoPhase = -1;
                 }
                 break;
         }
@@ -439,5 +489,249 @@ internal static class NetProbe
             Summary = $"FAIL {e.GetType().Name} {watch.ElapsedMilliseconds}ms（探针一轮终态）";
         }
         finally { Done = true; }
+    }
+}
+
+/// <summary>
+/// v2 任务 6 仓库决策层自诊断探针（cfg Debug.RepoSelfTest 门控，Ticker 10s 后拉起，一轮即终态）。
+/// 主线程段：gamekb 通道四候选 dump（GameVersion.ProbeRead → ModCenter_gamever.txt）+ 12 仓本地
+/// 插件快照（SnapshotLocal）。后台段（HTTP 全在后台，裁定 1）：一轮 12 仓 fetch（顺序温和，
+/// 匿名限流预算内）→ 三档决策自证——A 真仓真基线 / B 强制通道失败（D8 Step 4：不误报 Warn +
+/// "未校验"标注）/ C 合成分支自证（五态各至少一行，走同一 Build 代码路径，不碰本机枚举与网络）
+/// → D PendingWriter 合并语义对临时文件自证（真 pending.json 绝不写入假意图）。证据
+/// BepInEx/ModCenter_reposelftest.txt（硬规则 9）；Ticker 主线程只收割 Done 旗打印。
+/// </summary>
+internal static class RepoProbe
+{
+    internal static volatile bool Done;
+    internal static string Summary = "";
+
+    private static GameVersion.Local _local;   // 主线程读好，后台只读
+    private static List<RepoRow> _rows;        // 主线程构造（SnapshotLocal），后台附 Remote/Gamekb
+
+    private static string EvidencePath => System.IO.Path.Combine(Paths.BepInExRootPath, "ModCenter_reposelftest.txt");
+
+    private static void P(string line)
+    {
+        try { System.IO.File.AppendAllText(EvidencePath, $"[{DateTime.Now:HH:mm:ss.fff}] {line}\n"); } catch { }
+        ModCenterPlugin.Log("reposelftest " + line);
+    }
+
+    /// <summary>Ticker 主线程调：清旧证据 → 写头行 → gamekb 通道探针（主线程 interop）→ 本地快照 → 拉后台 Task。</summary>
+    public static void Start()
+    {
+        Done = false;
+        Summary = "";
+        try { if (System.IO.File.Exists(EvidencePath)) System.IO.File.Delete(EvidencePath); } catch { }
+        var mirror = ModCenterPlugin.NetworkMirrorPrefix?.Value ?? "";
+        var check = ModCenterPlugin.NetworkCheckTimeoutMs?.Value ?? 5000;
+        P($"probe start: {RepoDecision.RepoKeys.Length} 仓 mirror='{mirror}' checkTimeout={check}ms（一轮 12 次 API 请求）");
+
+        // ① gamekb 通道探针（主线程：interop 候选）；证据双写 gamever.txt + 本文件摘要
+        _local = GameVersion.ProbeRead(line => P("gamever | " + line));
+        P($"本地基线: baseline='{_local.Baseline}' display='{_local.Display}' channel='{_local.Channel}' note='{_local.Note}'");
+
+        // ② 本地插件快照（主线程：IL2CPPChainloader）
+        _rows = RepoDecision.SnapshotLocal();
+        foreach (var r in _rows)
+            P($"local {r.RepoKey}: {(r.Local ?? "未安装")} (guid={r.Guid})");
+
+        System.Threading.Tasks.Task.Run(RunAsync);
+    }
+
+    private static async System.Threading.Tasks.Task RunAsync()
+    {
+        var pass = true;
+        try
+        {
+            // ---- fetch 轮（一轮 12 仓，顺序执行——温和限流，不连环多轮）----
+            var fetchFail = 0;
+            var watch = System.Diagnostics.Stopwatch.StartNew();
+            foreach (var r in _rows)
+            {
+                var info = await RepoClient.FetchLatest(r.RepoKey);
+                if (info == null)
+                {
+                    r.Remote = null; r.Gamekb = null; fetchFail++;
+                    P($"fetch FAIL {r.RepoKey}（warn 已留 LogOutput；决策降级 Remote=null 不虚报）");
+                }
+                else
+                {
+                    r.Remote = info.Version; r.Gamekb = info.Gamekb;
+                    P($"fetch OK {r.RepoKey}: remote={info.Version} gamekb={info.Gamekb}");
+                }
+            }
+            P($"fetch 轮完: {watch.ElapsedMilliseconds}ms 12 仓 fail={fetchFail}");
+
+            // ---- A 真仓真基线 ----
+            P("--- A 真仓真基线（本机 12 行） ---");
+            RepoDecision.Build(_rows, _local);
+            foreach (var r in _rows) P(RowLine(r));
+            var dist = Distribution(_rows);
+            P($"A 分布: {dist}");
+
+            // ---- B 通道失败降级（Step 4：强制 GameVersion 返 null → 不误报 Warn + "未校验"标注）----
+            P("--- B 通道失败降级（基线强制 null，D8 Step 4） ---");
+            var unverified = GameVersion.Local.Unverified("探针强制通道失败（Step 4 降级实测）");
+            RepoDecision.Build(_rows, unverified);
+            foreach (var r in _rows) P(RowLine(r));
+            var bWarn = _rows.Count(r => r.State == RepoState.Warn);
+            var bNotes = _rows.Count(r => !string.IsNullOrEmpty(r.VerNote));
+            var bFetchOk = _rows.Count(r => !string.IsNullOrEmpty(r.Remote) && !string.IsNullOrEmpty(r.Gamekb));
+            var bPass = bWarn == 0 && bNotes == bFetchOk && bFetchOk > 0;
+            P($"B 断言: warn={bWarn}（期望 0 不误报） 未校验标注={bNotes} 行（期望 = fetch 成功且带 gamekb 的 {bFetchOk} 行） → {(bPass ? "PASS" : "FAIL")}");
+            pass &= bPass;
+
+            // ---- C 合成分支自证（合成输入走同一 Build 路径；不碰本机枚举/网络）----
+            P("--- C 分支自证（合成输入，非本机枚举/非网络；五态各至少一行） ---");
+            var gk = _rows.Find(x => !string.IsNullOrEmpty(x.Gamekb))?.Gamekb ?? "2026-10-23_26157732";
+            var gkBad = "2000-01-01_1"; // 与任何真 buildid 都不等的合成快照名
+            var cases = new List<SynthCase>
+            {
+                Synth("未装+基线匹配",         null,    "1.7.0", gk,     RepoState.Install),
+                Synth("旧版+基线匹配",         "1.0.0", "1.7.0", gk,     RepoState.Update),
+                Synth("同版+基线匹配",         "1.7.0", "1.7.0", gk,     RepoState.Ok),
+                Synth("本地高（D7）",          "9.9.9", "1.7.0", gk,     RepoState.Downgrade),
+                Synth("未装+基线不匹配（D8）",  null,    "1.7.0", gkBad,  RepoState.Warn),
+                Synth("旧版+基线不匹配（D8）",  "1.0.0", "1.7.0", gkBad,  RepoState.Warn),
+                Synth("快照名形态异常",         "1.0.0", "1.7.0", "2000-01-01_pre1", RepoState.Warn),
+                Synth("fetch 失败路径",        "1.7.0", null,    null,   RepoState.Ok),
+            };
+            // 基线不可用时期望翻转：不匹配两行不再 Warn（保持 Install/Update + 未校验标注）
+            var cPass = true;
+            if (_local.Baseline != null)
+            {
+                RepoDecision.Build(cases.ConvertAll(c => c.Row), _local);
+                cPass &= AssertRows(cases);
+            }
+            else
+            {
+                foreach (var c in cases)
+                {
+                    if (c.Expected == RepoState.Warn)
+                        c.Expected = c.Row.Local == null ? RepoState.Install : RepoState.Update; // 通道不可用：不判 Warn
+                }
+                RepoDecision.Build(cases.ConvertAll(c => c.Row), unverified);
+                cPass &= AssertRows(cases);
+            }
+            // 追加：基线不可用专项（Install/Update + 未校验标注，不误报 Warn）
+            var cases2 = new List<SynthCase>
+            {
+                Synth("未装+不匹配+通道失败", null,    "1.7.0", gkBad, RepoState.Install),
+                Synth("旧版+不匹配+通道失败", "1.0.0", "1.7.0", gkBad, RepoState.Update),
+            };
+            RepoDecision.Build(cases2.ConvertAll(c => c.Row), unverified);
+            foreach (var c in cases2)
+            {
+                var ok = c.Row.State == c.Expected && string.IsNullOrEmpty(c.Row.Why) && !string.IsNullOrEmpty(c.Row.VerNote);
+                P($"{SynthLine(c)} → 期望 {c.Expected}+未校验标注 {(ok ? "PASS" : "FAIL")}");
+                cPass &= ok;
+            }
+            var cRows = cases.ConvertAll(c => c.Row);
+            var cDist = Distribution(cRows);
+            var fiveOk = CountState(cRows, RepoState.Ok) >= 1 && CountState(cRows, RepoState.Update) >= 1 &&
+                         CountState(cRows, RepoState.Downgrade) >= 1 && CountState(cRows, RepoState.Warn) >= 1 &&
+                         CountState(cRows, RepoState.Install) >= 1;
+            P($"C 五态覆盖: {cDist} → {(fiveOk ? "PASS" : "FAIL（基线不可用机器上期望翻转，见上）")}");
+            cPass &= _local.Baseline != null && fiveOk;
+            pass &= cPass;
+
+            // ---- D PendingWriter 合并语义（临时文件；真 pending.json 绝不写入假意图）----
+            P("--- D PendingWriter 合并语义（临时文件自证，验后即删） ---");
+            var tmp = System.IO.Path.Combine(System.IO.Path.GetDirectoryName(McPending.File), "selftest-pending.json");
+            var dOk = false;
+            try
+            {
+                try { System.IO.File.Delete(tmp); } catch { }
+                var ops1 = new List<McPending.Op>
+                {
+                    new() { Type = McPending.TypeDelete,  Target = "plugins/a.dll" },
+                    new() { Type = McPending.TypeReplace, Target = "plugins/b.dll", Staged = "ModCenter/staging/b.zip", Md5 = "00" },
+                };
+                McPending.Save(tmp, ops1, new List<string> { "g1", "g2" }); // 旧清单（他人 ops + T3 order）
+                PendingWriter.AppendOps(tmp, new List<McPending.Op>
+                {
+                    new() { Type = McPending.TypeInstall, Target = "plugins/c.dll", Staged = "ModCenter/staging/c.zip", Md5 = "01" },
+                });
+                var back = McPending.Load(tmp);
+                var order = McPending.LoadOrder(tmp);
+                dOk = back.Count == 3
+                      && back[0].Target == "plugins/a.dll" && back[1].Target == "plugins/b.dll" // 旧在前
+                      && back[2].Target == "plugins/c.dll"                                     // 新在后
+                      && back[2].Type == McPending.TypeInstall && back[2].Md5 == "01"
+                      && order.Count == 2 && order[0] == "g1";                                  // order 不丢
+                P($"D 断言: 追加后 ops={back.Count} 条（旧2前新1后） order={order.Count} 条（g1,g2 保留） → {(dOk ? "PASS" : "FAIL")}");
+                pass &= dOk;
+            }
+            finally
+            {
+                try { if (System.IO.File.Exists(tmp)) System.IO.File.Delete(tmp); } catch { } // 痕迹清
+                P("D 清理: selftest-pending.json 已删（真 pending.json 全程零触碰）");
+            }
+
+            Summary = $"DONE A[{dist}] fetchFail={fetchFail} | B 通道降级 {(bPass ? "PASS" : "FAIL")}（warn=0 未校验={bNotes}行） | " +
+                      $"C 五态分支 {(cPass ? "PASS" : "FAIL")} | D 合并语义 {(dOk ? "PASS" : "FAIL")}（探针一轮终态）";
+        }
+        catch (Exception e)
+        {
+            P($"FAIL {e.GetType().Name}: {e.Message}");
+            Summary = $"FAIL {e.GetType().Name} {e.Message}（探针一轮终态）";
+        }
+        finally { Done = true; }
+    }
+
+    /// <summary>合成用例（C 档专用）：公共 RepoRow + 用例名/期望态（RepoRow 冻结密封， wrapper 旁挂）。</summary>
+    private sealed class SynthCase
+    {
+        public RepoRow Row;
+        public string Name;
+        public RepoState Expected;
+    }
+
+    private static SynthCase Synth(string caseName, string local, string remote, string gamekb, RepoState expected) => new()
+    {
+        Name = caseName,
+        Row = new RepoRow
+        {
+            RepoKey = "Synth", Name = "Synth", Guid = "com.local.survivallog.synth",
+            Local = local, Remote = remote, Gamekb = gamekb,
+        },
+        Expected = expected,
+    };
+
+    private static bool AssertRows(List<SynthCase> cases)
+    {
+        var ok = true;
+        foreach (var c in cases)
+        {
+            var good = c.Row.State == c.Expected;
+            P($"{SynthLine(c)} → 期望 {c.Expected} {(good ? "PASS" : "FAIL")}");
+            ok &= good;
+        }
+        return ok;
+    }
+
+    private static string SynthLine(SynthCase c)
+    {
+        var r = c.Row;
+        return $"C [{c.Name}] local='{r.Local ?? "null"}' remote='{r.Remote ?? "null"}' gamekb='{r.Gamekb ?? "null"}' → state={r.Status} why='{r.Why}' vernote='{r.VerNote}'";
+    }
+
+    private static string RowLine(RepoRow r) =>
+        $"A/B {r.RepoKey}: local={r.Local ?? "未装"} remote={r.Remote ?? "fetch失败"} gamekb={r.Gamekb ?? "-"} → {r.Status}" +
+        (string.IsNullOrEmpty(r.Why) ? "" : $" why='{r.Why}'") +
+        (string.IsNullOrEmpty(r.VerNote) ? "" : $" vernote='{r.VerNote}'");
+
+    private static string Distribution(List<RepoRow> rows) =>
+        $"ok={CountState(rows, RepoState.Ok)} update={CountState(rows, RepoState.Update)} " +
+        $"downgrade={CountState(rows, RepoState.Downgrade)} warn={CountState(rows, RepoState.Warn)} " +
+        $"install={CountState(rows, RepoState.Install)}";
+
+    private static int CountState(List<RepoRow> rows, RepoState s)
+    {
+        var n = 0;
+        foreach (var r in rows)
+            if (r.State == s) n++;
+        return n;
     }
 }
