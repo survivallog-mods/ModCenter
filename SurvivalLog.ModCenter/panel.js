@@ -8,6 +8,13 @@
  * 显示，撤销/立即重启占位禁用待 T13）；弹窗=面板内浮层（.mc-modal-bg/.mc-modal 同款，
  * ESC/点底关闭，弹窗开着时 ESC 先关弹窗再关面板）。ics 缺省时行渲染与 v1 完全一致
  * （快照协议向后兼容）。
+ * v2 生命周期任务 8 = 套件仓库页 + 更新确认链（同原型仓库段照抄）：侧栏入口卡
+ * （.__mc-repo-entry 计数徽标）→ 主区仓库视图（.__mc-repo-row 五态：更新 pri/降级 org/
+ * 安装 blue/告警 org/✓最新；Remote=null=红字"检查失败"绝不显示"已是最新"；← 返回/
+ * 检查更新 blue/全部更新 pri）；真数据更新确认弹窗（版本对比 kv + 校验/生效说明 +
+ * D7 降级红字 + D8 版本告警红字 + 橙"降级到 X"/琥珀"更新到 X"主钮）→ 确认后 MC_UPD/MC_INST
+ * → 弹窗内联进度条（__mcEvent MC_DL{repoKey,pct,stage} 就地更新，弹窗不重建）；MC_REPO_DATA
+ * （rows+lastCheck+checking+dl）驱动视图与入口卡计数；⊘ 图标消歧 g:"kbw"。
  *
  * 注入落点：Root 文档（C# WebBridge.ExecuteJavaScript 上下文）。__McInstalled 守卫幂等。
  * 全局契约（C# Ticker / MenuEntryInjector 对齐）：__McInstalled / __mcOutbox / __mcDrain /
@@ -57,9 +64,11 @@
 
   /* ---- 状态：host/root=宿主文档与面板根；snap=最近快照；sel='__self'|guid ----
    * v2 任务 7：pend=最近 MC_PENDING_SUMMARY（底部待生效条数据，跨开关面板保留）；
-   * pendEl/pendTx/mbg/mdl=待生效条与浮层弹窗元素（随面板建/拆）。 */
-  var S = { host: null, root: null, side: null, cfg: null, sub: null, toastEl: null, pendEl: null, pendTx: null, mbg: null, mdl: null };
-  var ST = { snap: null, sel: null, pend: null };
+   * pendEl/pendTx/mbg/mdl=待生效条与浮层弹窗元素（随面板建/拆）。
+   * v2 任务 8：repo=仓库视图开着；repoData=最近 MC_REPO_DATA（跨开关保留）；dl=当前下载链
+   * {repoKey,pct,stage}；mdlRepoKey=更新确认弹窗归属仓（MC_DL 进度归属判定）。 */
+  var S = { host: null, root: null, side: null, cfg: null, sub: null, toastEl: null, pendEl: null, pendTx: null, mbg: null, mdl: null, mdlRepoKey: null };
+  var ST = { snap: null, sel: null, pend: null, repo: false, repoData: null, dl: null };
   var TH = Object.create(null); // 滑条 100ms 节流句柄表
 
   var CSS = ''
@@ -186,6 +195,37 @@
     + '#__mc_overlay .__mc-m-h{font-size:11.5px;color:#e8a33d;letter-spacing:2px;margin-bottom:6px;}'
     + '#__mc_overlay .__mc-m-txt{font-size:12.5px;color:#9aa0ad;line-height:1.75;}'
     + '#__mc_overlay .__mc-m-acts{display:flex;gap:8px;flex-wrap:wrap;margin-top:14px;}'
+    /* ---- v2 任务 8：套件仓库页（原型 .mc-repo-entry/.mc-repo-top/.mc-repo-row/.mc-rep-hd/
+     * .mc-risk/.mc-ok/.btn.blue/.btn.org/.mc-modal .files——样式值照抄，类名 __mc 化；
+     * 行内 .sp 复用 T7 .__mc-sp{flex:1}。kv=弹窗版本对比行（原型 .mc-kv/.v）；
+     * dlbar=下载进度条（T8 新增，无原型对应：琥珀填充+0.2s 过渡）。 ---- */
+    + '#__mc_overlay .__mc-repo-entry{margin:4px 6px 8px;padding:10px 12px;border-radius:10px;border:1px solid rgba(96,165,250,.3);background:rgba(96,165,250,.07);cursor:pointer;display:flex;align-items:center;gap:10px;}'
+    + '#__mc_overlay .__mc-repo-entry:hover{background:rgba(96,165,250,.12);}'
+    + '#__mc_overlay .__mc-repo-entry .__mc-re-tt{font-size:12.5px;color:#60a5fa;}'
+    + '#__mc_overlay .__mc-repo-entry .__mc-re-dd{font-size:11px;color:#6b7180;margin-top:3px;display:flex;align-items:center;gap:5px;}'
+    + '#__mc_overlay .__mc-repo-top{display:flex;align-items:center;gap:10px;margin-bottom:12px;}'
+    + '#__mc_overlay .__mc-repo-top .__mc-lc{margin-left:auto;font-size:11px;color:#6b7180;}'
+    + '#__mc_overlay .__mc-repo-row{display:flex;align-items:center;gap:12px;padding:9px 12px;border-radius:9px;border:1px solid transparent;}'
+    + '#__mc_overlay .__mc-repo-row:hover{background:rgba(255,255,255,.03);}'
+    + '#__mc_overlay .__mc-repo-row .__mc-rn{width:170px;font-size:13.5px;flex-shrink:0;}'
+    + '#__mc_overlay .__mc-repo-row .__mc-cols{font-family:Consolas,monospace;font-size:12px;color:#9aa0ad;flex-shrink:0;}'
+    + '#__mc_overlay .__mc-repo-row .__mc-cols b{color:#4ade80;font-weight:400;}'
+    + '#__mc_overlay .__mc-repo-row .__mc-cols i{color:#6b7180;font-style:normal;}'
+    + '#__mc_overlay .__mc-repo-row .__mc-cols i.__mc-failtx{color:#f87171;}' /* 检查失败（Remote=null 专用，绝不显示"已是最新"） */
+    + '#__mc_overlay .__mc-repo-row .__mc-why{font-size:11px;color:#f87171;}'
+    + '#__mc_overlay .__mc-rep-hd{display:flex;gap:14px;padding:6px 12px;font-size:11px;color:#6b7180;letter-spacing:1px;}'
+    + '#__mc_overlay .__mc-ok{color:#4ade80;font-size:11.5px;}'
+    + '#__mc_overlay .__mc-risk{margin-top:10px;padding:8px 12px;border-radius:8px;font-size:11.5px;line-height:1.6;background:rgba(127,29,29,.18);border:1px solid rgba(248,113,113,.25);color:#fca5a5;}'
+    + '#__mc_overlay .__mc-btn.__mc-btn-blue{border-color:rgba(96,165,250,.45);color:#60a5fa;}'
+    + '#__mc_overlay .__mc-btn.__mc-btn-blue:hover{background:rgba(96,165,250,.1);}'
+    + '#__mc_overlay .__mc-btn.__mc-btn-org{border-color:rgba(251,191,36,.5);color:#fbbf24;}'
+    + '#__mc_overlay .__mc-btn.__mc-btn-org:hover{background:rgba(251,191,36,.1);}'
+    + '#__mc_overlay .__mc-modal .__mc-files{font-family:Consolas,monospace;font-size:11.5px;color:#9aa0ad;line-height:1.9;}' /* T7 遗留：原型 .mc-modal .files（T10 卸载明细复用） */
+    + '#__mc_overlay .__mc-modal .__mc-files .__mc-del{color:#f87171;}'
+    + '#__mc_overlay .__mc-kv{display:flex;align-items:center;gap:10px;font-size:13px;flex-wrap:wrap;}' /* 弹窗版本对比行（原型 .mc-kv/.v） */
+    + '#__mc_overlay .__mc-kv .__mc-kvv{font-family:Consolas,monospace;font-size:12.5px;}'
+    + '#__mc_overlay .__mc-dlbar{height:6px;border-radius:3px;background:#0f1219;border:1px solid #2a2f3d;overflow:hidden;margin-top:8px;}'
+    + '#__mc_overlay .__mc-dlbar i{display:block;height:100%;background:#e8a33d;width:0;transition:width .2s;}'
     + '#__mc_overlay .__mc-side::-webkit-scrollbar,#__mc_overlay .__mc-cfg::-webkit-scrollbar{width:8px;}'
     + '#__mc_overlay .__mc-side::-webkit-scrollbar-thumb,#__mc_overlay .__mc-cfg::-webkit-scrollbar-thumb{background:#2a2f3d;border-radius:4px;}';
 
@@ -304,9 +344,10 @@
   /* ================= v2 任务 7：行内图标徽标 ================= */
 
   /* 字形推断：g 显式优先；orange 需 click 消歧（cf=⇄碰撞 / upd=↓降级）；其余按色级。
-   * （↓ 与 ⊘ 同为 orange+upd——喂 ⊘ 时 DTO 带 g:"⊘"，见 Payload.IcInfo） */
+   * （↓ 与 ⊘ 同为 orange+upd——喂 ⊘ 时 DTO 带 g:"kbw"（T8 裁定 4 的消歧别名，此处映射为
+   * ⊘ 字形；也兼容直接给字形符的旧口径），见 Payload.IcInfo） */
   function icGlyph(ic) {
-    if (ic.g) return ic.g;
+    if (ic.g) return ic.g === 'kbw' ? '\u2298' : ic.g; // kbw → ⊘ 版本告警
     if (ic.k === 'orange') return ic.click === 'cf' ? '\u21c4' : '\u2193'; // ⇄ / ↓
     if (ic.k === 'red') return '\u26a0';       // ⚠ 冲突
     if (ic.k === 'gray') return '\u25ce';      // ◎ 同域
@@ -332,10 +373,45 @@
     return h + '</span>';
   }
 
+  /* ---- v2 任务 8：仓库入口卡计数 + 仓库视图数据访问 ---- */
+
+  function repoCounts() {
+    var d = ST.repoData, c = { upd: 0, inst: 0, warn: 0 };
+    if (!d || !d.rows) return c;
+    for (var i = 0; i < d.rows.length; i++) {
+      var r = d.rows[i];
+      if (r.pending) continue; // 待生效行不再计入可更新
+      if (r.status === 'update') c.upd++;
+      else if (r.status === 'install') c.inst++;
+      else if (r.status === 'warn') c.warn++;
+    }
+    return c;
+  }
+
+  function repoEntryHtml() {
+    var d = ST.repoData, c = repoCounts(), dd;
+    if (!d) dd = '\u6253\u5f00\u540e\u81ea\u52a8\u68c0\u67e5\u66f4\u65b0\uff08GitHub \u00b7 12 \u4ed3\uff09';
+    else if (d.checking) dd = '\u6b63\u5728\u68c0\u67e5\u66f4\u65b0\u2026';
+    else dd = c.upd + ' \u4e2a\u53ef\u66f4\u65b0 \u00b7 ' + c.inst + ' \u4e2a\u53ef\u5b89\u88c5 \u00b7 ' + c.warn + ' \u4e2a\u7248\u672c\u544a\u8b66';
+    return '<div class="__mc-repo-entry" data-interactive data-act="repo-open" role="button" tabindex="0">'
+      + '<div><div class="__mc-re-tt">\u5957\u4ef6\u4ed3\u5e93 \u00b7 \u5728\u7ebf\u5b89\u88c5 / \u66f4\u65b0</div>'
+      + '<div class="__mc-re-dd">'
+      + '<span class="__mc-ic __mc-blue" style="width:13px;height:13px;font-size:7.5px;border-radius:50%;cursor:default" aria-hidden="true">\u2191</span>'
+      + dd + '</div></div></div>';
+  }
+
+  function openRepoView() {
+    ST.repo = true;
+    renderCfg();
+    // 每次打开都拉（force=false）：C# 侧 10 分钟会话缓存/fetch 在跑只推现状（裁定 2）
+    window.__mcOutbox.push({ type: 'MC_REPO_GET', force: false });
+  }
+
   function renderSide() {
     if (!S.side) return;
     var ms = mods(), ts = tps();
-    var h = '<div class="__mc-cat">\u5957\u4ef6 MOD\uff08' + ms.length + '\uff09</div>';
+    var h = repoEntryHtml(); // v2 任务 8：仓库入口卡（置顶，计数随 MC_REPO_DATA 刷新）
+    h += '<div class="__mc-cat">\u5957\u4ef6 MOD\uff08' + ms.length + '\uff09</div>';
     for (var i = 0; i < ms.length; i++) {
       var m = ms[i];
       h += '<div class="__mc-mod-row' + (m.enabled ? '' : ' __mc-off')
@@ -367,10 +443,14 @@
 
   function wireSide(side) {
     side.addEventListener('click', function (e) {
+      /* v2 任务 8：仓库入口卡 → 仓库视图（原型 ent.onclick 同款） */
+      var ent = e.target.closest ? e.target.closest('[data-act="repo-open"]') : null;
+      if (ent) { e.stopPropagation(); openRepoView(); return; }
       var sw = e.target.closest ? e.target.closest('[data-act="toggle"]') : null;
       if (sw) { e.stopPropagation(); toggleMod(sw.getAttribute('data-guid')); return; }
       /* v2 任务 7：图标点击路由（原型 wireSide 同款 stopPropagation——不选行）。
-       * cf=冲突详情弹窗（T11 前兜底文案）/ upd=更新确认弹窗壳（T8 前兜底文案）；
+       * cf=冲突详情弹窗（T11 前兜底文案）/ upd=更新确认弹窗（T8 真数据版：按 guid 对照
+       * 最近 MC_REPO_DATA；无仓库数据/检查失败回退 T7 兜底壳）；
        * 无 data-click（⟳ 纯状态，cursor:default）不弹窗不选行（点 ⟳ 无弹窗）。 */
       var ic = e.target.closest ? e.target.closest('.__mc-ic') : null;
       if (ic) {
@@ -380,11 +460,12 @@
         var m = findMod(ic.getAttribute('data-guid'));
         if (!m) return;
         if (click === 'cf') openModal(cfModalHtml(m));
-        else if (click === 'upd') openModal(updModalHtml(m));
+        else if (click === 'upd') openUpdModal(m);
         return;
       }
       var row = e.target.closest ? e.target.closest('.__mc-mod-row') : null;
-      if (row) { ST.sel = row.getAttribute('data-guid'); renderSide(); renderCfg(); }
+      /* 原型同款：仓库视图开着时点 mod 行 = 返回管理视图（选中该 mod） */
+      if (row) { ST.sel = row.getAttribute('data-guid'); ST.repo = false; renderSide(); renderCfg(); }
     });
   }
 
@@ -511,8 +592,91 @@
     return h + '</div>';
   }
 
+  /* ================= v2 任务 8：主区仓库视图 ================= */
+
+  function repoRowOf(key) {
+    var d = ST.repoData;
+    if (!d || !d.rows || !key) return null;
+    for (var i = 0; i < d.rows.length; i++)
+      if (d.rows[i].repoKey === key) return d.rows[i];
+    return null;
+  }
+  function repoRowOfGuid(guid) {
+    var d = ST.repoData;
+    if (!d || !d.rows || !guid) return null;
+    for (var i = 0; i < d.rows.length; i++)
+      if (d.rows[i].guid === guid) return d.rows[i];
+    return null;
+  }
+
+  function lastCheckText(d) {
+    var t = d && d.lastCheck ? new Date(d.lastCheck) : null, when;
+    if (!t || !(t.getTime() > 0)) when = '\u4ece\u672a';
+    else {
+      var now = new Date();
+      var hm = ('0' + t.getHours()).slice(-2) + ':' + ('0' + t.getMinutes()).slice(-2);
+      when = (t.getFullYear() === now.getFullYear() && t.getMonth() === now.getMonth() && t.getDate() === now.getDate())
+        ? '\u4eca\u5929 ' + hm
+        : (t.getMonth() + 1) + '/' + t.getDate() + ' ' + hm;
+    }
+    return '\u4e0a\u6b21\u68c0\u67e5\uff1a' + when + ' \u00b7 ' + ((d && d.mirror) || '\u76f4\u8fde');
+  }
+
+  function dlStageText(st, pct) {
+    if (st === 'down') return '\u6b63\u5728\u4e0b\u8f7d\u2026 ' + (pct || 0) + '%';
+    if (st === 'check') return 'MD5 \u6821\u9a8c\u2026';
+    if (st === 'unzip') return '\u89e3\u5305\u6682\u5b58\u2026';
+    if (st === 'write') return '\u5199\u5165\u5f85\u751f\u6548\u6e05\u5355\u2026';
+    return '\u5904\u7406\u4e2d\u2026';
+  }
+
+  /* 仓库视图（原型 repoHtml 照抄：顶栏 ← 返回/检查更新/全部更新 + 上次检查；表头；12 行五态）。
+   * Remote=null：checking=真 →"检查中…"，假 →红字"检查失败"无按钮（绝不显示"已是最新"）。 */
+  function repoViewHtml() {
+    var d = ST.repoData, ups = 0, i, r;
+    if (d && d.rows) for (i = 0; i < d.rows.length; i++) { r = d.rows[i]; if (!r.pending && r.status === 'update') ups++; }
+    var h = '<div class="__mc-mod-title"><h2>\u5957\u4ef6\u4ed3\u5e93</h2>'
+      + '<span class="__mc-en">survivallog-mods</span></div>'
+      + '<div class="__mc-mod-desc">\u6765\u81ea GitHub \u7ec4\u7ec7 survivallog-mods\uff0812 \u4e2a\u72ec\u7acb\u4ed3\u5e93\uff09\uff0c\u4e0b\u8f7d\u7ecf MD5 \u6821\u9a8c\uff0c\u5b89\u88c5 / \u66f4\u65b0\u5728\u4e0b\u6b21\u542f\u52a8\u65f6\u7531\u542f\u52a8\u6e05\u7406\u5668\u843d\u4f4d\u3002\u70b9\u51fb\u5de6\u4fa7\u4efb\u610f mod \u8fd4\u56de\u7ba1\u7406\u89c6\u56fe\u3002</div>'
+      + '<div class="__mc-repo-top">'
+      + '<button type="button" class="__mc-btn __mc-btn-mini" data-ract="back">\u2190 \u8fd4\u56de\u7ba1\u7406</button>'
+      + '<button type="button" class="__mc-btn __mc-btn-blue __mc-btn-mini" data-ract="chk">\u68c0\u67e5\u66f4\u65b0</button>'
+      + (ups > 0 ? '<button type="button" class="__mc-btn __mc-btn-pri __mc-btn-mini" data-ract="updall">\u5168\u90e8\u66f4\u65b0\uff08' + ups + '\uff09</button>' : '')
+      + '<span class="__mc-lc">' + esc(lastCheckText(d)) + '</span></div>';
+    if (!d || !d.rows || !d.rows.length)
+      return h + '<div class="__mc-loading">'
+        + (d && d.checking ? '\u6b63\u5728\u68c0\u67e5\u4ed3\u5e93\u7248\u672c\u2026' : '\u6b63\u5728\u8bfb\u53d6\u4ed3\u5e93\u6570\u636e\u2026') + '</div>';
+    h += '<div class="__mc-rep-hd"><span style="width:170px">MOD</span><span>\u672c\u5730 \u2192 \u8fdc\u7aef</span></div>';
+    for (i = 0; i < d.rows.length; i++) h += repoRowHtml(d.rows[i], d);
+    return h;
+  }
+
+  function repoRowHtml(r, d) {
+    var h = '<div class="__mc-repo-row" data-repo="' + esc(r.repoKey) + '">'
+      + '<span class="__mc-rn">' + esc(r.name) + '</span>';
+    var cols;
+    if (r.status === 'install') cols = '<i>\u672a\u5b89\u88c5</i> \u2192 <b>' + esc(r.remote) + '</b>';
+    else if (r.remote == null) cols = esc(r.local || '\u672a\u5b89\u88c5') + ' \u2192 <i class="__mc-failtx">'
+      + (d && d.checking ? '\u68c0\u67e5\u4e2d\u2026' : '\u68c0\u67e5\u5931\u8d25') + '</i>';
+    else if (r.status === 'downgrade') cols = esc(r.local) + ' \u2192 <i style="color:#fbbf24">' + esc(r.remote) + '\uff08\u4f4e\u4e8e\u672c\u5730\uff09</i>';
+    else cols = esc(r.local) + (r.remote !== r.local ? ' \u2192 <b>' + esc(r.remote) + '</b>' : '');
+    h += '<span class="__mc-cols">' + cols + '</span><span class="__mc-sp"></span>';
+    if (r.status === 'warn' && r.why) h += '<span class="__mc-why" title="' + esc(r.why) + '">\u26a0 ' + esc(r.why) + '</span>';
+    if (r.pending) h += '<span class="__mc-ok" style="color:#e8a33d;cursor:default" title="\u91cd\u542f\u540e\u7531\u542f\u52a8\u6e05\u7406\u5668\u5e94\u7528">\u27f3 \u5f85\u751f\u6548</span>';
+    else if (ST.dl && ST.dl.repoKey === r.repoKey)
+      h += '<button type="button" class="__mc-btn __mc-btn-mini" disabled>'
+        + (ST.dl.stage === 'err' ? '\u2717 \u5931\u8d25' : esc(dlStageText(ST.dl.stage, ST.dl.pct))) + '</button>';
+    else if (r.status === 'update') h += '<button type="button" class="__mc-btn __mc-btn-pri __mc-btn-mini" data-ract="upd" data-repo="' + esc(r.repoKey) + '">\u66f4\u65b0</button>';
+    else if (r.status === 'downgrade') h += '<button type="button" class="__mc-btn __mc-btn-org __mc-btn-mini" data-ract="upd" data-repo="' + esc(r.repoKey) + '">\u964d\u7ea7\u66f4\u65b0</button>';
+    else if (r.status === 'install') h += '<button type="button" class="__mc-btn __mc-btn-blue __mc-btn-mini" data-ract="inst" data-repo="' + esc(r.repoKey) + '">\u5b89\u88c5</button>';
+    else if (r.status === 'warn') h += '<button type="button" class="__mc-btn __mc-btn-org __mc-btn-mini" data-ract="upd" data-repo="' + esc(r.repoKey) + '" title="' + esc(r.why || '') + '">\u66f4\u65b0</button>';
+    else if (r.remote != null) h += '<span class="__mc-ok">\u2713 \u6700\u65b0</span>';
+    return h + '</div>';
+  }
+
   function renderCfg() {
     if (!S.cfg) return;
+    if (ST.repo) { S.cfg.innerHTML = repoViewHtml(); return; } // v2 任务 8：仓库视图优先（不依赖快照）
     if (!ST.snap) {
       S.cfg.innerHTML = '<div class="__mc-loading">\u6b63\u5728\u8bfb\u53d6 mod \u914d\u7f6e\u2026</div>';
       return;
@@ -596,23 +760,121 @@
       + '<div class="__mc-m-acts"><button type="button" class="__mc-btn __mc-btn-mini" data-mact="close">\u5173\u95ed</button></div>';
   }
 
-  /* 更新确认弹窗壳（click:"upd"）——T8 仓库页接入前的兜底文案（仓库数据加载中/暂不可用） */
+  /* 更新确认弹窗壳（click:"upd" 且无仓库数据时的兜底——T8 真数据版见 updModalRealHtml） */
   function updModalHtml(m) {
     return '<h3>' + chipHtml('blue', '\u2191') + '\u66f4\u65b0 \u00b7 ' + esc(m.name) + '</h3>'
       + '<div class="__mc-m-sub">\u5957\u4ef6\u4ed3\u5e93</div>'
       + '<div class="__mc-m-sec"><div class="__mc-m-h">\u7248\u672c</div>'
-      + '<div class="__mc-m-txt">\u4ed3\u5e93\u6570\u636e\u52a0\u8f7d\u4e2d / \u6682\u4e0d\u53ef\u7528\uff08\u5957\u4ef6\u4ed3\u5e93\u9875\u4efb\u52a1 8 \u63a5\u5165\u540e\u5c55\u793a\u7248\u672c\u5bf9\u6bd4\u4e0e\u786e\u8ba4\u64cd\u4f5c\uff09\u3002</div></div>'
+      + '<div class="__mc-m-txt">\u4ed3\u5e93\u6570\u636e\u5c1a\u672a\u5c31\u7eea\uff08\u6253\u5f00\u5957\u4ef6\u4ed3\u5e93\u9875\u68c0\u67e5\u66f4\u65b0\u540e\u518d\u4ece\u884c\u5185\u56fe\u6807\u8fdb\u5165\uff09\u3002</div></div>'
       + '<div class="__mc-m-acts"><button type="button" class="__mc-btn __mc-btn-mini" data-mact="close">\u53d6\u6d88</button>'
       + '<button type="button" class="__mc-btn __mc-btn-pri" disabled>\u66f4\u65b0</button></div>';
   }
 
-  function openModal(html) {
-    if (!S.mdl || !S.mbg || !S.mbg.isConnected) return;
+  /* ---- v2 任务 8：更新确认弹窗（真数据版，原型 updHtml 照抄口径）----
+   * D7 降级红字（版本回退…是否降级由你决定）/ D8 版本告警红字（游戏版本不符…是否继续由你决定）；
+   * 主按钮：降级=橙"降级到 X" / 安装=蓝"安装 X" / 更新（含告警）=琥珀 pri"更新到 X"。 */
+  function repoVerbOf(r) {
+    if (r.status === 'downgrade') return '\u964d\u7ea7';
+    if (r.local == null || r.status === 'install') return '\u5b89\u88c5';
+    return '\u66f4\u65b0';
+  }
+
+  function updModalRealHtml(r) {
+    var isDown = r.status === 'downgrade', isWarn = r.status === 'warn';
+    var isInst = r.local == null || r.status === 'install';
+    var chip = isDown ? chipHtml('orange', '\u2193') : chipHtml('blue', '\u2191');
+    var verb = repoVerbOf(r);
+    var h = '<h3>' + chip + verb + ' \u00b7 ' + esc(r.name) + '</h3>'
+      + '<div class="__mc-m-sub">\u5957\u4ef6\u4ed3\u5e93 \u00b7 survivallog-mods/' + esc(r.repoKey) + '</div>'
+      + '<div class="__mc-m-sec"><div class="__mc-m-h">\u7248\u672c</div>'
+      + '<div class="__mc-kv" style="padding:0"><span class="__mc-kvv">' + esc(r.local || '\u672a\u5b89\u88c5') + '</span>'
+      + '<span style="color:#6b7180">\u2192</span>'
+      + '<span class="__mc-kvv" style="color:' + (isDown ? '#fbbf24' : '#60a5fa') + ';font-size:14px">' + esc(r.remote) + '</span></div></div>';
+    if (isDown) h += '<div class="__mc-risk">\u26a0 \u7248\u672c\u56de\u9000\uff1a\u672c\u5730 ' + esc(r.local) + ' \u9ad8\u4e8e\u8fdc\u7aef ' + esc(r.remote)
+      + '\uff0c\u65e7\u7248\u529f\u80fd\u53ef\u80fd\u4e0e\u5b58\u6863/\u5176\u4ed6 mod \u4e0d\u5339\u914d\u3002\u662f\u5426\u964d\u7ea7\u7531\u4f60\u51b3\u5b9a\u3002</div>';
+    else if (isWarn) h += '<div class="__mc-risk">\u26a0 \u6e38\u620f\u7248\u672c\u4e0d\u7b26\uff08' + esc(r.why || '') + '\uff09\uff1a\u8be5\u7248\u672c\u53ef\u80fd\u4e0e\u4f60\u5f53\u524d\u7684\u6e38\u620f\u4e0d\u517c\u5bb9\uff0c\u5b58\u5728\u95ea\u9000\u98ce\u9669\u3002\u662f\u5426\u7ee7\u7eed\u7531\u4f60\u51b3\u5b9a\u3002</div>';
+    if (r.verNote) h += '<div class="__mc-m-sec"><div class="__mc-m-txt" style="font-size:11.5px;color:#8a90a0">\u24d8 ' + esc(r.verNote) + '</div></div>';
+    h += '<div class="__mc-m-sec"><div class="__mc-m-h">\u6821\u9a8c\u4e0e\u751f\u6548</div>'
+      + '<div class="__mc-m-txt">\u4e0b\u8f7d\u540e MD5 \u6821\u9a8c\uff08\u5bf9 update.json\uff09\u2192 \u6682\u5b58 \u2192 \u91cd\u542f\u6e38\u620f\u65f6\u7531\u542f\u52a8\u6e05\u7406\u5668\u539f\u5b50\u66ff\u6362\uff08\u63d2\u4ef6\u52a0\u8f7d\u524d\uff0c\u65e7\u7248\u4e0d\u5220\u53ef\u56de\u9000\uff09\u3002</div></div>'
+      + '<div class="__mc-m-acts"><button type="button" class="__mc-btn __mc-btn-mini" data-mact="close">\u53d6\u6d88</button>'
+      + '<button type="button" class="__mc-btn ' + (isDown ? '__mc-btn-org' : (isInst ? '__mc-btn-blue' : '__mc-btn-pri'))
+      + '" data-mact="doupd" data-repo="' + esc(r.repoKey) + '">'
+      + (isDown ? '\u964d\u7ea7\u5230 ' : (isInst ? '\u5b89\u88c5 ' : '\u66f4\u65b0\u5230 ')) + esc(r.remote) + '</button></div>';
+    return h;
+  }
+
+  /* 确认后的进度态弹窗（下载/校验/解包/写清单——MC_DL 就地更新，不重建弹窗） */
+  function updModalDlHtml(r, dl) {
+    var chip = r.status === 'downgrade' ? chipHtml('orange', '\u2193') : chipHtml('blue', '\u2191');
+    var st = dl ? dl.stage : 'down';
+    var pct = dl && typeof dl.pct === 'number' ? dl.pct : 0;
+    return '<h3>' + chip + repoVerbOf(r) + ' \u00b7 ' + esc(r.name) + '</h3>'
+      + '<div class="__mc-m-sub">\u5957\u4ef6\u4ed3\u5e93 \u00b7 survivallog-mods/' + esc(r.repoKey) + '</div>'
+      + '<div class="__mc-m-sec"><div class="__mc-m-h">\u4e0b\u8f7d\u4e0e\u6821\u9a8c</div>'
+      + '<div class="__mc-m-txt" id="__mc_dltx">' + esc(dlStageText(st, pct)) + '</div>'
+      + '<div class="__mc-dlbar"><i id="__mc_dlfill" style="width:' + (st === 'down' ? pct : 100) + '%"></i></div>'
+      + '<div class="__mc-m-txt" style="font-size:11px;color:#6b7180;margin-top:6px">\u4e0b\u8f7d \u2192 MD5 \u6821\u9a8c \u2192 \u89e3\u5305\u6682\u5b58 \u2192 \u5199\u5165\u5f85\u751f\u6548\u6e05\u5355\uff08\u91cd\u542f\u540e\u7531\u542f\u52a8\u6e05\u7406\u5668\u539f\u5b50\u66ff\u6362\uff09</div></div>'
+      + '<div class="__mc-m-acts"><button type="button" class="__mc-btn __mc-btn-mini" data-mact="close">\u9690\u85cf\uff08\u540e\u53f0\u7ee7\u7eed\uff09</button></div>';
+  }
+
+  function updModalDoneHtml(r) {
+    return '<h3>' + chipHtml('amber', '\u27f3') + '\u5df2\u52a0\u5165\u5f85\u751f\u6548 \u00b7 ' + esc(r.name) + '</h3>'
+      + '<div class="__mc-m-sub">\u5957\u4ef6\u4ed3\u5e93 \u00b7 survivallog-mods/' + esc(r.repoKey) + '</div>'
+      + '<div class="__mc-m-sec"><div class="__mc-m-txt">\u5df2\u4e0b\u8f7d\u5e76 MD5 \u6821\u9a8c\uff0c\u65b0\u7248\u5df2\u6682\u5b58\u5e76\u5199\u5165\u5f85\u751f\u6548\u6e05\u5355\u3002'
+      + '<b style="color:#e8e6e0">\u91cd\u542f\u6e38\u620f\u540e</b>\u7531\u542f\u52a8\u6e05\u7406\u5668\u5728\u63d2\u4ef6\u52a0\u8f7d\u524d\u539f\u5b50\u66ff\u6362\uff1b\u5e95\u90e8\u5f85\u751f\u6548\u6761\u53ef\u67e5\u770b\u6c47\u603b\u3002</div></div>'
+      + '<div class="__mc-m-acts"><button type="button" class="__mc-btn __mc-btn-pri __mc-btn-mini" data-mact="close">\u5173\u95ed</button></div>';
+  }
+
+  function updModalErrHtml(r, err) {
+    return '<h3>' + chipHtml('red', '\u26a0') + '\u66f4\u65b0\u5931\u8d25 \u00b7 ' + esc(r.name) + '</h3>'
+      + '<div class="__mc-m-sub">\u5957\u4ef6\u4ed3\u5e93 \u00b7 survivallog-mods/' + esc(r.repoKey) + '</div>'
+      + '<div class="__mc-risk">' + esc(err || '\u672a\u77e5\u9519\u8bef') + '</div>'
+      + '<div class="__mc-m-sec"><div class="__mc-m-txt">\u6682\u5b58\u5df2\u6e05\u7406\uff0c\u672a\u5199\u5165\u5f85\u751f\u6548\u6e05\u5355\u3002\u53ef\u7a0d\u540e\u91cd\u8bd5\uff08\u5148\u201c\u68c0\u67e5\u66f4\u65b0\u201d\u518d\u786e\u8ba4\uff09\u3002</div></div>'
+      + '<div class="__mc-m-acts"><button type="button" class="__mc-btn __mc-btn-mini" data-mact="close">\u5173\u95ed</button></div>';
+  }
+
+  /* 侧栏 ↑/↓/⊘ 图标 → 真数据确认弹窗（按 guid 对照最近 MC_REPO_DATA；无数据回退 T7 壳） */
+  function openUpdModal(m) {
+    var r = m ? repoRowOfGuid(m.guid) : null;
+    if (r && r.remote != null && !r.pending) openRepoModal(r);
+    else openModal(updModalHtml(m));
+  }
+
+  /* 仓库行/图标共用的确认弹窗：确认 → MC_UPD/MC_INST 入 outbox → 弹窗转进度态 */
+  function openRepoModal(r) {
+    openModal(updModalRealHtml(r));
+    if (!S.mdl) return;
+    S.mdlRepoKey = r.repoKey;
+    var go = S.mdl.querySelector('[data-mact="doupd"]');
+    if (!go) return;
+    go.addEventListener('click', function (e) {
+      e.stopPropagation();
+      var row = repoRowOf(S.mdlRepoKey);
+      if (!row) return;
+      window.__mcOutbox.push({
+        type: (row.local == null || row.status === 'install') ? 'MC_INST' : 'MC_UPD',
+        repoKey: row.repoKey,
+      });
+      if (setModal(updModalDlHtml(row, null))) {
+        var tx = S.mdl.querySelector('#__mc_dltx');
+        if (tx) tx.textContent = '\u51c6\u5907\u4e0b\u8f7d\u2026';
+      }
+    });
+  }
+
+  function setModal(html) {
+    if (!S.mdl || !S.mbg || !S.mbg.isConnected) return false;
     S.mdl.innerHTML = html;
-    S.mbg.className = '__mc-modal-bg __mc-show';
     var closes = S.mdl.querySelectorAll('[data-mact="close"]');
     for (var i = 0; i < closes.length; i++)
       closes[i].addEventListener('click', function (e) { e.stopPropagation(); closeModal(); });
+    return true;
+  }
+
+  function openModal(html) {
+    if (!setModal(html)) return;
+    S.mdlRepoKey = null; // 通用弹窗清归属（openRepoModal 随后置回；防陈旧 MC_DL 改写其他弹窗）
+    S.mbg.className = '__mc-modal-bg __mc-show';
   }
 
   function closeModal() {
@@ -722,6 +984,22 @@
     cfg.addEventListener('click', function (e) {
       var t = e.target;
       if (!t.closest) return;
+      /* v2 任务 8：仓库视图动作（← 返回 / 检查更新 / 全部更新 / 行内 更新·降级·安装 → 确认弹窗） */
+      var ra = t.closest('[data-ract]');
+      if (ra) {
+        var ract = ra.getAttribute('data-ract');
+        if (ract === 'back') { ST.repo = false; renderCfg(); }
+        else if (ract === 'chk') { window.__mcOutbox.push({ type: 'MC_CHK' }); }
+        else if (ract === 'updall') {
+          window.__mcOutbox.push({ type: 'MC_UPDALL' });
+          toastRaw('\u5168\u90e8\u66f4\u65b0\u5df2\u5f00\u59cb', '\u4e0b\u8f7d\u4e32\u884c\u8fdb\u884c\uff0c\u9010\u4e2a MD5 \u6821\u9a8c\u540e\u52a0\u5165\u5f85\u751f\u6548\u6e05\u5355');
+        }
+        else if (ract === 'upd' || ract === 'inst') {
+          var rr = repoRowOf(ra.getAttribute('data-repo'));
+          if (rr) openRepoModal(rr);
+        }
+        return;
+      }
       var m = curMod();
       if (!m) return;
       /* bool 开关 */
@@ -905,6 +1183,37 @@
     renderAll();
   };
 
+  /* ---- v2 任务 8：MC_DL 进度 → 仓库行按钮就地态 + 弹窗进度条（弹窗不重建，裁定 6） ---- */
+  function onDlEvent(ev) {
+    ST.dl = { repoKey: ev.repoKey, pct: ev.pct, stage: ev.stage };
+    if (ST.repo && S.cfg && S.cfg.isConnected) {
+      var btn = null;
+      var rows = S.cfg.querySelectorAll('.__mc-repo-row[data-repo]');
+      for (var i = 0; i < rows.length; i++) {
+        if (rows[i].getAttribute('data-repo') !== ev.repoKey) continue;
+        btn = rows[i].querySelector('button');
+        break;
+      }
+      if (btn) {
+        btn.disabled = true;
+        btn.textContent = ev.stage === 'ok' ? '\u2713 \u5df2\u52a0\u5165'
+          : (ev.stage === 'err' ? '\u2717 \u5931\u8d25' : dlStageText(ev.stage, ev.pct));
+      }
+    }
+    if (S.mdlRepoKey === ev.repoKey && modalOpen() && S.mdl) {
+      if (ev.stage === 'ok') {
+        setModal(updModalDoneHtml(repoRowOf(ev.repoKey) || { name: ev.repoKey, repoKey: ev.repoKey }));
+      } else if (ev.stage === 'err') {
+        setModal(updModalErrHtml(repoRowOf(ev.repoKey) || { name: ev.repoKey, repoKey: ev.repoKey }, ev.err));
+      } else {
+        var fill = S.mdl.querySelector('#__mc_dlfill');
+        var tx = S.mdl.querySelector('#__mc_dltx');
+        if (fill) fill.style.width = (ev.stage === 'down' ? ev.pct : 100) + '%';
+        if (tx) tx.textContent = dlStageText(ev.stage, ev.pct);
+      }
+    }
+  }
+
   window.__mcEvent = function (event) {
     window.__mcLastEvent = event;
     if (event && event.type === 'MC_SET_FAIL') {
@@ -921,6 +1230,17 @@
       ST.pend = event;
       renderPending();
     }
+    /* v2 任务 8：仓库快照（MC_REPO_DATA）——入口卡计数 + 仓库视图重绘；弹窗是 cfg 的
+     * 兄弟节点不受 renderCfg 影响（弹窗开着绝不重建，进度条由 MC_DL 就地更新——裁定 6） */
+    if (event && event.type === 'MC_REPO_DATA') {
+      ST.repoData = event;
+      if (event.dl) ST.dl = { repoKey: event.dl.repoKey, pct: event.dl.pct, stage: event.dl.stage };
+      else if (!event.checking) ST.dl = null;
+      renderSide();
+      if (ST.repo && S.cfg && S.cfg.isConnected) renderCfg();
+    }
+    /* v2 任务 8：下载链进度/结果（MC_DL：down|check|unzip|write|ok|err） */
+    if (event && event.type === 'MC_DL') onDlEvent(event);
   };
 
   /* ================= 开关 ================= */
@@ -934,12 +1254,14 @@
     doc.body.appendChild(S.root);
     renderAll(); // 已有快照则立即出内容，否则"正在读取…"占位
     window.__mcOutbox.push({ type: 'MC_OPEN', host: doc.location.pathname });
+    // v2 任务 8：仓库视图跨开关保留（ST.repo），重开补拉一轮（C# 侧缓存/冷却节流）
+    if (ST.repo) window.__mcOutbox.push({ type: 'MC_REPO_GET', force: false });
   };
   window.__mcClose = function () {
     if (!S.root) return;
     var el = S.root;
     S.root = null; S.side = S.cfg = S.sub = S.toastEl = null;
-    S.pendEl = null; S.pendTx = null; S.mbg = null; S.mdl = null; // v2 任务 7：弹窗/待生效条随面板拆
+    S.pendEl = null; S.pendTx = null; S.mbg = null; S.mdl = null; S.mdlRepoKey = null; // v2 任务 7/8：弹窗/待生效条随面板拆
     if (el.isConnected && el.parentNode) el.parentNode.removeChild(el);
     /* 关闭即清节流句柄（评审备忘 3）：撤销未触发的 trailing 补发，面板关闭后不再发消息 */
     for (var id in TH) if (TH[id] && TH[id].timer != null) clearTimeout(TH[id].timer);
@@ -976,7 +1298,7 @@
     } catch (e) { alive = false; }
     if (alive) return;
     S.root = null; S.side = S.cfg = S.sub = S.toastEl = null;
-    S.pendEl = null; S.pendTx = null; S.mbg = null; S.mdl = null; // v2 任务 7
+    S.pendEl = null; S.pendTx = null; S.mbg = null; S.mdl = null; S.mdlRepoKey = null; // v2 任务 7/8
     for (var id in TH) if (TH[id] && TH[id].timer != null) clearTimeout(TH[id].timer);
     TH = Object.create(null);
     window.__mcOutbox.push({ type: 'MC_CLOSE', why: 'host-doc-gone' });

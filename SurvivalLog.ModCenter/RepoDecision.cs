@@ -12,8 +12,8 @@ public enum RepoState { Ok, Update, Downgrade, Warn, Install }
 
 /// <summary>
 /// 仓库页一行（任务 6 冻结接口，T7/T8 面板消费）。Status 固定小写五值
-/// "ok"|"update"|"downgrade"|"warn"|"install"（控制器裁定 2）。Why 仅 warn 态非空
-/// （downgrade 态放"远端低于本地"提示，面板复用）；VerNote 为 D8"未校验游戏版本"注记
+/// "ok"|"update"|"downgrade"|"warn"|"install"（控制器裁定 2）。Why 在 Warn 与 Downgrade
+/// 态非空（其余态空）；VerNote 为 D8"未校验游戏版本"注记
 /// （基线不可用时任何 fetch 成功行可携带，不改 State——冻结面之外的增量字段）。
 /// </summary>
 public sealed class RepoRow
@@ -172,8 +172,9 @@ public static class RepoDecision
 /// <summary>
 /// pending 意图写入器（任务 6，控制器裁定 3）：对 <see cref="McPending"/> 的静态薄封装——
 /// **主线程唯一写者**（全部方法只在主线程 Ticker/消息分发上下文调用；后台写 pending = 缺陷，
-/// 清理器启动早期独占读改写，运行期单写者避免竞争）。写前读旧清单合并（保留他人 ops，
-/// **旧 ops 在前新 ops 在后**）；Save 防抖不必（写频率极低——面板确认动作级）。
+/// 清理器启动早期独占读改写，运行期单写者避免竞争。唯一例外：探针对**临时路径**的后台自证
+/// 走 internal <see cref="AppendOps(string, List{McPending.Op})"/>，不写真 pending.json）。
+/// 写前读旧清单合并（保留他人 ops，**旧 ops 在前新 ops 在后**）；Save 防抖不必（写频率极低——面板确认动作级）。
 /// cfg 文件名 = GUID 命名 com.local.survivallog.&lt;mod&gt;.cfg（T4 实证 BepInEx cfg 按 GUID 命名）——
 /// <see cref="AddDelete"/> 的 cfgRel 由调用方传，本封装不管映射。
 /// 消费方：T8 更新/安装（AddUpdate）、T10 卸载（AddDelete）、T9 顺序（SetOrder）。
@@ -182,13 +183,17 @@ public static class PendingWriter
 {
     /// <summary>
     /// 更新/安装意图（T8）：install（未装，row.Local==null）/ replace（已装）一条 op。
-    /// Target = plugins/SurvivalLog.&lt;RepoKey&gt;.dll；Staged = staging 绝对路径转 BepInEx 根相对；
-    /// Md5 = update.json.md5（清理器执行侧强校验）。staged 文件须已由 DownloadAsset 落位。
+    /// Target = plugins/SurvivalLog.&lt;RepoKey&gt;.dll；Staged = staging 绝对路径转 BepInEx 根相对
+    /// ——T8 下载链解 zip 后暂存的 **dll**（清理器 install/replace 实测语义 = File.Copy(staged→target)
+    /// 且先对 staged 本件强校验 Md5，故 op.Md5 取暂存 dll 自身 MD5；zip 整包 MD5（update.json.md5）
+    /// 由下载链在解包前校验，此处不重复。info 仅契约保留）。
     /// </summary>
     public static void AddUpdate(RepoRow row, RepoClient.UpdateInfo info, string stagedAbsPath)
     {
         if (row == null || string.IsNullOrEmpty(row.RepoKey)) throw new ArgumentException("row/RepoKey 为空", nameof(row));
         if (info == null || string.IsNullOrEmpty(info.Md5)) throw new ArgumentException("info/Md5 为空（update.json 契约五字段）", nameof(info));
+        if (string.IsNullOrEmpty(stagedAbsPath) || !File.Exists(stagedAbsPath))
+            throw new ArgumentException("staged dll 不在场: " + stagedAbsPath, nameof(stagedAbsPath));
 
         AppendOps(McPending.File, new List<McPending.Op>
         {
@@ -197,7 +202,7 @@ public static class PendingWriter
                 Type = string.IsNullOrEmpty(row.Local) ? McPending.TypeInstall : McPending.TypeReplace,
                 Target = RepoDecision.DllRelOf(row.RepoKey),
                 Staged = ToRel(stagedAbsPath),
-                Md5 = info.Md5,
+                Md5 = RepoClient.Md5Of(stagedAbsPath), // 清理器执行侧对 staged 本件强校验（T2 实测语义）
             },
         });
     }

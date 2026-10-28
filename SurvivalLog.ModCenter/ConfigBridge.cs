@@ -2,6 +2,7 @@ using System;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Globalization;
+using System.IO;
 using System.Linq;
 using System.Text;
 using System.Text.Json;
@@ -23,7 +24,14 @@ namespace SurvivalLog.ModCenter;
 /// 3s 节流 + MC_CLOSE 立即落盘后恢复原值）。
 /// v2 生命周期任务 7：待生效清单汇总——BuildSnapshot 前主线程读 pending.json（mtime 节流），
 /// 归属到的 mod 行挂 ics ⟳ 徽标；Pump 每 2s 巡检，摘要变化推 MC_PENDING_SUMMARY（底部待生效条）。
-/// 线程纪律：全部 cfg 读写与分发都在 Ticker 主线程（Pump）；outbox 回调线程只入队。
+/// v2 生命周期任务 8：套件仓库页——MC_REPO_GET{force}（打开自动查：10 分钟会话缓存）/ MC_CHK
+/// （手动刷新：60 秒冷却）→ 后台 12 仓 fetch + RepoDecision.Build（主线程收割推 MC_REPO_DATA +
+/// 快照侧栏 ↑/↓/⊘ 徽标）；MC_UPD/MC_INST/MC_UPDALL 确认后走**串行**下载链（后台：下载（进度
+/// 250ms 节流推 MC_DL）→ zip MD5 对 update.json → 解包 BepInEx/plugins/*.dll 暂存 → 主线程
+/// PendingWriter.AddUpdate）→ 快照刷新（行内 ⟳ 出现、↑/↓ 消失）。GitHub 匿名 60 次/h：一轮
+/// 12 次，绝不后台轮询。
+/// 线程纪律：全部 cfg 读写与分发都在 Ticker 主线程（Pump）；outbox 回调线程只入队；
+/// 仓库 fetch/下载在后台 Task，结果经 RepoQueue 回主线程收割（PendingWriter 主线程唯一写者）。
 /// </summary>
 internal static class ConfigBridge
 {
@@ -46,6 +54,35 @@ internal static class ConfigBridge
     private static string _pendSig;        // 摘要签名（变化才推送）；null=首拍未同步（只同步不推，MC_OPEN 会补推）
     private static float _pendAcc;         // Pump 2s 节拍累加器
 
+    // ---- v2 任务 8：仓库页状态（全部主线程持有/变更；后台任务只经 RepoQueue 回传） ----
+    private sealed class RepoUi
+    {
+        public int Kind;                          // 1=fetch 完成 2=下载进度 3=单仓链结果 4=链收尾
+        public List<RepoRow> Rows;                // 1
+        public Dictionary<string, RepoClient.UpdateInfo> Infos; // 1
+        public string RepoKey;                    // 2/3
+        public int Pct;                           // 2
+        public string Stage;                      // 2: down|check|unzip|write
+        public bool Ok;                           // 3
+        public string Err;                        // 3（失败原因）
+        public RepoRow Row;                       // 3 ok（主线程 AddUpdate 用）
+        public RepoClient.UpdateInfo Info;        // 3 ok
+        public string Staged;                     // 3 ok（staging 内 dll 绝对路径）
+    }
+
+    private static readonly ConcurrentQueue<RepoUi> RepoQueue = new();
+    private static List<RepoRow> _repoRows;      // 最近决策快照；null=从未查过（fetch 期间保持旧值，完成才整体换）
+    private static readonly Dictionary<string, RepoClient.UpdateInfo> _repoInfos = new(StringComparer.Ordinal); // repoKey → fetch 结果（下载链直用，不二次 fetch）
+    private static long _repoLastCheck;          // 上次完成一轮检查的 Unix 毫秒；0=从未
+    private static bool _repoFetching;           // 后台 fetch 在跑（面板行"检查中…"）
+    private static bool _repoChain;              // 下载链串行闸（全部更新=循环单链，绝不并发）
+    private static string _dlKey;                // 当前下载链仓键；null=空闲（推送体 dl 字段）
+    private static int _dlPct;
+    private static string _dlStage;
+    private const long RepoCacheMs = 10 * 60 * 1000;   // 打开自动查：10 分钟会话级缓存（控制器裁定 2）
+    private const long RepoCooldownMs = 60 * 1000;     // 手动刷新：60 秒冷却
+    private static long NowMs => DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
+
     private static readonly string EvidencePath =
         System.IO.Path.Combine(Paths.BepInExRootPath, "ModCenter_evidence.txt");
 
@@ -57,6 +94,7 @@ internal static class ConfigBridge
     {
         RefreshPending(true);
         var pendByRow = PendingTipsByRow(); // guid（小写）→ 行内 ⟳ tip
+        var repoPend = RepoPendingGuids();  // v2 任务 8：有待生效 install/replace 意图的 guid（仓库行/侧栏徽标判定）
         var snap = new Snapshot { Self = new SelfInfo { Ver = ModCenterPlugin.Version } };
         foreach (var mm in Meta.Mods)
         {
@@ -76,8 +114,15 @@ internal static class ConfigBridge
             }
             if (mm.OvrHost != null) mi.Ovr = ReadOvr(cfg, mm.OvrHost);
             if (mm.BagOvrHost != null) mi.BagOvr = ReadBagOvr(cfg, mm.BagOvrHost);
+            // v2 任务 8：侧栏行内徽标 = 仓库态（↑蓝可更新/↓橙可降级/↑+⊘版本告警，点击 upd 弹确认窗）
+            // + 待生效 ⟳（T7）。已有待生效意图的行不再给可动作徽标（裁定 3：⟳ 出现、↑/↓ 消失）。
+            var ics = RepoIcsOf(mm.Guid, repoPend);
             if (pendByRow.TryGetValue(mm.Guid, out var pendTip))
-                mi.Ics = new List<IcInfo> { new() { K = "amber", Tip = pendTip } }; // ⟳ 纯状态（无 click）
+            {
+                ics ??= new List<IcInfo>();
+                ics.Add(new IcInfo { K = "amber", Tip = pendTip }); // ⟳ 纯状态（无 click）
+            }
+            if (ics != null && ics.Count > 0) mi.Ics = ics;
             snap.Mods.Add(mi);
         }
         BuildTp(snap, pendByRow); // 任务 14：Tier 0 第三方通用页
@@ -768,6 +813,326 @@ internal static class ConfigBridge
         PushEvent(sb.ToString());
     }
 
+    // ============ 套件仓库页（v2 任务 8：拉取/检查节流 + 下载确认链） ============
+
+    /// <summary>guid → 待生效 install/replace 意图集合（小写 guid；仓库行/侧栏徽标与动作闸共用）。</summary>
+    private static HashSet<string> RepoPendingGuids()
+    {
+        var set = new HashSet<string>(StringComparer.Ordinal);
+        foreach (var op in _pendOps)
+        {
+            if (op.Type != McPending.TypeInstall && op.Type != McPending.TypeReplace) continue;
+            var g = PendRowKeyOf(op.Target);
+            if (g != null) set.Add(g);
+        }
+        return set;
+    }
+
+    /// <summary>侧栏仓库态徽标（↑/↓/↑+⊘；BuildSnapshot 消费）。无远端（未查/检查失败）或已有
+    /// 待生效意图的行返回 null（后者只显 ⟳，裁定 3）。⊘ 与 ↓ 同为 orange+upd，G="kbw" 消歧。</summary>
+    private static List<IcInfo> RepoIcsOf(string guid, HashSet<string> repoPend)
+    {
+        if (_repoRows == null) return null;
+        RepoRow row = null;
+        foreach (var r in _repoRows)
+            if (string.Equals(r.Guid, guid, StringComparison.OrdinalIgnoreCase)) { row = r; break; }
+        if (row == null || string.IsNullOrEmpty(row.Remote)) return null;
+        if (repoPend.Contains(guid.ToLowerInvariant())) return null;
+        switch (row.State)
+        {
+            case RepoState.Update:
+                return new List<IcInfo> { new() { K = "blue", Tip = $"可更新到 {row.Remote} · 点击确认", Click = "upd" } };
+            case RepoState.Downgrade:
+                return new List<IcInfo>
+                {
+                    new() { K = "orange", Tip = $"远端 {row.Remote} 低于本地 {row.Local} · 点击确认（版本回退，风险自担）", Click = "upd" },
+                };
+            case RepoState.Warn:
+                return new List<IcInfo>
+                {
+                    new() { K = "blue", Tip = $"可更新到 {row.Remote}（有版本告警）· 点击确认", Click = "upd" },
+                    new() { K = "orange", Tip = row.Why + " · 是否继续由你决定 · 点击查看", Click = "upd", G = "kbw" },
+                };
+            default:
+                return null; // Ok=同版本无动作面；Install=未装（侧栏本就无此行）
+        }
+    }
+
+    /// <summary>MC_REPO_GET{force}（仓库视图打开拉取）/ MC_CHK（手动"检查更新"）共用入口。
+    /// 节流（裁定 2）：fetch 在跑→只推现状；打开（force=false）10 分钟缓存内推缓存；手动 60 秒
+    /// 冷却内推数据+toast"刚检查过"；否则起一轮后台 fetch（12 仓顺序，匿名限额预算内）。</summary>
+    private static void HandleRepoGet(bool force)
+    {
+        if (_repoFetching) { PushRepoData(); return; }
+        if (_repoRows != null)
+        {
+            var age = NowMs - _repoLastCheck;
+            if (age < 0) age = 0;
+            if (!force && age < RepoCacheMs) { PushRepoData(); return; }
+            if (force && age < RepoCooldownMs)
+            {
+                PushRepoData();
+                PushEvent("{\"type\":\"MC_TOAST\",\"main\":" + JsonW.Str("刚检查过")
+                    + ",\"small\":" + JsonW.Str("60 秒内不重复查询（GitHub 匿名限额 60 次/小时，一轮 12 仓）") + "}");
+                return;
+            }
+        }
+        StartRepoFetch();
+    }
+
+    /// <summary>起一轮后台 fetch：本地快照/游戏基线主线程取好（IL2CPP/文件通道契约），
+    /// _repoFetching 置位即推 checking 快照（fetch 期间 _repoRows 保持旧值，后台改自己的副本，
+    /// 完成后主线程整体替换——零跨线程行读写）。</summary>
+    private static void StartRepoFetch()
+    {
+        var rows = RepoDecision.SnapshotLocal(); // 主线程（IL2CPPChainloader 契约）
+        var local = GameVersion.ReadCached() ?? GameVersion.ReadLocal(); // 文件通道线程无关，结果缓存
+        _repoFetching = true;
+        PushRepoData();
+        System.Threading.Tasks.Task.Run(async () =>
+        {
+            var infos = new Dictionary<string, RepoClient.UpdateInfo>(StringComparer.Ordinal);
+            foreach (var r in rows) // 顺序温和（一轮 12 次 API 请求，不连环多轮）
+            {
+                var info = await RepoClient.FetchLatest(r.RepoKey);
+                if (info == null) { r.Remote = null; r.Gamekb = null; } // 失败留痕已在 RepoClient warn
+                else { r.Remote = info.Version; r.Gamekb = info.Gamekb; infos[r.RepoKey] = info; }
+            }
+            RepoDecision.Build(rows, local); // 纯函数，后台可调
+            RepoQueue.Enqueue(new RepoUi { Kind = 1, Rows = rows, Infos = infos });
+        });
+    }
+
+    /// <summary>确认更新/安装（MC_UPD/MC_INST {repoKey}）与全部更新（MC_UPDALL，Update 态整批
+    /// 循环单链——Warn 需逐仓红字确认、Install 非更新语义，均不入批）。下载串行闸 _repoChain。</summary>
+    private static void HandleRepoUpd(string repoKey, bool all)
+    {
+        if (_repoChain)
+        {
+            PushEvent("{\"type\":\"MC_TOAST\",\"main\":" + JsonW.Str("已有下载在进行")
+                + ",\"small\":" + JsonW.Str("更新链串行执行（限流+带宽），完成后再试") + "}");
+            return;
+        }
+        if (_repoFetching)
+        {
+            PushEvent("{\"type\":\"MC_TOAST\",\"main\":" + JsonW.Str("正在检查更新")
+                + ",\"small\":" + JsonW.Str("检查完成后即可更新") + "}");
+            return;
+        }
+        if (_repoRows == null)
+        {
+            PushEvent("{\"type\":\"MC_TOAST\",\"main\":" + JsonW.Str("尚未检查更新")
+                + ",\"small\":" + JsonW.Str("先点\"检查更新\"获取仓库版本") + "}");
+            return;
+        }
+        var pend = RepoPendingGuids();
+        List<RepoRow> targets;
+        if (all)
+        {
+            targets = new List<RepoRow>();
+            foreach (var r in _repoRows)
+                if (r.State == RepoState.Update && RepoActionable(r, pend, out _)) targets.Add(r);
+            if (targets.Count == 0)
+            {
+                PushEvent("{\"type\":\"MC_TOAST\",\"main\":" + JsonW.Str("没有可整批更新的项")
+                    + ",\"small\":" + JsonW.Str("版本告警与降级项需逐仓确认") + "}");
+                return;
+            }
+        }
+        else
+        {
+            RepoRow row = null;
+            foreach (var r in _repoRows)
+                if (string.Equals(r.RepoKey, repoKey, StringComparison.OrdinalIgnoreCase)) { row = r; break; }
+            if (row == null) { Log("repo upd 拒绝：未知仓键 " + repoKey); return; }
+            if (!RepoActionable(row, pend, out var why))
+            {
+                PushEvent("{\"type\":\"MC_TOAST\",\"main\":" + JsonW.Str(row.Name + " 当前无可执行动作")
+                    + ",\"small\":" + JsonW.Str(why) + "}");
+                return;
+            }
+            targets = new List<RepoRow> { row };
+        }
+        _repoChain = true;
+        var jobs = new List<(RepoRow row, RepoClient.UpdateInfo info)>();
+        foreach (var t in targets) jobs.Add((t, _repoInfos[t.RepoKey]));
+        Log("repo 下载链启动: " + string.Join(", ", jobs.ConvertAll(j => j.row.RepoKey + " " + j.row.Local + "→" + j.info.Version)));
+        System.Threading.Tasks.Task.Run(() => RunRepoChainAsync(jobs));
+    }
+
+    /// <summary>行可动作判定：fetch 成功（Remote/信息在）且无待生效意图且态属 Update/Downgrade/Warn/Install。</summary>
+    private static bool RepoActionable(RepoRow r, HashSet<string> pend, out string why)
+    {
+        why = null;
+        if (string.IsNullOrEmpty(r.Remote)) { why = "上次检查该仓失败（Remote 不可用）"; return false; }
+        if (!_repoInfos.ContainsKey(r.RepoKey)) { why = "仓库数据已过期，请重新检查更新"; return false; }
+        if (pend.Contains(r.Guid.ToLowerInvariant())) { why = "已有待生效意图（重启后应用）"; return false; }
+        if (r.State is not (RepoState.Update or RepoState.Downgrade or RepoState.Warn or RepoState.Install))
+        { why = "已是最新"; return false; }
+        return true;
+    }
+
+    /// <summary>下载链（后台，串行）：下载（进度 250ms/1% 节流入队）→ zip MD5 对 update.json（失败
+    /// 清 staging 不写 pending，裁定 3）→ 解包 BepInEx/plugins/*.dll 暂存（zip 随即清理）→
+    /// kind3 回主线程 PendingWriter.AddUpdate。单仓失败不阻断后续仓（各自报错）。</summary>
+    private static async System.Threading.Tasks.Task RunRepoChainAsync(List<(RepoRow row, RepoClient.UpdateInfo info)> jobs)
+    {
+        try
+        {
+            foreach (var (row, info) in jobs)
+            {
+                string zipPath = null;
+                try
+                {
+                    RepoQueue.Enqueue(new RepoUi { Kind = 2, RepoKey = row.RepoKey, Pct = 0, Stage = "down" });
+                    long lastPush = 0;
+                    var lastPct = -1;
+                    zipPath = await RepoClient.DownloadAsset(info, (done, total) =>
+                    {
+                        if (total <= 0) return; // 服务器未报 Content-Length：不推百分比（面板显示"下载中…"）
+                        var pct = (int)(done * 100 / total);
+                        var now = Environment.TickCount64;
+                        if (pct == lastPct || (pct < 100 && now - lastPush < 250)) return;
+                        lastPush = now; lastPct = pct;
+                        RepoQueue.Enqueue(new RepoUi { Kind = 2, RepoKey = row.RepoKey, Pct = pct, Stage = "down" });
+                    });
+                    RepoQueue.Enqueue(new RepoUi { Kind = 2, RepoKey = row.RepoKey, Pct = 100, Stage = "check" });
+                    var md5 = RepoClient.Md5Of(zipPath);
+                    if (!string.Equals(md5, info.Md5, StringComparison.OrdinalIgnoreCase))
+                        throw new InvalidDataException($"MD5 校验失败（期望 {info.Md5} 实得 {md5}），暂存已清理");
+                    RepoQueue.Enqueue(new RepoUi { Kind = 2, RepoKey = row.RepoKey, Pct = 100, Stage = "unzip" });
+                    var dll = ExtractPluginDll(zipPath);
+                    if (dll == null) throw new InvalidDataException("zip 内未找到 BepInEx/plugins/*.dll（打包布局异常）");
+                    try { System.IO.File.Delete(zipPath); } catch { } // dll 已暂存，zip 即刻清理
+                    RepoQueue.Enqueue(new RepoUi { Kind = 2, RepoKey = row.RepoKey, Pct = 100, Stage = "write" });
+                    RepoQueue.Enqueue(new RepoUi { Kind = 3, RepoKey = row.RepoKey, Ok = true, Row = row, Info = info, Staged = dll });
+                }
+                catch (Exception e)
+                {
+                    if (zipPath != null) { try { System.IO.File.Delete(zipPath); } catch { } } // 失败清 staging
+                    RepoQueue.Enqueue(new RepoUi { Kind = 3, RepoKey = row.RepoKey, Ok = false, Err = e.Message });
+                }
+            }
+        }
+        finally { RepoQueue.Enqueue(new RepoUi { Kind = 4 }); }
+    }
+
+    /// <summary>解包 zip 内套件 dll（release.ps1 布局：BepInEx/plugins/SurvivalLog.&lt;mod&gt;.dll
+    /// + BepInEx/config/ + README）→ 落 staging 同名暂存（覆盖旧残留）。未找到返回 null。</summary>
+    private static string ExtractPluginDll(string zipPath)
+    {
+        using var zip = System.IO.Compression.ZipFile.OpenRead(zipPath);
+        foreach (var e in zip.Entries)
+        {
+            var n = (e.FullName ?? "").Replace('\\', '/');
+            if (n.Length == 0 || !n.EndsWith(".dll", StringComparison.OrdinalIgnoreCase)) continue;
+            var lower = n.ToLowerInvariant();
+            const string prefix = "bepinex/plugins/";
+            if (!lower.StartsWith(prefix, StringComparison.Ordinal)) continue;
+            if (lower.IndexOf('/', prefix.Length) != -1) continue; // 只取 plugins 直下（防子目录夹带）
+            var dest = Path.Combine(McPending.StagingDir, n.Substring(prefix.Length));
+            // 流式解出（不用 ExtractToFile 扩展——它住在 System.IO.Compression.FileSystem，
+            // 游戏运行时在場性未实证；ZipArchive/Open 为 System.IO.Compression 本体，net6 内置）
+            using (var src = e.Open())
+            using (var dst = new FileStream(dest, FileMode.Create, FileAccess.Write, FileShare.None, 65536))
+            {
+                src.CopyTo(dst);
+            }
+            return dest;
+        }
+        return null;
+    }
+
+    /// <summary>后台队列收割（Pump 主线程）：fetch 完成=换快照+推数据+侧栏徽标快照；
+    /// 进度=推 MC_DL；单仓成功=主线程 AddUpdate+快照刷新（⟳ 出现/↑↓ 消失）；失败=MC_DL err+toast；
+    /// 链收尾=释放串行闸+推数据。</summary>
+    private static void RepoHarvest(RepoUi ui)
+    {
+        switch (ui.Kind)
+        {
+            case 1:
+                _repoRows = ui.Rows;
+                _repoInfos.Clear();
+                if (ui.Infos != null)
+                    foreach (var kv in ui.Infos) _repoInfos[kv.Key] = kv.Value;
+                _repoLastCheck = NowMs;
+                _repoFetching = false;
+                PushRender(BuildSnapshot().ToJson()); // 侧栏 ↑/↓/⊘ 徽标（快照协议承载）
+                PushRepoData();
+                break;
+            case 2:
+                _dlKey = ui.RepoKey; _dlPct = ui.Pct; _dlStage = ui.Stage;
+                PushEvent("{\"type\":\"MC_DL\",\"repoKey\":" + JsonW.Str(ui.RepoKey)
+                    + ",\"pct\":" + ui.Pct.ToString(CultureInfo.InvariantCulture)
+                    + ",\"stage\":" + JsonW.Str(ui.Stage) + "}");
+                break;
+            case 3:
+                if (ui.Ok)
+                {
+                    var name = ui.Row.Name;
+                    var to = ui.Info.Version;
+                    try
+                    {
+                        PendingWriter.AddUpdate(ui.Row, ui.Info, ui.Staged); // 主线程唯一写者
+                        PushEvent("{\"type\":\"MC_DL\",\"repoKey\":" + JsonW.Str(ui.RepoKey)
+                            + ",\"pct\":100,\"stage\":\"ok\"}");
+                        PushEvent("{\"type\":\"MC_TOAST\",\"main\":" + JsonW.Str(name + " 已加入待生效")
+                            + ",\"small\":" + JsonW.Str("已下载并 MD5 校验 · " + (string.IsNullOrEmpty(ui.Row.Local) ? "安装 " : "更新 ") + name + " → " + to + " · 重启后由启动清理器原子替换") + "}");
+                        RefreshPending(true);
+                        _pendSig = PendingSig();
+                        PushPendingSummary();
+                        PushRender(BuildSnapshot().ToJson()); // 行内 ⟳ 出现、↑/↓ 消失（裁定 3）
+                        PushRepoData();
+                    }
+                    catch (Exception e)
+                    {
+                        Log("warn AddUpdate 失败(" + ui.RepoKey + "): " + e.Message);
+                        PushEvent("{\"type\":\"MC_DL\",\"repoKey\":" + JsonW.Str(ui.RepoKey)
+                            + ",\"pct\":100,\"stage\":\"err\",\"err\":" + JsonW.Str("写入待生效清单失败：" + e.Message) + "}");
+                    }
+                }
+                else
+                {
+                    PushEvent("{\"type\":\"MC_DL\",\"repoKey\":" + JsonW.Str(ui.RepoKey)
+                        + ",\"pct\":100,\"stage\":\"err\",\"err\":" + JsonW.Str(ui.Err ?? "未知错误") + "}");
+                    PushEvent("{\"type\":\"MC_TOAST\",\"main\":" + JsonW.Str("更新失败（未写入待生效）")
+                        + ",\"small\":" + JsonW.Str((ui.Err ?? "未知错误") + " · 暂存已清理") + "}");
+                }
+                break;
+            case 4:
+                _repoChain = false;
+                _dlKey = null; _dlPct = 0; _dlStage = null;
+                PushRepoData();
+                break;
+        }
+    }
+
+    /// <summary>推 MC_REPO_DATA（__mcEvent 通道）：rows（含 pending 意图标记）+ lastCheck + checking
+    /// + 当前下载链状态（面板重开恢复行内/弹窗进度态）。</summary>
+    private static void PushRepoData()
+    {
+        var d = new RepoData
+        {
+            LastCheck = _repoLastCheck,
+            Checking = _repoFetching,
+            Mirror = string.IsNullOrEmpty(ModCenterPlugin.NetworkMirrorPrefix?.Value) ? "直连" : "镜像",
+        };
+        if (_repoRows != null)
+        {
+            RefreshPending(false); // mtime 未变零开销；变了才有新意图
+            var pend = RepoPendingGuids();
+            foreach (var r in _repoRows)
+                d.Rows.Add(new RepoRowInfo
+                {
+                    Name = r.Name, Status = r.Status, Local = r.Local, Remote = r.Remote,
+                    Why = r.Why, RepoKey = r.RepoKey, Guid = r.Guid, Gamekb = r.Gamekb,
+                    VerNote = r.VerNote, Pending = pend.Contains(r.Guid.ToLowerInvariant()),
+                });
+        }
+        if (_dlKey != null) { d.DlKey = _dlKey; d.DlPct = _dlPct; d.DlStage = _dlStage; }
+        PushEvent(d.ToJson());
+    }
+
     // ============ 消息泵（主线程，Ticker 每帧调） ============
 
     internal static void EnqueueOutboxJson(string json) => Inbox.Enqueue(json);
@@ -797,6 +1162,8 @@ internal static class ConfigBridge
                     PushPendingSummary();
                 }
             }
+            // v2 任务 8：仓库后台队列收割（fetch 完成/下载进度/单仓结果/链收尾 → 推送或落 pending）
+            while (RepoQueue.TryDequeue(out var ui)) RepoHarvest(ui);
         }
         catch (Exception e) { Log("warn 桥泵异常: " + e.Message); }
     }
@@ -834,6 +1201,24 @@ internal static class ConfigBridge
                             break;
                         case "MC_TOGGLE_MOD":
                             HandleToggle(GetStr(el, "guid"), el);
+                            break;
+                        // v2 任务 8：仓库页命令（面板 → C#；fetch/下载在后台 Task，收割推 MC_REPO_DATA/MC_DL）
+                        case "MC_REPO_GET":
+                            HandleRepoGet(el.TryGetProperty("force", out var f)
+                                && (f.ValueKind == JsonValueKind.True
+                                    || (f.ValueKind == JsonValueKind.String && bool.TryParse(f.GetString(), out var fb) && fb)));
+                            break;
+                        case "MC_CHK":
+                            HandleRepoGet(true); // 手动"检查更新"（60 秒冷却）
+                            break;
+                        case "MC_UPD":
+                            HandleRepoUpd(GetStr(el, "repoKey"), all: false);
+                            break;
+                        case "MC_INST":
+                            HandleRepoUpd(GetStr(el, "repoKey"), all: false);
+                            break;
+                        case "MC_UPDALL":
+                            HandleRepoUpd(null, all: true);
                             break;
                         case "MC_EVIDENCE": // 验证辅助（只读）：写证据文件供装机断言（见 DESIGN §6.4）
                             WriteEvidence(GetStr(el, "tag"));

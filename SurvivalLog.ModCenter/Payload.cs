@@ -205,8 +205,8 @@ public sealed class BagOvrInfo
 /// k=色级（小写 red|orange|gray|blue|amber）；tip=悬停 title 全文；click=点击路由
 /// （cf=冲突详情弹窗 / upd=更新确认弹窗；null/空=纯状态不输出，如 ⟳）；g=可选字形符——
 /// ↓与⊘同为 orange+upd，无 g 无法消歧（缺省按 k+click 推断：red→⚠ / orange+cf→⇄ / gray→◎ /
-/// blue→↑ / orange+upd→↓ / amber→⟳；T8 喂 ⊘ 时带 g:"⊘"）。
-/// T7 只接真数据 ⟳ 待生效（pending.json）；冲突/更新/降级/告警四形由 T8/T11/T12 喂。
+/// blue→↑ / orange+upd→↓ / amber→⟳；T8 喂 ⊘ 时带 g:"kbw"，panel.js 将其映射为 ⊘ 字形）。
+/// T7 只接真数据 ⟳ 待生效（pending.json）；冲突形由 T11 喂，更新/降级/告警三形由 T8 喂。
 /// </summary>
 public sealed class IcInfo
 {
@@ -222,6 +222,78 @@ public sealed class IcInfo
         if (!string.IsNullOrEmpty(Click)) sb.Append(",\"click\":").Append(JsonW.Str(Click));
         if (!string.IsNullOrEmpty(G)) sb.Append(",\"g\":").Append(JsonW.Str(G));
         sb.Append('}');
+    }
+}
+
+/// <summary>
+/// 仓库页行 DTO（v2 生命周期任务 8）：<see cref="RepoDecision.RepoRow"/> 的面板投影——
+/// Status 固定小写五值；Remote=null = fetch 失败（面板"检查失败"，快照 checking=true 时
+/// 显示"检查中…"）；Pending=该行已有待生效 install/replace 意图（⟳ 替代动作按钮，
+/// 行内 ↑/↓ 同步消失——控制器裁定 3）。Gamekb/VerNote 空不输出。
+/// </summary>
+public sealed class RepoRowInfo
+{
+    public string Name;    // 显示名（= 仓键）
+    public string Status;  // ok|update|downgrade|warn|install（小写）
+    public string Local;   // 本地版本；null = 未安装
+    public string Remote;  // 远端版本；null = fetch 失败
+    public string Why;     // warn 原因 / downgrade 提示；其余态空
+    public string RepoKey; // 仓键（MC_UPD/MC_INST 路由用）
+    public string Guid;    // 套件插件 GUID
+    public string Gamekb;  // 远端 gamekb 快照名；空不输出
+    public string VerNote; // 未校验游戏版本注记（D8）；空不输出
+    public bool Pending;   // 已有待生效 install/replace 意图
+
+    internal void Write(StringBuilder sb)
+    {
+        sb.Append("{\"name\":").Append(JsonW.Str(Name))
+          .Append(",\"status\":").Append(JsonW.Str(Status))
+          .Append(",\"local\":").Append(JsonW.Str(Local))
+          .Append(",\"remote\":").Append(JsonW.Str(Remote))
+          .Append(",\"why\":").Append(JsonW.Str(Why))
+          .Append(",\"repoKey\":").Append(JsonW.Str(RepoKey))
+          .Append(",\"guid\":").Append(JsonW.Str(Guid));
+        if (!string.IsNullOrEmpty(Gamekb)) sb.Append(",\"gamekb\":").Append(JsonW.Str(Gamekb));
+        if (!string.IsNullOrEmpty(VerNote)) sb.Append(",\"verNote\":").Append(JsonW.Str(VerNote));
+        if (Pending) sb.Append(",\"pending\":true");
+        sb.Append('}');
+    }
+}
+
+/// <summary>
+/// 仓库页快照（任务 8，MC_REPO_DATA 推送体，__mcEvent 通道）：rows=12 行五态投影 +
+/// lastCheck（Unix 毫秒，0=从未）+ checking（后台 fetch 在跑）+ dl（当前下载链状态，
+/// null=空闲——面板重开时恢复行内/弹窗进度态）。序列化手写 StringBuilder（AOT 零反射纪律）。
+/// </summary>
+public sealed class RepoData
+{
+    public long LastCheck;  // 上次完成一轮检查的 Unix 毫秒；0 = 从未
+    public bool Checking;   // 后台 fetch 在跑
+    public string Mirror;   // "直连" / "镜像"（Network.MirrorPrefix 非空）
+    public List<RepoRowInfo> Rows = new();
+    public string DlKey;    // 当前下载链仓键；null = 空闲
+    public int DlPct;       // 0..100
+    public string DlStage;  // down|check|unzip|write
+
+    public string ToJson()
+    {
+        var sb = new StringBuilder(4096);
+        sb.Append("{\"type\":\"MC_REPO_DATA\",\"lastCheck\":").Append(LastCheck.ToString(CultureInfo.InvariantCulture))
+          .Append(",\"checking\":").Append(Checking ? "true" : "false")
+          .Append(",\"mirror\":").Append(JsonW.Str(Mirror))
+          .Append(",\"dl\":");
+        if (DlKey == null) sb.Append("null");
+        else sb.Append("{\"repoKey\":").Append(JsonW.Str(DlKey))
+               .Append(",\"pct\":").Append(DlPct.ToString(CultureInfo.InvariantCulture))
+               .Append(",\"stage\":").Append(JsonW.Str(DlStage)).Append('}');
+        sb.Append(",\"rows\":[");
+        for (var i = 0; i < Rows.Count; i++)
+        {
+            if (i > 0) sb.Append(',');
+            Rows[i].Write(sb);
+        }
+        sb.Append("]}");
+        return sb.ToString();
     }
 }
 
