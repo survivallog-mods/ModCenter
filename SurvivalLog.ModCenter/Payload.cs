@@ -42,7 +42,7 @@ public sealed class Snapshot
 
 public sealed class SelfInfo
 {
-    public string Ver; // ModCenter 版本（跟 suite version.json，作者定号）
+    public string Ver; // ModCenter 版本（csproj 单源 <Version>；由 ModCenterPlugin.Version 注入）
 }
 
 public sealed class ModInfo
@@ -54,6 +54,7 @@ public sealed class ModInfo
     public bool Enabled; // 启停状态（套件=各 mod General.Enabled；第三方=[DisabledTp] marker 取反，任务 16）
     public bool? Soft;   // 第三方软停能力（任务 16）：Tier 2 约定在场或清单 softDisable→true（套件 null 不输出）
     public bool? Absent; // 第三方缺席行（任务 16）：dll 已禁用未加载（面板补行供再启用；套件 null 不输出）
+    public bool Missing; // 套件行 cfg==null（dll 不在场=已卸载/未安装）——面板呈现"未安装/去仓库安装"态（终审必修 7）
     public int? Tier;    // 第三方接入档（任务 15）：null/省略 = Tier 0 通用页；1 = 清单定制页（fixture/面板判别）
     public List<GroupInfo> Groups = new();
     public List<OvrInfo> Ovr; // 仅动作加速挂（其他.Overrides 解析结果）；null 不输出该字段
@@ -69,6 +70,7 @@ public sealed class ModInfo
           .Append(",\"enabled\":").Append(Enabled ? "true" : "false");
         if (Soft == true) sb.Append(",\"soft\":true");       // 任务 16：软停语义标记（仅第三方输出）
         if (Absent == true) sb.Append(",\"absent\":true");   // 任务 16：dll 已禁用缺席行（仅第三方输出）
+        if (Missing) sb.Append(",\"missing\":true");         // 终审必修 7：套件行 dll 不在场（未安装态）
         if (Tier != null) sb.Append(",\"tier\":").Append(Tier.Value.ToString(System.Globalization.CultureInfo.InvariantCulture));
         sb.Append(",\"groups\":[");
         for (var i = 0; i < Groups.Count; i++)
@@ -244,19 +246,25 @@ public sealed class RepoRowInfo
     public string Guid;    // 套件插件 GUID
     public string Gamekb;  // 远端 gamekb 快照名；空不输出
     public string VerNote; // 未校验游戏版本注记（D8）；空不输出
+    public bool Kbw;       // D8 终审必修 6：Ok/Downgrade 行 gamekb 不符（行内 ⊘ + 行级原因）
+    public string KbWhy;   // 上述告警原因全文；空不输出
     public bool Pending;   // 已有待生效 install/replace 意图
 
     internal void Write(StringBuilder sb)
     {
         sb.Append("{\"name\":").Append(JsonW.Str(Name))
           .Append(",\"status\":").Append(JsonW.Str(Status))
-          .Append(",\"local\":").Append(JsonW.Str(Local))
-          .Append(",\"remote\":").Append(JsonW.Str(Remote))
+          // Local/Remote 的 null 必须落成 JSON null（历史实现写成 ""，面板 r.remote==null 判据
+          // 永不命中——fetch 失败行会误显空远端 + 重装按钮，终审必修 8 行级"检查失败"依赖此修正）
+          .Append(",\"local\":").Append(Local == null ? "null" : JsonW.Str(Local))
+          .Append(",\"remote\":").Append(Remote == null ? "null" : JsonW.Str(Remote))
           .Append(",\"why\":").Append(JsonW.Str(Why))
           .Append(",\"repoKey\":").Append(JsonW.Str(RepoKey))
           .Append(",\"guid\":").Append(JsonW.Str(Guid));
         if (!string.IsNullOrEmpty(Gamekb)) sb.Append(",\"gamekb\":").Append(JsonW.Str(Gamekb));
         if (!string.IsNullOrEmpty(VerNote)) sb.Append(",\"verNote\":").Append(JsonW.Str(VerNote));
+        if (Kbw) sb.Append(",\"kbw\":true");
+        if (!string.IsNullOrEmpty(KbWhy)) sb.Append(",\"kbwhy\":").Append(JsonW.Str(KbWhy));
         if (Pending) sb.Append(",\"pending\":true");
         sb.Append('}');
     }
@@ -271,6 +279,7 @@ public sealed class RepoData
 {
     public long LastCheck;  // 上次完成一轮检查的 Unix 毫秒；0 = 从未
     public bool Checking;   // 后台 fetch 在跑
+    public bool FailAll;    // 终审必修 8：本轮检查全失败/fetch 异常（入口卡"检查失败（点击重试）"）
     public string Mirror;   // "直连" / "镜像"（Network.MirrorPrefix 非空）
     public List<RepoRowInfo> Rows = new();
     public string DlKey;    // 当前下载链仓键；null = 空闲
@@ -281,8 +290,9 @@ public sealed class RepoData
     {
         var sb = new StringBuilder(4096);
         sb.Append("{\"type\":\"MC_REPO_DATA\",\"lastCheck\":").Append(LastCheck.ToString(CultureInfo.InvariantCulture))
-          .Append(",\"checking\":").Append(Checking ? "true" : "false")
-          .Append(",\"mirror\":").Append(JsonW.Str(Mirror))
+          .Append(",\"checking\":").Append(Checking ? "true" : "false");
+        if (FailAll) sb.Append(",\"failAll\":true");
+        sb.Append(",\"mirror\":").Append(JsonW.Str(Mirror))
           .Append(",\"dl\":");
         if (DlKey == null) sb.Append("null");
         else sb.Append("{\"repoKey\":").Append(JsonW.Str(DlKey))

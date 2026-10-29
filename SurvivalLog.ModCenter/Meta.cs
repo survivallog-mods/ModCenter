@@ -71,7 +71,7 @@ internal sealed class ConflictEntry
 }
 
 /// <summary>
-/// 元数据表（任务 6）：9 mod 页面定义唯一蓝本 = spec §7 v4 九张表
+/// 元数据表（任务 6）：套件 mod 页面定义唯一蓝本 = spec §7 v4 九张表 + EndlessGuard/CabinetBurden 后续补登
 /// （docs/superpowers/specs/2026-10-24-modcenter-design.md §7；结构对照原型 v4 MODS 数组）。
 /// 纪律（作者 v3 评审 + spec §5.4）：**默认值与范围不写死为准**——快照时从
 /// ConfigEntry.DefaultValue/AcceptableValueRange 反射合入；此处的 Def/Min/Max 仅在
@@ -222,6 +222,47 @@ internal static class Meta
             // ③新增个性化清单（BagOverrides 绑定键，CabinetSize 侧 Resolve 最高优先级 + 受管集注入绕黑名单）；
             // ④全页面数值输入框去原生加减钮（panel.js numbox：type=text + inputmode=numeric + 仅数字清洗）。
             // 13 包 [Bag.<id>] 为 v4 绑定键直达反射桥；Preset（勿手改）/ExcludeIds/Debug.* 不进面板。
+        },
+        new MetaMod
+        {
+            Guid = "com.local.survivallog.cabinetburden",
+            Name = "柜子负重解放", En = "CabinetBurden",
+            Desc = "储物家具负重清零（0=官方'无重量上限'语义，柜子界面负重条自动隐藏）；名单自动发现，默认排除购物车/轿车；切换/改名单后重进存档对已存在容器生效。",
+            // CabinetBurden 的总开关在自己的 cfg [Burden] Enabled（非套件模板 General.Enabled）
+            EnabledSection = "Burden", EnabledKey = "Enabled",
+            Groups =
+            {
+                new MetaGroup
+                {
+                    Title = "负重名单（改后重进存档生效）",
+                    Items =
+                    {
+                        new MetaItem
+                        {
+                            Section = "Burden", Key = "IncludeBagIds", Label = "追加解放的包编号（逗号分隔）",
+                            Badge = "reload", Type = "sel", Def = "",
+                            Note = "如 5010,5012,5013（工作台抽屉）或 3,4（购物车/轿车）；留空=只覆盖自动发现的储物包"
+                        },
+                        new MetaItem
+                        {
+                            Section = "Burden", Key = "ExcludeBagIds", Label = "排除的包编号（优先级最高）",
+                            Badge = "reload", Type = "sel", Def = "3,4",
+                            Note = "默认排除 3(购物车)/4(轿车)——载具包走背包装备体系"
+                        },
+                        new MetaItem
+                        {
+                            Section = "Debug", Key = "ListOnReady", Label = "启动时在日志列出受管包",
+                            Badge = "cfg", Type = "bool", Def = true,
+                            Note = "首轮生效时在 LogOutput 列出全部受管储物包与负重改写（核对名单用）"
+                        },
+                        new MetaItem
+                        {
+                            Section = "Debug", Key = "Verbose", Label = "每轮输出明细",
+                            Badge = "cfg", Type = "bool", Def = false
+                        }
+                    }
+                }
+            }
         },
         new MetaMod
         {
@@ -494,7 +535,7 @@ internal static class Meta
     /// </summary>
     internal static readonly Dictionary<string, string> Domains = new(StringComparer.OrdinalIgnoreCase)
     {
-        // 12 套件 mod（= 组织 12 仓；CabinetBurden/ModCenter 不在 Meta 九表但同属套件）
+        // 12 套件 mod（= 组织 12 仓；CabinetBurden 已补登 Meta 表，ModCenter 自身走附加名表）
         ["com.local.survivallog.backpackexpand"] = "储物",
         ["com.local.survivallog.cabinetburden"] = "储物",
         ["com.local.survivallog.cabineteverywhere"] = "储物",

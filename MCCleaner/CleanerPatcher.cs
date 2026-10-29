@@ -82,6 +82,7 @@ public class CleanerPatcher : BasePatcher
     {
         // 生命周期自证：时间戳 + 本 dll 实际加载位置（Assembly.Location 原值）
         Ev("Initialize reached, dll=" + typeof(CleanerPatcher).Assembly.Location);
+        ClearOrderProtected(); // 终审必修 9：上一靴的披露文件先清，本靴加载序 postfix 按实际重写
 
         RunSelfTestIfFlagged(); // T2 Step1：McPending 序列化自证；T3：加载序重排自证（同标记触发）
         var selfUninst = RunPendingOps(); // T2 Step2：pending 执行器；T4：内置 marker 翻译段（先翻译后执行，Ruling 1）；T10：返回本靴是否执行过 ModCenter 自卸载删除
@@ -448,6 +449,8 @@ public class CleanerPatcher : BasePatcher
     ///   意图）；键不存在 + .disabled 在场 → **不翻译、不动文件**（Ruling 9：玩家手工禁用保持，
     ///   面板侧 AbsentDisabled 缺席行仍供玩家显式启用，走 marker=false 路径）；
     /// - 持久 pending.json 已有同 target 的 op → 持久 op 优先，跳过翻译（避免双重执行冲突）；
+    ///   终审必修 2：同 target 判定归一 `.disabled` 与裸名两形态（卸载 delete 指向 .disabled 时，
+    ///   marker=false 派生 enable 必须跳过——否则撤销/删除失败后会反向改名复活）。
     /// - 派生 op 执行完即弃：成功不写 pending.json（源=cfg marker），失败仅留 [MARKER] 证据
     ///   （下次启动按 marker 现值重译重试，自愈）。
     /// 幂等：状态与 marker 一致（dll 已改名/已恢复）时不产出任何 op、零证据零 churn。
@@ -457,11 +460,14 @@ public class CleanerPatcher : BasePatcher
         var derived = new List<McPending.Op>();
         try
         {
-            // 同 target 去重集（持久 op 优先，Ruling 1）：BepInEx 根相对路径归一 '\' 后 OrdinalIgnoreCase
+            // 同 target 去重集（持久 op 优先，Ruling 1）：BepInEx 根相对路径归一 '\' 后 OrdinalIgnoreCase。
+            // 终审必修 2：归一集同时收 `.disabled` 与裸名两种 target——持久 delete 指向
+            // `X.dll.disabled` 时，marker=false 派生的 enable（target=`X.dll`）必须视为同件跳过，
+            // 否则删除失败/撤销卸载后那次启动会把 .disabled 反向改名复活。
             var taken = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
             foreach (var op in persistent)
                 if (!string.IsNullOrEmpty(op?.Target))
-                    taken.Add(NormRel(op.Target));
+                    AddTaken(taken, op.Target);
 
             foreach (var kv in ParseDisabledTp(McCfgPath()))
             {
@@ -487,7 +493,7 @@ public class CleanerPatcher : BasePatcher
                     Type = kv.Value ? McPending.TypeDisable : McPending.TypeEnable,
                     Target = target,
                 });
-                taken.Add(NormRel(target));
+                AddTaken(taken, target);
             }
         }
         catch (Exception ex)
@@ -497,8 +503,19 @@ public class CleanerPatcher : BasePatcher
         return derived;
     }
 
-    /// <summary>翻译去重用路径归一：'/'→'\'（ResolveRel 同款），配 OrdinalIgnoreCase 比对。</summary>
+    /// <summary>翻译去重用路径归一：'/'→'\'（ResolveRel 同款），配 OrdinalIgnoreCase 比对。
+    /// 终审必修 2：登记 target 时同时登记其 `.disabled` 变体与裸名变体（两形态同件）。</summary>
     private static string NormRel(string rel) => rel.Trim().Replace('/', '\\');
+
+    private static void AddTaken(HashSet<string> set, string rel)
+    {
+        var n = NormRel(rel);
+        set.Add(n);
+        if (n.EndsWith(DisabledSuffix, StringComparison.OrdinalIgnoreCase))
+            set.Add(n.Substring(0, n.Length - DisabledSuffix.Length));
+        else
+            set.Add(n + DisabledSuffix);
+    }
 
     /// <summary>ModCenter 自身 cfg 路径：<c>BepInEx\config\com.local.survivallog.modcenter.cfg</c>
     /// （BepInEx 按 GUID 命名插件 cfg；装机实证 be.788 的 patcher Initialize 阶段
@@ -626,6 +643,8 @@ public class CleanerPatcher : BasePatcher
                 var name = Path.GetFileName(e);
                 if (Directory.Exists(e) && name.Equals("staging", StringComparison.OrdinalIgnoreCase)) continue;
                 if (!Directory.Exists(e) && name.Equals("pending.json", StringComparison.OrdinalIgnoreCase)) continue;
+                // 终审必修 9：依赖保护披露文件是派生件（每靴重建），不阻断自卸载目录 sweep
+                if (!Directory.Exists(e) && name.Equals("order_protected.txt", StringComparison.OrdinalIgnoreCase)) continue;
                 OpsEv("[DIRSWEEP] SKIP 目录内有非 staging/pending.json 内容: " + name + "（保守不动）");
                 return; // 目录内有其他内容（selftest 等）：保守放弃
             }
@@ -686,6 +705,35 @@ public class CleanerPatcher : BasePatcher
     /// <summary>Harmony 实例 ID（补丁器阶段自用，与插件侧 Harmony ID 无冲突）。</summary>
     private const string OrderHarmonyId = "com.local.survivallog.mccleaner.order";
 
+    /// <summary>终审必修 9：依赖保护披露文件（面板排序视图读取并展示"被硬依赖保护 N 项"）。
+    /// 每靴覆盖，格式每行 <c>&lt;guid&gt;\t&lt;被依赖guid&gt;</c>；无 order/无保护 = 空文件。</summary>
+    private static string OrderProtectedFile =>
+        Path.Combine(Paths.BepInExRootPath, "ModCenter", "order_protected.txt");
+
+    private static void ClearOrderProtected()
+    {
+        try { if (File.Exists(OrderProtectedFile)) File.Delete(OrderProtectedFile); } catch { }
+    }
+
+    private static void WriteOrderProtected(List<(string Guid, string Dep)> pairs)
+    {
+        try
+        {
+            var dir = Path.GetDirectoryName(OrderProtectedFile);
+            if (!string.IsNullOrEmpty(dir)) Directory.CreateDirectory(dir);
+            var sb = new StringBuilder();
+            foreach (var p in pairs)
+                if (!string.IsNullOrEmpty(p.Guid) && !string.IsNullOrEmpty(p.Dep))
+                    sb.Append(p.Guid).Append('\t').Append(p.Dep).Append('\n');
+            File.WriteAllText(OrderProtectedFile, sb.ToString(), Utf8NoBom); // 每靴覆盖
+            OpsEv("[ORDER-PROTECTED] 披露文件 " + pairs.Count + " 行 → " + OrderProtectedFile);
+        }
+        catch (Exception ex)
+        {
+            OpsEv("[ORDER-PROTECTED] 披露文件写入 FAIL " + ex.Message);
+        }
+    }
+
     /// <summary>
     /// 补丁器阶段挂 BaseChainloader&lt;BasePlugin&gt;.ModifyLoadOrder 的 postfix（spec §2 教训：
     /// 必须封闭泛型，开放泛型会让 Il2CppInterop Harmony 后端炸 ContainsGenericParameters）。
@@ -732,7 +780,11 @@ public class CleanerPatcher : BasePatcher
                 OpsEv("[ORDER] SKIP pending 解析失败: " + ex.Message);
                 return;
             }
-            if (order == null || order.Count == 0) return;
+            if (order == null || order.Count == 0)
+            {
+                ClearOrderProtected(); // 无覆盖=无保护披露（不残留上一靴结果）
+                return;
+            }
 
             // PluginInfo → Node 投影（GUID + 全量依赖及硬/软标志），并留 Node→PluginInfo 反查（引用键）
             var ownerOf = new Dictionary<OrderReorder.Node, PluginInfo>(__result.Count);
@@ -755,7 +807,7 @@ public class CleanerPatcher : BasePatcher
                 if (!string.IsNullOrEmpty(node.Guid)) guids.Add(node.Guid);
             }
 
-            var applied = OrderReorder.Apply(projected, order, out var protected_);
+            var applied = OrderReorder.Apply(projected, order, out var protected_, out var protectedPairs);
 
             // 映射回 PluginInfo 并原位重排（applied 是输入同实例的排列，逐一映射必齐全）
             var reordered = new List<PluginInfo>(applied.Count);
@@ -787,6 +839,7 @@ public class CleanerPatcher : BasePatcher
                 OpsEv("[ORDER] #" + i.ToString("00") + " " + (__result[i]?.Metadata?.GUID ?? "?"));
             if (protected_.Count == 0) OpsEv("[ORDER-PROTECTED] none");
             else foreach (var s in protected_) OpsEv("[ORDER-PROTECTED] " + s);
+            WriteOrderProtected(protectedPairs); // 终审必修 9：面板排序视图披露（每靴覆盖）
         }
         catch (Exception ex)
         {
@@ -802,7 +855,8 @@ public class CleanerPatcher : BasePatcher
 /// 算法：优先级 = order 命中序（重复/幽灵跳过）或 orderCount+原始下标（保证唯一），
 /// Kahn 拓扑排序每步取"硬依赖已全部放置"的项中优先级最小者；依赖环兜底按原相对序尾置
 /// （ModifyLoadOrder 输入本身拓扑成立，正常不可达）。软依赖不参与。
-/// protected_ 输出被保护项名单（"guid(依赖 dep1,dep2)"，朴素序里排到硬依赖之前的项）。
+/// protected_ 输出被保护项名单（"guid(依赖 dep1,dep2)"，朴素序里排到硬依赖之前的项）；
+/// protectedPairs 同口径逐对展开（[guid, 被依赖guid]，终审必修 9 披露文件消费）。
 /// </summary>
 internal static class OrderReorder
 {
@@ -814,8 +868,13 @@ internal static class OrderReorder
     }
 
     public static List<Node> Apply(IList<Node> current, List<string> order, out List<string> protected_)
+        => Apply(current, order, out protected_, out _);
+
+    public static List<Node> Apply(IList<Node> current, List<string> order, out List<string> protected_,
+        out List<(string Guid, string Dep)> protectedPairs)
     {
         protected_ = new List<string>();
+        protectedPairs = new List<(string Guid, string Dep)>();
         var n = current.Count;
         if (n == 0) return new List<Node>();
 
@@ -870,7 +929,12 @@ internal static class OrderReorder
             foreach (var j in deps[i])
                 if (naivePos[i] < naivePos[j]) violated.Add(current[j].Guid);
             if (violated.Count > 0)
+            {
                 protected_.Add(current[i].Guid + "(依赖 " + string.Join(",", violated) + ")");
+                foreach (var v in violated)
+                    if (!string.IsNullOrEmpty(current[i].Guid) && !string.IsNullOrEmpty(v))
+                        protectedPairs.Add((current[i].Guid, v));
+            }
         }
 
         // Kahn 优先级拓扑：每步取可放置项（在场硬依赖已全放置）中优先级最小者

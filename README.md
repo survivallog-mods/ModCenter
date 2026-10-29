@@ -10,7 +10,7 @@
 ## 二、功能清单
 
 - **双入口**：主菜单与游戏内 ESC 设置菜单各一个入口按钮，对局中也能随时打开调参。
-- **集中管理套件 9 个 mod**（背包扩容、柜子容量、保鲜增强、动作加速、储藏柜直达、角色解锁、机器人提速、自选规划、灾前加速）：开关、滑条、下拉直改配置，多数即时生效；面板每项标注生效时机（即时 / 读档后 / 重启后）。
+- **集中管理套件 12 个 mod**（背包扩容、柜子容量、柜子负重解放、保鲜增强、动作加速、储藏柜直达、角色解锁、机器人提速、自选规划、灾前加速、囤鼠桃园、本面板）：开关、滑条、下拉直改配置，多数即时生效；面板每项标注生效时机（即时 / 读档后 / 重启后）。
 - **正规写配置**：面板改的就是各 mod 自己的 `BepInEx\config` 配置文件，关面板自动保存（约 3 秒防抖落盘）；手改文件与面板互不冲突。
 - **第三方 mod 三档接入**：未对接的第三方 dll 自动读取其配置生成通用设置页（能看能改）；带接入清单的按对方作者定义的中文页面展示；深度对接的开关可即时生效。
 - **第三方 dll 一键禁用/启用**：禁用 = 把该 dll 改名为 `.disabled`（只改名、绝不删除文件），下次启动游戏不再加载；随时在面板里改回原名。
@@ -47,7 +47,7 @@
 
 **Features**
 - One entry in the main menu and one in the in-game ESC menu; open the panel anytime.
-- Manage all 9 suite mods (backpack, cabinet capacity, fridge, action speed, cabinet access, role unlock, robot speed, plan pick, pre-disaster speed): toggles, sliders and dropdowns write the real config, most take effect within seconds without restarting; each item shows when it applies (instant / after loading / after reboot).
+- Manage all 12 suite mods (backpack, cabinet capacity, cabinet burden, fridge, action speed, cabinet access, role unlock, robot speed, plan pick, pre-disaster speed, endless mode, this panel): toggles, sliders and dropdowns write the real config, most take effect within seconds without restarting; each item shows when it applies (instant / after loading / after reboot).
 - Writes each mod's own config file under BepInEx\config (debounced autosave); manual edits and panel edits stay in sync.
 - Third-party plugins at three levels: auto-generated generic settings page, manifest-defined Chinese pages, or deep-integration with instant on/off.
 - One-click disable/enable for third-party DLLs: disable = rename to `.disabled` (never deleted); re-enable anytime in the panel.

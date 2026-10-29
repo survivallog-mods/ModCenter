@@ -511,8 +511,9 @@ PendingWriter 合并语义对临时文件 `selftest-pending.json` 自证（旧�
   cfg 路径严格取 `PluginInfo.Instance as BasePlugin → Config.ConfigFilePath`，不在场不列
   （不自拼 `<GUID>.cfg`）。回包 `MC_UNINST_DATA{guid,name,self,files[],note?}`。
 - **写入**（`MC_UNINST_DO`）：`PendingWriter.AddDelete(dllRel, cfgRel)`（缺席行只写
-  `.disabled`，同在场冗余 `.disabled` 一并列删）→ marker 清除（链上第三方 `Enable`、
-  缺席行 `Forget`、套件/self 跳过——**不用 Enable**，避免为即将删除的缺席行制造复活窗口）→
+  `.disabled`，同在场冗余 `.disabled` 一并列删）→ marker 处理（链上第三方 `Enable`；
+  **缺席行不动 marker**——终审必修 2：marker=false + `.disabled` 在场会被清理器翻成
+  enable 复活，卸载意图只由 pending delete 承载；套件/self 跳过）→
   `pending.order` 移除该 guid → `FlushDirty()`（marker 立即落盘，不留防抖窗口）→
   刷新摘要/快照/仓库数据。重复确认同目标 delete → 幂等 toast，不二次写。
 - **强杀免疫**：意图已落盘；下次启动清理器在插件加载前 `File.Delete`（E4 无锁）——
@@ -880,8 +881,18 @@ v1 的第三方重启级禁用流程 = 面板写 `[DisabledTp]` marker → 游�
 9. **证据文件清单**（BepInEx 根，硬规则 9）：`ModCenter_loaded.txt`、`ModCenter_kb.txt`、
    `MCCleaner_loaded.txt`、`MCCleaner_ops.txt`、`ModCenter_patchscan.txt`、
    `ModCenter_gamever.txt`、`ModCenter_reposelftest.txt`、`ModCenter_netspeed.txt`、
-   `ModCenter_probe.txt`（按需）。自动化验证后清理游戏侧部署与临时文件，证据副本存
-   suite 仓 sdd 目录。
+   `ModCenter_probe.txt`（按需）；另有派生披露文件 `BepInEx\ModCenter\order_protected.txt`
+   （加载序依赖保护，每靴由清理器覆盖，见 §5.4）。自动化验证后清理游戏侧部署与临时文件，
+   证据副本存 suite 仓 sdd 目录。
+10. **pending 契约变更必须同步发版 MCCleaner（终审必修 10）**：新增 pending op 类型或
+   契约字段（`McPending.Op`/`order`/`order_protected` 等）时，**必须同步升级并用安装器/网盘
+   分发 MCCleaner**。旧清理器对未知 op 走 `default` 分支 → FAIL 且条目永久保留在
+   pending.json（每次启动重试、永远卡住）；契约字段只增不改时旧清理器可忽略新字段，
+   但新 op 类型没有兼容降级路径。发版检查单把"MCCleaner 版本随契约变更升级"列为发版门。
+11. **框架侧过滤是启发式（终审必修 10）**：`PatchScan` 的框架/引擎方法过滤按程序集与命名
+   空间启发式判定，不是硬编码全表；未来游戏大版本拆程序集或引入新命名空间时，真实游戏
+   方法可能被误归"框架侧"（只披露、不计入碰撞组），须在游戏更新后复核过滤规则与
+   `ModCenter_patchscan.txt` 证据。
 
 ## 9. E2E 实测记录索引
 

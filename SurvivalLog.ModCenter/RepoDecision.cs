@@ -29,6 +29,8 @@ public sealed class RepoRow
     // ---- 冻结面之外的增量字段（T8 决策/PendingWriter 消费，不破坏冻结签名）----
     public string Gamekb;  // 远端 gamekb 快照名（update.json.gamekb，fetch 时附带）
     public string VerNote; // gamekb 未校验注记（D8："未校验游戏版本：…"）；基线可用 = 空
+    public bool Kbw;       // 终审必修 6：Ok/Downgrade 行 gamekb 不符（不改 State，行内 ⊘ + 行级原因）
+    public string KbWhy;   // 上述告警原因全文；空 = 无
 
     /// <summary>面板态字符串（控制器裁定 2 固定口径，小写）。</summary>
     public string Status => State.ToString().ToLowerInvariant();
@@ -39,10 +41,9 @@ public sealed class RepoRow
 /// 决策口径（spec §4.1 + D7/D8 作者拍板，均**只告警不拦截**）：
 /// - 本地版本 &gt; 远端 = Downgrade（Why="远端低于本地"）；远端 &gt; 本地 = Update；相等 = Ok；
 ///   未安装 = Install；fetch 失败（Remote=null）= Ok + Remote null（五态无 fail 态，不虚报）。
-/// - gamekb 告警（D8）：仅对可动作态（Install/Update）判定——远端 gamekb ≠ 本地基线 → Warn
-///   （Why=原因文案，按钮仍可用）；基线不可用（通道失败/无法映射）→ 不判 Warn，
-///   VerNote="未校验游戏版本：…"。Downgrade/Ok 不参与 gamekb 改态（Downgrade 自身即告警态；
-///   Ok=同版本无动作面）。
+/// - gamekb 告警（D8）：远端 gamekb ≠ 本地基线 → Warn（Install/Update 态）或
+///   Kbw 标记（Ok/Downgrade 态——保持原态，主列表行内 ⊘ 仍给；终审必修 6）；
+///   基线不可用（通道失败/无法映射）→ 不判 Warn/Kbw，VerNote="未校验游戏版本：…"。
 /// <see cref="Build"/> 为纯函数（不碰 IO/interop，任意线程可调）；本地枚举在
 /// <see cref="SnapshotLocal"/>（主线程，IL2CPPChainloader 契约）。
 /// </summary>
@@ -100,6 +101,8 @@ public static class RepoDecision
         {
             row.Why = "";
             row.VerNote = "";
+            row.Kbw = false;
+            row.KbWhy = "";
 
             // fetch 失败：无可比远端——Ok + Remote=null（面板按 Remote null 渲染"检查失败"；不虚报 update/warn）
             if (string.IsNullOrEmpty(row.Remote))
@@ -145,13 +148,20 @@ public static class RepoDecision
                     // 通道失败/无法映射：不判 Warn，标"未校验游戏版本"（注记不改 State，任何基态可携带）
                     row.VerNote = "未校验游戏版本：" + (local.Note ?? "本地基线不可用") + "（不判兼容告警）";
                 }
-                else if (basis is RepoState.Install or RepoState.Update)
+                else
                 {
                     var why = GameVersion.GamekbMismatchReason(row.Gamekb, local);
                     if (why != null)
                     {
-                        row.State = RepoState.Warn; // Warn 覆盖可动作态（要装/更的东西适配构建不一致才是告警主场景）
-                        row.Why = why;
+                        // 终审必修 6：D8 字面"主列表行内 ⊘"不限于可动作态——Ok/Downgrade
+                        // 保持原态（无更新动作面）但仍带 Kbw 标记，面板行内给 ⊘。
+                        row.Kbw = true;
+                        row.KbWhy = why;
+                        if (basis is RepoState.Install or RepoState.Update)
+                        {
+                            row.State = RepoState.Warn; // Warn 覆盖可动作态（要装/更的东西适配构建不一致才是告警主场景）
+                            row.Why = why;
+                        }
                     }
                 }
             }

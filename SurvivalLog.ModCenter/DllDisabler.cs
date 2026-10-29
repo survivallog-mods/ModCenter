@@ -21,8 +21,10 @@ namespace SurvivalLog.ModCenter;
 ///   清理器侧独立行级解析）。强杀残留概念随之消失：意图在 cfg，每次启动先于加载执行。
 /// - **本类职责（纯意图写入 + 面板真值源）**：Disable/Enable 写 marker；MarkerOf 供快照取反显示；
 ///   Enable 的即时反向改名保留（dll 未加载不锁，直接 File.Move），失败不再分离进程兜底——
-///   下次启动清理器按 marker 重译自愈。T10 增 Forget：卸载只清 marker 不改名（文件交给 pending
-///   delete；Enable 的反向改名对"即将删除的缺席行"会制造复活窗口）。
+///   下次启动清理器按 marker 重译自愈。
+///   T10 曾增 Forget（卸载只清 marker 不改名）；终审必修 2 起退役：**缺席行卸载不动 marker**
+///   ——marker=false + .disabled 在场会被清理器翻成 enable（删除失败/撤销卸载即复活），
+///   而 marker=true + 裸 dll 不在场时清理器零动作，卸载意图完全由 pending delete 承载。
 ///   ScanOnLoad 仍做 Load 时对照：marker=true 但 dll 在场
 ///   = 清理器异常没跑 → 登记残留供 Tier 2 软停重放（ReapplySoft，插件本会话仍在链上）。
 /// - **快照缺席行**：plugins 里存在 <c>*.dll.disabled</c>（非第一方）→ 面板补一行 enabled=false
@@ -68,18 +70,20 @@ internal static class DllDisabler
         catch { return false; }
     }
 
-    /// <summary>停用：写 marker=true（DisabledTp）——下次启动由 MCCleaner 翻译执行改名（T4）。</summary>
+    /// <summary>停用：写 marker=true（DisabledTp）——下次启动由 MCCleaner 翻译执行改名（T4）。
+    /// 终审必修 4：写后立即落盘（FlushDirty）——3s 防抖窗口内强杀会丢停用意图。</summary>
     internal static void Disable(string dllRel)
     {
         var mk = Marker(dllRel);
         if (mk == null) { Log("toggle 拒绝：marker entry 创建失败 " + dllRel); return; }
         MarkDirtySelf();
         mk.Value = true;
+        ConfigBridge.FlushDirty(); // 意图即时持久（强杀免疫）
     }
 
     /// <summary>
     /// 启用：若 dll 已被改名则即时反向改名（未加载不锁，直接 Move；失败不兜底——下次启动
-    /// 由 MCCleaner 按 marker=false 重译自愈，T4）→ marker=false。
+    /// 由 MCCleaner 按 marker=false 重译自愈，T4）→ marker=false（写后立即落盘，必修 4）。
     /// </summary>
     internal static void Enable(string dllRel)
     {
@@ -100,25 +104,9 @@ internal static class DllDisabler
         {
             var mk = Marker(dllRel);
             if (mk != null && mk.Value) { MarkDirtySelf(); mk.Value = false; }
+            ConfigBridge.FlushDirty(); // 意图即时持久（强杀免疫）
         }
         catch (Exception e) { Log("warn enable marker 清除异常: " + e.Message); }
-    }
-
-    /// <summary>
-    /// 卸载（T10）：只清 marker（true→false），**不动文件**——目标 dll/.disabled 由启动清理器的
-    /// pending delete 负责删除。与 <see cref="Enable"/> 的区别：Enable 以"恢复加载"为前提会反向
-    /// 改名 .disabled→dll；对即将删除的缺席行这会制造一瞬"复活"窗口（若删除 op 意外失败则变成
-    /// 真复活）。卸载只需记录消失，故走本路径。Bind 失败仅记日志（pending 删除不依赖 marker）。
-    /// </summary>
-    internal static void Forget(string dllRel)
-    {
-        if (string.IsNullOrEmpty(dllRel)) return;
-        try
-        {
-            var mk = Marker(dllRel);
-            if (mk != null && mk.Value) { MarkDirtySelf(); mk.Value = false; }
-        }
-        catch (Exception e) { Log("warn uninst marker 清除异常: " + e.Message); }
     }
 
     /// <summary>Load 时对照（ModCenterPlugin.Load 末尾调）：cfg [DisabledTp] true 项 × plugins 目录。

@@ -41,7 +41,8 @@ namespace SurvivalLog.ModCenter;
 /// （guid=dll 相对名）/ModCenter 自身四路由）构造真值明细（dll=DllDisabler.DllRelOf；
 /// cfg=PluginInfo.Instance as BasePlugin→Config.ConfigFilePath，v1 §4.1③ 实证写法）回
 /// MC_UNINST_DATA {files[],note,self}；MC_UNINST_DO → PendingWriter.AddDelete(dll+cfg)+
-/// marker 清除（在链上第三方走 DllDisabler.Enable，缺席行走 Forget 只清不改名）+ 排序记录移除 +
+/// marker 清除（在链上第三方走 DllDisabler.Enable；缺席行不动 marker——终审必修 2：防
+/// marker=false+.disabled 被清理器翻成 enable 复活）+ 排序记录移除 +
 /// FlushDirty（强杀免疫：意图即时原子落盘）+ 快照/摘要/仓库数据刷新。带出：RepoPendingGuids
 /// 扩含 delete（卸载意图吃掉 ↑/↓ 徽标）；HandleOrderSave 体内兜底异常→MC_ORDER_FAIL（防保存钮
 /// 在途卡死）；待生效条 order 覆盖档分"已保存未重启/生效中"（首拍 order 有效序相同或
@@ -104,6 +105,8 @@ internal static class ConfigBridge
     private static long _repoLastCheck;          // 上次完成一轮检查的 Unix 毫秒；0=从未
     private static bool _repoFetching;           // 后台 fetch 在跑（面板行"检查中…"）
     private static bool _repoChain;              // 下载链串行闸（全部更新=循环单链，绝不并发）
+    private static readonly HashSet<string> _chainGuids = new(StringComparer.OrdinalIgnoreCase); // 当前链覆盖的 guid（卸载竞态闸，必修 1）
+    private static string _repoFetchError;       // 上一轮 fetch 异常（Kind5）；Kind1 清（入口卡失败态，必修 8）
     private static string _dlKey;                // 当前下载链仓键；null=空闲（推送体 dl 字段）
     private static int _dlPct;
     private static string _dlStage;
@@ -131,7 +134,10 @@ internal static class ConfigBridge
             var mi = new ModInfo
             {
                 Guid = mm.Guid, Name = mm.Name, En = mm.En, Desc = mm.Desc,
-                // 插件不在链上（dll 级缺失）视为停用；在场以该 mod 自己的 General.Enabled 为准
+                // 插件不在链上（dll 级缺失/已卸载）视为未安装：面板呈现"未安装/去仓库安装"态，
+                // 详情控件不可写（必修 7；与"已停用"严格分流——停用有 cfg 可写，未安装没有）
+                Missing = cfg == null,
+                // 在场以该 mod 自己的 General.Enabled 为准
                 // （任务 13 真值源；entry 缺失=旧版 dll，按 Bind 默认 true 兜底）
                 Enabled = cfg != null && ReadModEnabled(mm, cfg, out _)
             };
@@ -223,6 +229,7 @@ internal static class ConfigBridge
         { Log($"toggle 拒绝：{mm.En} {mm.EnabledSection}.{mm.EnabledKey} 非 bool（{en.SettingType.Name}）"); return; }
         MarkDirty(cfg); // 先关自动落盘再写（统一防抖，同 TrySet）
         en.BoxedValue = val; // 同值写被 BepInEx 短路（不发 SettingChanged，§4.3-1）；值变化即触发目标 mod Rerun
+        FlushDirty(); // 终审必修 4：启停意图即时落盘——3s 防抖窗口内强杀会丢意图
         Log($"toggle {mm.En} → {(enabled ? "启用" : "停用")}（直写 {mm.Guid} {mm.EnabledSection}.{mm.EnabledKey}）");
     }
 
@@ -358,8 +365,8 @@ internal static class ConfigBridge
 
     // ============ Tier 0 第三方通用页（任务 14，接入协议 docs/modcenter-integration-guide.md §二） ============
 
-    // 第一方 GUID 前缀：套件 9 mod（Meta 已登记）/ ModCenter 自身 / 探针三件 / CabinetBurden、
-    // EndlessGuard 等 Meta 未登记的本仓 mod 全在此族——一律不进第三方分组。
+    // 第一方 GUID 前缀：Meta 已登记套件（现 11 个页面，含 CabinetBurden）/ ModCenter 自身 / 探针三件
+    // / 其他本仓 mod 全在此族——一律不进第三方分组。
     private const string FirstPartyPrefix = "com.local.survivallog.";
     // 探针豁免名（BepInPlugin.Name 含其一即豁免；GUID 前缀已覆盖现役三件，此为改名/换族双保险）
     private static readonly string[] TpProbeNames = { "ActionProbe", "ViewportProbe", "ConfigDumpProbe" };
@@ -407,7 +414,7 @@ internal static class ConfigBridge
             Log("tp 快照: " + snap.Tp.Count + " 个第三方条目（" + string.Join(", ", snap.Tp.Select(m => m.En)) + "）");
     }
 
-    /// <summary>豁免判定：Meta 登记（套件 9）/ ModCenter 自身 / 第一方 GUID 族 / 探针名。</summary>
+    /// <summary>豁免判定：Meta 登记（套件页面）/ ModCenter 自身 / 第一方 GUID 族 / 探针名。</summary>
     private static bool TpExempt(string guid, string name)
     {
         if (!string.IsNullOrEmpty(guid))
@@ -1041,8 +1048,10 @@ internal static class ConfigBridge
         return set;
     }
 
-    /// <summary>侧栏仓库态徽标（↑/↓/↑+⊘；BuildSnapshot 消费）。无远端（未查/检查失败）或已有
-    /// 待生效意图的行返回 null（后者只显 ⟳，裁定 3）。⊘ 与 ↓ 同为 orange+upd，G="kbw" 消歧。</summary>
+    /// <summary>侧栏仓库态徽标（↑/↓/⊘；BuildSnapshot 消费）。无远端（未查/检查失败）或已有
+    /// 待生效意图的行返回 null（后者只显 ⟳，裁定 3）。⊘ 与 ↓ 同为 orange+upd，G="kbw" 消歧。
+    /// 终审必修 6（D8 字面口径）：gamekb 不符的 Ok/Downgrade 行也挂 ⊘（不限于可动作态）；
+    /// Ok 行同时获得"重装当前版本"入口（必修 5，点击 ⊘ 弹同版本重装确认窗）。</summary>
     private static List<IcInfo> RepoIcsOf(string guid, HashSet<string> repoPend)
     {
         if (_repoRows == null) return null;
@@ -1051,25 +1060,37 @@ internal static class ConfigBridge
             if (string.Equals(r.Guid, guid, StringComparison.OrdinalIgnoreCase)) { row = r; break; }
         if (row == null || string.IsNullOrEmpty(row.Remote)) return null;
         if (repoPend.Contains(guid.ToLowerInvariant())) return null;
+        var ics = new List<IcInfo>();
         switch (row.State)
         {
             case RepoState.Update:
-                return new List<IcInfo> { new() { K = "blue", Tip = $"可更新到 {row.Remote} · 点击确认", Click = "upd" } };
+                ics.Add(new IcInfo { K = "blue", Tip = $"可更新到 {row.Remote} · 点击确认", Click = "upd" });
+                break;
             case RepoState.Downgrade:
-                return new List<IcInfo>
-                {
-                    new() { K = "orange", Tip = $"远端 {row.Remote} 低于本地 {row.Local} · 点击确认（版本回退，风险自担）", Click = "upd" },
-                };
+                ics.Add(new IcInfo { K = "orange", Tip = $"远端 {row.Remote} 低于本地 {row.Local} · 点击确认（版本回退，风险自担）", Click = "upd" });
+                if (row.Kbw) ics.Add(KbIc(row));
+                break;
             case RepoState.Warn:
-                return new List<IcInfo>
-                {
-                    new() { K = "blue", Tip = $"可更新到 {row.Remote}（有版本告警）· 点击确认", Click = "upd" },
-                    new() { K = "orange", Tip = row.Why + " · 是否继续由你决定 · 点击查看", Click = "upd", G = "kbw" },
-                };
+                ics.Add(new IcInfo { K = "blue", Tip = $"可更新到 {row.Remote}（有版本告警）· 点击确认", Click = "upd" });
+                ics.Add(new IcInfo { K = "orange", Tip = row.Why + " · 是否继续由你决定 · 点击查看", Click = "upd", G = "kbw" });
+                break;
+            case RepoState.Ok:
+                if (row.Kbw) ics.Add(KbIc(row)); // 同版本但 gamekb 不符：行内仍给 ⊘
+                break;
             default:
-                return null; // Ok=同版本无动作面；Install=未装（侧栏本就无此行）
+                break; // Install=未装（侧栏本就无此行）
         }
+        return ics.Count > 0 ? ics : null;
     }
+
+    /// <summary>D8 ⊘ 徽标（橙 + ⊘ 字形消歧；点击走更新/重装确认窗）。</summary>
+    private static IcInfo KbIc(RepoRow row) => new()
+    {
+        K = "orange",
+        Tip = row.KbWhy + " · 点击查看",
+        Click = "upd",
+        G = "kbw",
+    };
 
     /// <summary>MC_REPO_GET{force}（仓库视图打开拉取）/ MC_CHK（手动"检查更新"）共用入口。
     /// 节流（裁定 2）：fetch 在跑→只推现状；打开（force=false）10 分钟缓存内推缓存；手动 60 秒
@@ -1084,13 +1105,27 @@ internal static class ConfigBridge
             if (!force && age < RepoCacheMs) { PushRepoData(); return; }
             if (force && age < RepoCooldownMs)
             {
-                PushRepoData();
-                PushEvent("{\"type\":\"MC_TOAST\",\"main\":" + JsonW.Str("刚检查过")
-                    + ",\"small\":" + JsonW.Str("60 秒内不重复查询（GitHub 匿名限额 60 次/小时，一轮 12 仓）") + "}");
-                return;
+                // 终审必修 8：全部失败时"点击重试"不受 60 秒冷却限制（失败轮不构成有效检查）
+                if (!RepoAllFailed())
+                {
+                    PushRepoData();
+                    PushEvent("{\"type\":\"MC_TOAST\",\"main\":" + JsonW.Str("刚检查过")
+                        + ",\"small\":" + JsonW.Str("60 秒内不重复查询（GitHub 匿名限额 60 次/小时，一轮 12 仓）") + "}");
+                    return;
+                }
             }
         }
         StartRepoFetch();
+    }
+
+    /// <summary>最近一轮是否全失败（12 行 Remote 皆 null 或 fetch 异常）——入口卡重试判定（必修 8）。</summary>
+    private static bool RepoAllFailed()
+    {
+        if (_repoFetchError != null) return true;
+        if (_repoRows == null || _repoRows.Count == 0) return false;
+        foreach (var r in _repoRows)
+            if (!string.IsNullOrEmpty(r.Remote)) return false;
+        return true;
     }
 
     /// <summary>起一轮后台 fetch：本地快照/游戏基线主线程取好（IL2CPP/文件通道契约），
@@ -1175,21 +1210,23 @@ internal static class ConfigBridge
             targets = new List<RepoRow> { row };
         }
         _repoChain = true;
+        _chainGuids.Clear();
+        foreach (var t in targets)
+            if (!string.IsNullOrEmpty(t.Guid)) _chainGuids.Add(t.Guid); // 卸载竞态闸（必修 1）
         var jobs = new List<(RepoRow row, RepoClient.UpdateInfo info)>();
         foreach (var t in targets) jobs.Add((t, _repoInfos[t.RepoKey]));
         Log("repo 下载链启动: " + string.Join(", ", jobs.ConvertAll(j => j.row.RepoKey + " " + j.row.Local + "→" + j.info.Version)));
         System.Threading.Tasks.Task.Run(() => RunRepoChainAsync(jobs));
     }
 
-    /// <summary>行可动作判定：fetch 成功（Remote/信息在）且无待生效意图且态属 Update/Downgrade/Warn/Install。</summary>
+    /// <summary>行可动作判定：fetch 成功（Remote/信息在）且无待生效意图。Update/Downgrade/Warn/Install
+    /// 为常规动作；**Ok 同版本也放行**（D7"重装当前版本"入口，终审必修 5：语义=修复损坏安装）。</summary>
     private static bool RepoActionable(RepoRow r, HashSet<string> pend, out string why)
     {
         why = null;
         if (string.IsNullOrEmpty(r.Remote)) { why = "上次检查该仓失败（Remote 不可用）"; return false; }
         if (!_repoInfos.ContainsKey(r.RepoKey)) { why = "仓库数据已过期，请重新检查更新"; return false; }
         if (pend.Contains(r.Guid.ToLowerInvariant())) { why = "已有待生效意图（重启后应用）"; return false; }
-        if (r.State is not (RepoState.Update or RepoState.Downgrade or RepoState.Warn or RepoState.Install))
-        { why = "已是最新"; return false; }
         return true;
     }
 
@@ -1285,6 +1322,7 @@ internal static class ConfigBridge
                     foreach (var kv in ui.Infos) _repoInfos[kv.Key] = kv.Value;
                 _repoLastCheck = NowMs;
                 _repoFetching = false;
+                _repoFetchError = null; // 本轮 fetch 正常收尾（入口卡失败态复位）
                 PushRender(BuildSnapshot().ToJson()); // 侧栏 ↑/↓/⊘ 徽标（快照协议承载）
                 PushRepoData();
                 break;
@@ -1301,11 +1339,33 @@ internal static class ConfigBridge
                     var to = ui.Info.Version;
                     try
                     {
+                        // 终审必修 1：写 op 前复查 delete 意图（下载期间用户卸载同一 mod 的
+                        // 兜底——HandleUninstDo 已拒绝在链仓，但卸载可能先于链尾落盘；命中则
+                        // 丢弃本次下载并清暂存，绝不把 replace 追加在 delete 之后（D2 复活）。
+                        RefreshPending(true); // 磁盘意图为准（卸载路径即时落盘）
+                        if (HasDeleteIntentFor(ui.Row.RepoKey))
+                        {
+                            try { System.IO.File.Delete(ui.Staged); } catch { }
+                            Log("repo 下载丢弃：检测到卸载意图 " + ui.Row.RepoKey + "（暂存已清理）");
+                            PushEvent("{\"type\":\"MC_DL\",\"repoKey\":" + JsonW.Str(ui.RepoKey)
+                                + ",\"pct\":100,\"stage\":\"err\",\"err\":"
+                                + JsonW.Str("该 mod 已加入待生效卸载——本次下载已丢弃（暂存已清理）") + "}");
+                            PushEvent("{\"type\":\"MC_TOAST\",\"main\":" + JsonW.Str(name + " 的更新已取消")
+                                + ",\"small\":" + JsonW.Str("检测到该 mod 的卸载意图（先落盘）——更新结果已丢弃，暂存已清理") + "}");
+                            RefreshPending(true);
+                            _pendSig = PendingSig();
+                            PushPendingSummary();
+                            PushRender(BuildSnapshot().ToJson());
+                            PushRepoData();
+                            break;
+                        }
                         PendingWriter.AddUpdate(ui.Row, ui.Info, ui.Staged); // 主线程唯一写者
                         PushEvent("{\"type\":\"MC_DL\",\"repoKey\":" + JsonW.Str(ui.RepoKey)
                             + ",\"pct\":100,\"stage\":\"ok\"}");
+                        var verb = ui.Row.State == RepoState.Ok ? "重装 "
+                            : (string.IsNullOrEmpty(ui.Row.Local) ? "安装 " : "更新 ");
                         PushEvent("{\"type\":\"MC_TOAST\",\"main\":" + JsonW.Str(name + " 已加入待生效")
-                            + ",\"small\":" + JsonW.Str("已下载并 MD5 校验 · " + (string.IsNullOrEmpty(ui.Row.Local) ? "安装 " : "更新 ") + name + " → " + to + " · 重启后由启动清理器原子替换") + "}");
+                            + ",\"small\":" + JsonW.Str("已下载并 MD5 校验 · " + verb + name + " → " + to + " · 重启后由启动清理器替换") + "}");
                         RefreshPending(true);
                         _pendSig = PendingSig();
                         PushPendingSummary();
@@ -1329,11 +1389,13 @@ internal static class ConfigBridge
                 break;
             case 4:
                 _repoChain = false;
+                _chainGuids.Clear();
                 _dlKey = null; _dlPct = 0; _dlStage = null;
                 PushRepoData();
                 break;
             case 5: // T8 遗留修①（T9 落地）：fetch 后台异常收尾——复位检查锁（旧 _repoRows 保留自愈），推数据+toast
                 _repoFetching = false;
+                _repoFetchError = ui.Err ?? "未知异常"; // 入口卡"检查失败（点击重试）"（必修 8）
                 PushRepoData();
                 PushEvent("{\"type\":\"MC_TOAST\",\"main\":" + JsonW.Str("检查更新失败")
                     + ",\"small\":" + JsonW.Str((ui.Err ?? "未知异常") + " · 已保留上次数据，可稍后重试") + "}");
@@ -1360,18 +1422,38 @@ internal static class ConfigBridge
                 {
                     Name = r.Name, Status = r.Status, Local = r.Local, Remote = r.Remote,
                     Why = r.Why, RepoKey = r.RepoKey, Guid = r.Guid, Gamekb = r.Gamekb,
-                    VerNote = r.VerNote, Pending = pend.Contains(r.Guid.ToLowerInvariant()),
+                    VerNote = r.VerNote, Kbw = r.Kbw, KbWhy = r.KbWhy,
+                    Pending = pend.Contains(r.Guid.ToLowerInvariant()),
                 });
+            // 终审必修 8：全失败（12 行 Remote 皆 null）或 fetch 异常 → 入口卡"检查失败（点击重试）"；
+            // 行级"检查失败"由 Remote=null 渲染，不受影响。
+            var allRemoteNull = d.Rows.Count > 0;
+            foreach (var r in d.Rows)
+                if (!string.IsNullOrEmpty(r.Remote)) { allRemoteNull = false; break; }
+            d.FailAll = allRemoteNull;
         }
+        if (_repoFetchError != null) d.FailAll = true; // 首轮 fetch 异常（_repoRows 仍 null）也要暴露失败态
         if (_dlKey != null) { d.DlKey = _dlKey; d.DlPct = _dlPct; d.DlStage = _dlStage; }
         PushEvent(d.ToJson());
+    }
+
+    /// <summary>该仓在 pending 里是否已有 delete 意图（必修 1 下载链尾兜底）。</summary>
+    private static bool HasDeleteIntentFor(string repoKey)
+    {
+        if (string.IsNullOrEmpty(repoKey)) return false;
+        var target = NormOpRel(RepoDecision.DllRelOf(repoKey));
+        foreach (var op in _pendOps)
+            if (op.Type == McPending.TypeDelete
+                && string.Equals(NormOpRel(op.Target), target, StringComparison.OrdinalIgnoreCase))
+                return true;
+        return false;
     }
 
     // ============ 加载排序模式（v2 任务 9：MC_ORDER_GET / MC_ORDER_SAVE） ============
 
     /// <summary>可排序插件全集（GUID）：当前 Chainloader 插件去掉探针族（TpProbeNames——面板
     /// 不可见的开发探针，原型 MODS 同样不含），按 GUID 字母序（=默认加载序，原型注释定稿）。
-    /// 套件 9 + ModCenter 自身 + 第三方全在内（含 Meta 未登记的第一方 mod——排序面对其可见）。</summary>
+    /// 套件 + ModCenter 自身 + 第三方全在内（含 Meta 未登记的第一方 mod——排序面对其可见）。</summary>
     private static List<string> OrderableGuids()
     {
         var list = new List<string>();
@@ -1414,6 +1496,33 @@ internal static class ConfigBridge
         for (var i = 0; i < order.Count; i++)
             if (!string.Equals(order[i], def[i], StringComparison.OrdinalIgnoreCase)) return false;
         return true;
+    }
+
+    /// <summary>终审必修 9：清理器披露文件（BepInEx\ModCenter\order_protected.txt，每靴覆盖；
+    /// 每行 "&lt;guid&gt;\t&lt;被依赖guid&gt;"）。缺失/坏行静默跳过——永不因披露文件阻断排序面。</summary>
+    private static string OrderProtectedPath =>
+        Path.Combine(Paths.BepInExRootPath, "ModCenter", "order_protected.txt");
+
+    private static List<(string G, string D)> ReadOrderProtected()
+    {
+        var list = new List<(string G, string D)>();
+        try
+        {
+            if (!System.IO.File.Exists(OrderProtectedPath)) return list;
+            foreach (var raw in System.IO.File.ReadAllLines(OrderProtectedPath))
+            {
+                var line = raw.Trim();
+                if (line.Length == 0) continue;
+                var ix = line.IndexOf('\t');
+                if (ix <= 0) continue;
+                var g = line.Substring(0, ix).Trim();
+                var d = line.Substring(ix + 1).Trim();
+                if (g.Length == 0 || d.Length == 0) continue;
+                list.Add((g, d));
+            }
+        }
+        catch (Exception e) { Log("warn order_protected.txt 读取失败: " + e.Message); }
+        return list;
     }
 
     /// <summary>MC_ORDER_GET：推 MC_ORDER_DATA。guids=生效序（pending.order 命中项按序前置 +
@@ -1464,7 +1573,22 @@ internal static class ConfigBridge
             if (i > 0) sb.Append(',');
             sb.Append(JsonW.Str(def[i]));
         }
-        sb.Append("]}");
+        sb.Append(']');
+        // 终审必修 9：清理器每靴写 order_protected.txt（<guid>\t<被依赖guid> 逐行）——排序视图
+        // 披露"被硬依赖保护 N 项"。文件不在场=不输出（旧清理器/从未有 order）。
+        var prot = ReadOrderProtected();
+        if (prot.Count > 0)
+        {
+            sb.Append(",\"prot\":[");
+            for (var i = 0; i < prot.Count; i++)
+            {
+                if (i > 0) sb.Append(',');
+                sb.Append("{\"g\":").Append(JsonW.Str(prot[i].G))
+                  .Append(",\"d\":").Append(JsonW.Str(prot[i].D)).Append('}');
+            }
+            sb.Append(']');
+        }
+        sb.Append('}');
         PushEvent(sb.ToString());
         Log("order data 推送: " + effective.Count + " 项（默认 " + def.Count + "，覆盖 "
             + _pendOrder.Count + " 条）");
@@ -1657,11 +1781,12 @@ internal static class ConfigBridge
     }
 
     /// <summary>MC_UNINST_DO {guid}：确认卸载——PendingWriter.AddDelete(dll+cfg)（缺席行只写
-    /// .disabled 一条——裸 dll 不存在）→ marker 清除（第三方在链上走 DllDisabler.Enable：dll 即将被删，反向改名
-    /// 副作用无害、marker 留 false 即可；缺席行走 Forget：只清 marker 不改名，避免 .disabled 复活；
+    /// .disabled 一条——裸 dll 不存在）→ marker 处理（第三方在链上走 DllDisabler.Enable：dll 即将被删，反向改名
+    /// 副作用无害、marker 留 false 即可；**缺席行不动 marker**（终审必修 2）；
     /// Meta 套件无 marker 不建孤儿键；Self 跳过）→ order 记录清掉该 guid（弹窗"排序记录"承诺）→
     /// FlushDirty（意图即时落盘，强杀免疫）→ 快照/摘要/仓库数据刷新（行内 ⟳、仓库 pending 标记）。
-    /// 防重：已有同目标 delete 意图→幂等跳过（toast 提示，不二次写）。</summary>
+    /// 防重：已有同目标 delete 意图→幂等跳过（toast 提示，不二次写）。
+    /// 终审必修 1：该仓下载/更新链在跑 → 整单拒绝（toast），绝不与链尾 AddUpdate 竞争。</summary>
     private static void HandleUninstDo(string guid)
     {
         var u = BuildUninst(guid);
@@ -1674,6 +1799,18 @@ internal static class ConfigBridge
         }
 
         RefreshPending(true);
+
+        // 终审必修 1：该 mod 的下载/更新链在跑 → 拒绝卸载（否则链尾 AddUpdate 会把新 dll
+        // 追加在 delete 之后，清理器按序执行后新 dll 复活——违反 D2）。链尾另有 delete 复查兜底。
+        var chainId = Resolve(guid)?.Guid ?? guid; // 短名路由归一
+        if (_repoChain && _chainGuids.Contains(chainId))
+        {
+            Log("uninst-do 拒绝：下载链正在处理 " + guid);
+            PushEvent("{\"type\":\"MC_TOAST\",\"main\":" + JsonW.Str("该 mod 正在下载更新")
+                + ",\"small\":" + JsonW.Str("下载链执行中，完成（或撤销待生效）后再卸载——本次未写入卸载意图") + "}");
+            return;
+        }
+
         var dllOp = UninstDllOp(u);
         var targets = new HashSet<string>(StringComparer.OrdinalIgnoreCase) { NormOpRel(dllOp) };
         if (u.DisabledTwin) targets.Add(NormOpRel(dllOp + ".disabled"));
@@ -1700,7 +1837,9 @@ internal static class ConfigBridge
                 if (u.DisabledTwin) PendingWriter.AddDelete(dllOp + ".disabled", null);
             }
             if (u.Tp && u.Loaded) DllDisabler.Enable(u.DllBaseRel); // 在链上第三方：marker 清除（裁定路径）
-            else if (u.Tp) DllDisabler.Forget(u.DllBaseRel);       // 缺席行：只清 marker，不反向改名
+            // 缺席行：**不动 marker**（终审必修 2）。marker=true + 裸 dll 不在场时清理器零动作；
+            // 若在此清成 false，撤销卸载/删除失败后下一次启动会被翻译成 enable（.disabled 反向
+            // 改名）→ 已卸载 mod 复活。卸载意图只由下面的 pending delete 承载。
             // 排序记录清理：pending.order 里该 guid 的条目一并移除（否则留幽灵引用；弹窗
             // "ModCenter 停用 / 排序记录（如有）"承诺的"排序记录"即此。清理器虽会丢幽灵，
             // 但记录本体不该残留）。
