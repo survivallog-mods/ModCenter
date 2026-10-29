@@ -815,7 +815,54 @@ PendingWriter 合并语义对临时文件 `selftest-pending.json` 自证（旧�
   CabinetBurden=柜子负重解放 / ModCenter=Mod 管理中心（L3 who 实测显示中文）；M6 "储物功能域"去空格；
   M7 见 6.13.2。自检 23 PASS（`task-12-selftest.txt`）。
 
+## 6.14 立即重启助手与待生效撤销（v2 生命周期任务 13，2026-10-29）
+
+### 6.14.1 机制
+
+- **重启链**（`RestartHelper.cs`，spec §4.1）：面板底部待生效条"立即重启"→ 确认弹窗 →
+  `MC_RESTART` → `ConfigBridge.HandleRestart`：先 `FlushDirty()` 落盘脏 cfg，再
+  `RestartHelper.Request()` 拉分离 PowerShell（沿用 T4 `StartDetachedPS`：`-NoProfile
+  -WindowStyle Hidden -EncodedCommand` + base64(UTF-16LE)，脚本 ASCII-only）。分离脚本：
+  ①`Get-Process -Id <本进程PID>` 轮询（1s 一拍，上限 180s）等**本进程**退出（PID 精确等待，
+  不按进程名——同机可能有别的实例）；②退出后 `Start-Sleep 9`（仓库硬规则：Steam 对刚杀实例
+  有 8~10s 延迟）；③`Start-Process 'steam://rungameid/4164790'`（必须走 steam 协议，直接起
+  exe 会被 Steamworks 转拉导致插件哑火）。**超时未退出则不重拉**（防双实例）。拉起成功后
+  C# 先推 toast（"正在重启游戏…/已请求重启：本进程退出后经 Steam 重拉（约 10 秒）"），
+  `ConfigBridge.Pump` 延迟 1.6s 调 `RestartHelper.QuitGame()`（`Application.Quit()`，主线程；
+  让 toast 先上屏）。拉起失败（PS 不可用）→ toast 报错且**不退出**（文案口径：
+  "已请求重启"≠"重启成功"，不假装成功）。
+- **撤销**（`MC_PENDING_UNDO`）：删除 `pending.json`（ops 清空；**order 一并清空**=回到默认
+  字母序——"撤销全部待生效操作"包含本会话刚保存的顺序，T9 裁定 1/5 中"默认序=无 order 字段"
+  同款语义），同拍强制重读 + 推新快照/摘要（行内 ⟳ 与底条一起消失）+ toast；删除失败只报错
+  不清内存态。staging 不做运行期清理（启动清理器 DirSweep 回收）。
+- **面板**：`pendEl` 事件委托（`[data-x]`）——撤销直接入 outbox；立即重启开面板内浮层确认弹窗
+  （文案："将退出游戏并在约 10 秒后自动重启以应用 N 项待生效操作。未保存的对局进度会丢失。"，
+  取消/确认重启；n=0 仅中性档时去掉"N 项待生效操作"）。两钮 T7 占位 `disabled` 已移除；
+  结果一律 C# 回推，面板不做乐观提示。
+
+### 6.14.2 装机实测记录（2026-10-29，主菜单阶段，CDP 9222）
+
+- **撤销链**：伪造 pending `{"ops":[{"op":"delete","target":"plugins/T13Noop.dll"}],
+  "order":["com.local.survivallog.robotspeed"]}`（无害假件：不存在目标=清理器幂等成功）→
+  底条显示"待生效 2 项（卸载 T13Noop · 加载顺序调整）"→ 点撤销 → 2s 内底条隐藏、toast
+  "已撤销全部待生效操作/加载顺序一并恢复默认（字母序）…"、`pending.json` 已删除（目录空）。
+- **重启链时间戳**（本地时间）：14:21:11.252 确认重启 → 14:21:11.756 toast"正在重启游戏…"
+  → 14:21:14.4~15.1 游戏进程退出（PID 4744，约 3.4s 后=2s drain+1.6s 延迟）→ 14:21:28.1
+  新进程 PID 66212 被 Steam 拉起（退出后约 13.4s：1s 轮询 + 9s 延迟 + Steam 自身启动）
+  → 14:21:28.688 清理器执行 `delete plugins/T13Noop.dll OK 目标不在场(幂等)`、
+  14:21:28.696 pending 原子重写 0/1、14:21:28.732 `[DIRSWEEP] OK ModCenter 目录已清空`
+  → 14:21:32 插件 loaded → 14:21:48 面板重开：底条隐藏、`MC_PENDING_SUMMARY{n:0}`。
+  证据 `task-13-live-timeline.txt`（进程/CDP/pending 0.5s 采样）、`task-13-cdp.txt`（弹窗文案/
+  toast/撤销 DOM）、`task-13-cleaner-evidence.txt`（清理器 ops 行）。
+- **回归**：`mc_fixture.js menu` ALL PASS（14 SKIP，99s）、`toggle` ALL PASS（108s）。
+
 ## 7. 迭代维护清单
+
+- 2026-10-29 v2 任务 13（立即重启助手）：`RestartHelper.cs` 由"零调用保留"转为实装
+  （`Request()` PID 精确等待 → 9s Steam 延迟补偿 → steam 协议重拉；`QuitGame()` 引擎退出）；
+  `ConfigBridge.cs` 增 `MC_RESTART`（延迟 1.6s 退出让 toast 上屏；失败不退出）与
+  `MC_PENDING_UNDO`（删除 pending.json=ops+order 全清，同拍推快照/摘要）；panel.js 待生效条
+  撤销/立即重启两钮接真（确认弹窗为 T13 自定，原型无）。机制与实测见 §6.14。
 
 - 2026-10-29 v2 任务 12（L2 补丁碰撞）：新增 `PatchScan.cs`（`Harmony.GetAllPatchedMethods` →
   `Patches.Owners`/`Patch.owner` 双路径归组 → 游戏侧过滤 + GUID 精确/前缀归属 → 碰撞组；行内

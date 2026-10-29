@@ -77,6 +77,11 @@ internal static class ConfigBridge
     private static string _pendSig;        // 摘要签名（变化才推送）；null=首拍未同步（只同步不推，MC_OPEN 会补推）
     private static float _pendAcc;         // Pump 2s 节拍累加器
 
+    // ---- v2 任务 13：一键重启（MC_RESTART）——拉起成功后延迟一拍再退出，让面板 toast 先上屏 ----
+    private static float _restartQuitAge = -1f; // -1=空闲；>=0=已请求重启，累加到 RestartQuitDelay 即 Application.Quit
+    private static bool _restartRequested;      // 已拉起分离等待链（进程内只许一条，防连点双拉起/双开）
+    private const float RestartQuitDelay = 1.6f;
+
     // ---- v2 任务 8：仓库页状态（全部主线程持有/变更；后台任务只经 RepoQueue 回传） ----
     private sealed class RepoUi
     {
@@ -950,6 +955,72 @@ internal static class ConfigBridge
         if (applied != null) sb.Append(",\"applied\":").Append(JsonW.Str(applied.FixedLabel));
         sb.Append('}');
         PushEvent(sb.ToString());
+    }
+
+    // ============ 待生效条动作（v2 任务 13：撤销全部待生效 / 一键重启） ============
+
+    /// <summary>
+    /// MC_PENDING_UNDO（v2 任务 13）：撤销全部待生效操作——pending.json 整体移除（ops 清空；
+    /// **order 一并清空**，裁定=撤销语义包含本会话刚保存的加载顺序，"回到默认序"与删除 order
+    /// 字段等效，见 T9 裁定 1/5）。随后强制重读 + 同拍推新快照与摘要（行内 ⟳ / 底条一起消失）。
+    /// 删除失败只 toast 报错、不清空内存态（不假装成功）；幂等（文件不在场=成功）。
+    /// 暂存（staging）不做运行期清理：下次启动清理器的目录 sweep（Ruling 12）回收，避免运行期
+    /// 与后台下载链抢文件。
+    /// </summary>
+    private static void HandlePendingUndo()
+    {
+        try
+        {
+            if (System.IO.File.Exists(McPending.File))
+                System.IO.File.Delete(McPending.File);
+            // 原子写中断的 .tmp 孤儿同清（不是意图介质，留着只会误导排障）
+            var tmp = McPending.File + ".tmp";
+            if (System.IO.File.Exists(tmp)) System.IO.File.Delete(tmp);
+        }
+        catch (Exception e)
+        {
+            Log("warn 撤销待生效失败: " + e.Message);
+            PushEvent("{\"type\":\"MC_TOAST\",\"main\":" + JsonW.Str("撤销失败")
+                + ",\"small\":" + JsonW.Str("pending.json 无法删除：" + e.Message) + "}");
+            return;
+        }
+        RefreshPending(true); // 内存态对齐磁盘（文件已不在=空清单/空 order）
+        _pendSig = PendingSig();
+        PushRender(BuildSnapshot().ToJson()); // 行内 ⟳ 同拍消失（BuildSnapshot 内部再强制重读）
+        PushPendingSummary();                 // 底条隐藏（n=0 且无 applied）
+        PushEvent("{\"type\":\"MC_TOAST\",\"main\":" + JsonW.Str("已撤销全部待生效操作")
+            + ",\"small\":" + JsonW.Str("加载顺序一并恢复默认（字母序）；暂存文件由下次启动清理器回收") + "}");
+    }
+
+    /// <summary>
+    /// MC_RESTART（v2 任务 13）：一键重启——先把脏 cfg 落盘，再拉分离 PowerShell
+    /// （RestartHelper：等本进程 PID 退出 → 9 秒 Steam 延迟补偿 → steam://rungameid/&lt;appid&gt;）。
+    /// 拉起成功只代表"已请求重启"（分离进程启动成功 ≠ 重启成功），toast 措辞按此诚实表述；
+    /// 随后由 Pump 在 <see cref="RestartQuitDelay"/> 秒后调 Application.Quit（让 toast 先上屏）。
+    /// 拉起失败 → toast 报错且**不退出**（不假装成功）。重复命令（连点/双发）只保留第一条
+    /// 等待链，后续回"重启已请求"提示（不再起第二条分离进程）。
+    /// </summary>
+    private static void HandleRestart()
+    {
+        if (_restartRequested)
+        {
+            // 连点/双发：等待链已拉起，不再起第二条（防退出后 Steam 被拉两次）
+            PushEvent("{\"type\":\"MC_TOAST\",\"main\":" + JsonW.Str("重启已请求")
+                + ",\"small\":" + JsonW.Str("分离进程已在等待本进程退出；游戏随后自动关闭并由 Steam 重开") + "}");
+            return;
+        }
+        try { FlushDirty(); }
+        catch (Exception e) { Log("warn 一键重启：前置落盘异常: " + e.Message); }
+        if (!RestartHelper.Request())
+        {
+            PushEvent("{\"type\":\"MC_TOAST\",\"main\":" + JsonW.Str("无法请求重启")
+                + ",\"small\":" + JsonW.Str("分离进程拉起失败（PowerShell 不可用？）——请手动退出游戏后重新启动") + "}");
+            return;
+        }
+        _restartRequested = true;
+        _restartQuitAge = 0f;
+        PushEvent("{\"type\":\"MC_TOAST\",\"main\":" + JsonW.Str("正在重启游戏…")
+            + ",\"small\":" + JsonW.Str("已请求重启：本进程退出后经 Steam 重拉（约 10 秒）") + "}");
     }
 
     // ============ 套件仓库页（v2 任务 8：拉取/检查节流 + 下载确认链） ============
@@ -1961,6 +2032,17 @@ internal static class ConfigBridge
             }
             // v2 任务 8：仓库后台队列收割（fetch 完成/下载进度/单仓结果/链收尾 → 推送或落 pending）
             while (RepoQueue.TryDequeue(out var ui)) RepoHarvest(ui);
+            // v2 任务 13：一键重启已请求——延迟到点再请求引擎退出（让"正在重启游戏…"toast 先上屏；
+            // 分离进程按本 PID 等我们退出，见 RestartHelper）
+            if (_restartQuitAge >= 0f)
+            {
+                _restartQuitAge += dt;
+                if (_restartQuitAge >= RestartQuitDelay)
+                {
+                    _restartQuitAge = -1f;
+                    RestartHelper.QuitGame();
+                }
+            }
         }
         catch (Exception e) { Log("warn 桥泵异常: " + e.Message); }
     }
@@ -2041,6 +2123,13 @@ internal static class ConfigBridge
                         // v2 任务 12：L2 补丁碰撞手动刷新（重扫 → 快照橙标 + MC_SCAN_DATA 汇总）
                         case "MC_SCAN":
                             HandlePatchScan();
+                            break;
+                        // v2 任务 13：底部待生效条两钮（撤销全部待生效 / 一键重启）
+                        case "MC_PENDING_UNDO":
+                            HandlePendingUndo();
+                            break;
+                        case "MC_RESTART":
+                            HandleRestart();
                             break;
                         case "MC_EVIDENCE": // 验证辅助（只读）：写证据文件供装机断言（见 DESIGN §6.4）
                             WriteEvidence(GetStr(el, "tag"));

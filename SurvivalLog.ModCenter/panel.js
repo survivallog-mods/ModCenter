@@ -5,7 +5,7 @@
  * 移植，样式值照抄）：mod 行内 ics 容器（mod.ics=[{k,tip,click?,g?}]，k=red|orange|gray|
  * blue|amber 18px 圆片七形，悬停 title 全文，click 路由 cf=冲突详情弹窗/upd=更新确认弹窗壳，
  * 无 click=纯状态如 ⟳ 待生效）；底部待生效条（__mcEvent MC_PENDING_SUMMARY{n,labels}，n>0
- * 显示，撤销/立即重启占位禁用待 T13）；弹窗=面板内浮层（.mc-modal-bg/.mc-modal 同款，
+ * 显示；v2 任务 13 撤销/立即重启两钮接真）；弹窗=面板内浮层（.mc-modal-bg/.mc-modal 同款，
  * ESC/点底关闭，弹窗开着时 ESC 先关弹窗再关面板）。ics 缺省时行渲染与 v1 完全一致
  * （快照协议向后兼容）。
  * v2 生命周期任务 8 = 套件仓库页 + 更新确认链（同原型仓库段照抄）：侧栏入口卡
@@ -39,6 +39,12 @@
  * 单独披露、不铺行——Ruling 14②；含"重新扫描"→ MC_SCAN）＋ 行内聚合橙标 ⇄
  * （C# 每 mod 一枚，click:"cf" 复用冲突详情弹窗的橙卡片；停用行 w:true → __mc-weak 弱化）；
  * 灰卡（lv=gray）标题用"同域 mod"（T11 M4）；T11 M2/M3/M5/M6 为 C# 侧表/文案修正。
+ * v2 生命周期任务 13 = 立即重启助手：底部待生效条两钮接真——"撤销"→ MC_PENDING_UNDO
+ * （C# 移除 pending.json：ops 与 order 一并清，回到默认加载序）→ 快照+摘要+toast 由 C# 回推；
+ * "立即重启"→ 确认弹窗（面板内浮层，文案含"将退出游戏并在约 10 秒后自动重启以应用 N 项
+ * 待生效操作。未保存的对局进度会丢失。"，取消/确认重启）→ 确认后 MC_RESTART → C# 拉分离
+ * 进程并延迟退出本进程；结果 toast 一律 C# 回推（"正在重启游戏…"=已请求重启，拉起失败报错
+ * 且游戏不退出——不假装成功）。
  *
  * 注入落点：Root 文档（C# WebBridge.ExecuteJavaScript 上下文）。__McInstalled 守卫幂等。
  * 全局契约（C# Ticker / MenuEntryInjector 对齐）：__McInstalled / __mcOutbox / __mcDrain /
@@ -344,13 +350,23 @@
     var toastEl = doc.createElement('div');
     toastEl.className = '__mc-toast'; toastEl.id = '__mc_toast';
 
-    /* v2 任务 7：底部待生效条（原型 #pend 同构；撤销/立即重启占位禁用——T13 接真） */
+    /* v2 任务 7：底部待生效条（原型 #pend 同构；v2 任务 13 撤销/立即重启两钮接真） */
     var pendEl = doc.createElement('div');
     pendEl.className = '__mc-pending'; pendEl.id = '__mc_pending';
     pendEl.innerHTML = '<span aria-hidden="true">\u27f3</span>'
       + '<span class="__mc-pend-tx" id="__mc_pend_tx"></span><span class="__mc-sp"></span>'
-      + '<button type="button" class="__mc-btn __mc-btn-mini" data-x="undo" disabled title="T13 \u63a5\u5165">\u64a4\u9500</button>'
-      + '<button type="button" class="__mc-btn __mc-btn-pri __mc-btn-mini" data-x="reboot" disabled title="T13 \u63a5\u5165">\u7acb\u5373\u91cd\u542f</button>';
+      + '<button type="button" class="__mc-btn __mc-btn-mini" data-x="undo">\u64a4\u9500</button>'
+      + '<button type="button" class="__mc-btn __mc-btn-pri __mc-btn-mini" data-x="reboot">\u7acb\u5373\u91cd\u542f</button>';
+    /* v2 任务 13：两钮动作——撤销=MC_PENDING_UNDO（C# 清 pending.json 后推快照+摘要+toast）；
+     * 立即重启=确认弹窗（openRebootModal）→ MC_RESTART。面板不做乐观提示（结果一律等 C# 回推，
+     * 拉起失败不退出——不假装成功）。 */
+    pendEl.addEventListener('click', function (e) {
+      var b = e.target && e.target.closest ? e.target.closest('[data-x]') : null;
+      if (!b) return;
+      var x = b.getAttribute('data-x');
+      if (x === 'undo') { window.__mcOutbox.push({ type: 'MC_PENDING_UNDO' }); return; }
+      if (x === 'reboot') openRebootModal();
+    });
 
     /* v2 任务 7：面板内浮层弹窗（裁定 1：绝对定位+半透明底，不用 window.alert；ESC/点底关闭） */
     var mbg = doc.createElement('div');
@@ -1464,6 +1480,32 @@
     if (applied)
       h += (h ? ' \u00b7 ' : '') + '<span style="color:#8a90a0">' + esc(applied) + '</span>';
     S.pendTx.innerHTML = h;
+  }
+
+  /* v2 任务 13：一键重启确认弹窗（原型无此弹窗，文案自定；brief 逐字口径
+   * "将退出游戏并在约 10 秒后自动重启以应用 N 项待生效操作。未保存的对局进度会丢失。"）。
+   * 确认 → MC_RESTART 入 outbox 并关弹窗；结果 toast 由 C# 回推（拉起成功="正在重启游戏…"、
+   * 失败=报错且游戏不退出）。n=0（仅中性档"生效中"）时文案去掉"N 项待生效操作"，
+   * 仍允许重启（应用加载序/重置现场）。 */
+  function openRebootModal() {
+    var n = ST.pend && ST.pend.n ? ST.pend.n : 0;
+    var risk = n > 0
+      ? '\u5c06\u9000\u51fa\u6e38\u620f\u5e76\u5728\u7ea6 10 \u79d2\u540e\u81ea\u52a8\u91cd\u542f\u4ee5\u5e94\u7528 ' + n + ' \u9879\u5f85\u751f\u6548\u64cd\u4f5c\u3002\u672a\u4fdd\u5b58\u7684\u5bf9\u5c40\u8fdb\u5ea6\u4f1a\u4e22\u5931\u3002'
+      : '\u5c06\u9000\u51fa\u6e38\u620f\u5e76\u5728\u7ea6 10 \u79d2\u540e\u81ea\u52a8\u91cd\u542f\u3002\u672a\u4fdd\u5b58\u7684\u5bf9\u5c40\u8fdb\u5ea6\u4f1a\u4e22\u5931\u3002';
+    openModal('<h3>' + chipHtml('amber', '\u21bb') + '\u7acb\u5373\u91cd\u542f \u00b7 \u5e94\u7528\u5f85\u751f\u6548\u64cd\u4f5c</h3>'
+      + '<div class="__mc-m-sub">\u672c\u8fdb\u7a0b\u9000\u51fa \u2192 \u7ea6 9 \u79d2\u5ef6\u8fdf\u8865\u507f \u2192 Steam \u91cd\u62c9</div>'
+      + '<div class="__mc-risk">\u26a0 ' + esc(risk) + '</div>'
+      + '<div class="__mc-m-sec"><div class="__mc-m-txt" style="font-size:11.5px;color:#8a90a0">\u24d8 \u91cd\u542f\u540e\u7531\u542f\u52a8\u6e05\u7406\u5668\u5728\u63d2\u4ef6\u52a0\u8f7d\u524d\u6267\u884c\u5f85\u751f\u6548\u64cd\u4f5c\uff1b\u82e5 3 \u5206\u949f\u5185\u6e38\u620f\u672a\u9000\u51fa\uff0c\u91cd\u62c9\u5c06\u81ea\u52a8\u653e\u5f03\uff08\u4e0d\u8d77\u53cc\u5b9e\u4f8b\uff09\u3002</div></div>'
+      + '<div class="__mc-m-acts"><button type="button" class="__mc-btn __mc-btn-mini" data-mact="close">\u53d6\u6d88</button>'
+      + '<button type="button" class="__mc-btn __mc-btn-pri" data-mact="doreboot">\u786e\u8ba4\u91cd\u542f</button></div>');
+    if (!S.mdl) return;
+    var go = S.mdl.querySelector('[data-mact="doreboot"]');
+    if (!go) return;
+    go.addEventListener('click', function (e) {
+      e.stopPropagation();
+      window.__mcOutbox.push({ type: 'MC_RESTART' });
+      closeModal();
+    });
   }
 
   /* ================= 消息发送 ================= */
