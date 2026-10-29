@@ -51,15 +51,17 @@ internal sealed class PatchScanResult
 {
     public long At;             // Unix 毫秒（面板"扫描于 …"）
     public int PatchedMethods;  // Harmony.GetAllPatchedMethods() 总数
-    public int InScope;         // 游戏侧已挂补丁方法数（过滤后）
-    public int Skipped;         // 非游戏侧（框架/引擎/插件内部）跳过数
-    public int SingleOwner;     // 单 owner 方法数（非碰撞）
+    public int InScope;         // 游戏侧已挂补丁方法数（全部 owner 数，含单 owner；评审 I-1）
+    public int Skipped;         // 非游戏侧已挂补丁方法数（框架/引擎/插件内部方法，全部 owner 数）
+    public int SingleOwner;     // 单 owner 方法数（非碰撞；两 scope 合计，仅日志）
     public int MultiOwnerGame;  // 游戏侧 ≥2 owner 组数（= Items + Unknown）
+    public int MultiOwnerFramework; // 非游戏侧 ≥2 owner 组数（裁定 A：汇总必须披露，不铺行）
     public long Ms;             // 扫描耗时（性能证据：>50ms 则改后台，裁定 1）
     public string Error;        // 扫描异常（null=正常）
     public string Scope = "游戏侧（HotUpdate 程序集 / GameCore.* 命名空间）";
-    public List<PatchCollision> Items = new();   // ≥1 个 owner 可归属（行内橙标 / 详情卡）
-    public List<PatchCollision> Unknown = new(); // 全部 owner 未知来源（只进扫描汇总）
+    public List<PatchCollision> Items = new();   // 游戏侧 ≥1 个 owner 可归属（行内橙标 / 详情卡）
+    public List<PatchCollision> Unknown = new(); // 游戏侧全部 owner 未知来源（只进扫描汇总）
+    public List<PatchCollision> Framework = new(); // 非游戏侧多 owner（只进汇总披露，裁定 A）
     public int Total => Items.Count + Unknown.Count;
 }
 
@@ -72,6 +74,9 @@ internal sealed class PatchScanResult
 /// （报告记录取舍）。owner→mod 归属（控制器裁定 2）：①精确匹配已装 GUID ②前缀匹配
 /// （owner 以 GUID+'.' 开头，如 com.local.survivallog.robotspeed.trace）③其余归"未知来源"。
 /// 行内橙标只挂"≥1 个 owner 可归属"的碰撞；全未知来源的碰撞只进扫描汇总（裁定 3）。
+/// 统计口径（fix I-1）：InScope/Skipped 按"全部已挂补丁方法"计数（含单 owner），碰撞组数单独
+/// 统计（MultiOwnerGame）；框架侧多 owner 组（MultiOwnerFramework/Framework）继续过滤不铺行，
+/// 但汇总必须披露"框架侧 N 组未计入"（Ruling 14②，真实共挂不隐身）。
 /// 扫描时机：面板打开（MC_OPEN）+ 手动刷新（MC_SCAN），主线程执行、不后台轮询（裁定 1）。
 /// 探针：cfg Debug.PatchScan（默认关）启动 10s 后 dump PatchInfo 真实形态到
 /// BepInEx/ModCenter_patchscan.txt（硬规则 9：不依赖 LogOutput）。
@@ -91,9 +96,10 @@ internal static class PatchScan
     internal static PatchScanResult Refresh()
     {
         _last = Scan();
-        Log($"patchscan: {_last.PatchedMethods} 个已挂补丁方法 → 游戏侧 {_last.InScope} 个 → " +
-            $"碰撞 {_last.Total} 组（可归属 {_last.Items.Count} / 未知来源 {_last.Unknown.Count}），" +
-            $"{_last.Ms}ms" + (_last.Error != null ? "（异常：" + _last.Error + "）" : ""));
+        Log($"patchscan: {_last.PatchedMethods} 个已挂补丁方法 → 游戏侧 {_last.InScope} 个（非游戏侧 {_last.Skipped} 个） → " +
+            $"游戏侧碰撞 {_last.Total} 组（可归属 {_last.Items.Count} / 未知来源 {_last.Unknown.Count}），" +
+            $"框架侧 {_last.MultiOwnerFramework} 组未计入，{_last.Ms}ms" +
+            (_last.Error != null ? "（异常：" + _last.Error + "）" : ""));
         return _last;
     }
 
@@ -127,7 +133,7 @@ internal static class PatchScan
         };
     }
 
-    /// <summary>面板摘要事件体（MC_SCAN_DATA；行内橙标之外的全量汇总，含未知来源组）。</summary>
+    /// <summary>面板摘要事件体（MC_SCAN_DATA；游戏侧碰撞全量汇总 + 框架侧未计入披露）。</summary>
     internal static PatchScanData BuildData()
     {
         var r = Current;
@@ -135,10 +141,12 @@ internal static class PatchScan
         {
             At = r.At, Patched = r.PatchedMethods, Game = r.InScope,
             Total = r.Total, Routed = r.Items.Count, Unknown = r.Unknown.Count,
+            Framework = r.MultiOwnerFramework,
             Ms = r.Ms, Scope = r.Scope, Error = r.Error,
         };
         foreach (var c in r.Items) d.Items.Add(ToItem(c));
         foreach (var c in r.Unknown) d.Items.Add(ToItem(c));
+        foreach (var c in r.Framework) d.FrameworkItems.Add(ToItem(c));
         return d;
     }
 
@@ -187,10 +195,11 @@ internal static class PatchScan
 
                 var owners = OwnersOf(pi);
                 if (owners.Count == 0) continue;
+                // I-1 修正：scope 计数按"全部已挂补丁方法"统计（单 owner 也计入），
+                // 与多 owner 碰撞组数分开——面板"游戏侧 G/P 方法"不再等于碰撞组数。
+                var inScope = InScope(m);
+                if (inScope) res.InScope++; else res.Skipped++;
                 if (owners.Count < 2) { res.SingleOwner++; continue; }
-                if (!InScope(m)) { res.Skipped++; continue; }
-                res.InScope++;
-                res.MultiOwnerGame++;
 
                 var t = m.DeclaringType;
                 var asm = "";
@@ -217,8 +226,18 @@ internal static class PatchScan
                     });
                 }
                 col.HasAttributed = col.Owners.Any(o => o.Guid != null);
-                if (col.HasAttributed) res.Items.Add(col);
-                else res.Unknown.Add(col);
+                if (inScope)
+                {
+                    res.MultiOwnerGame++;
+                    if (col.HasAttributed) res.Items.Add(col);
+                    else res.Unknown.Add(col);
+                }
+                else
+                {
+                    // 裁定 A（Ruling 14②）：框架侧多 owner 组不铺行/不计入碰撞总数，但汇总必须披露
+                    res.MultiOwnerFramework++;
+                    res.Framework.Add(col);
+                }
             }
             catch (Exception e)
             {
@@ -227,6 +246,7 @@ internal static class PatchScan
         }
         res.Items.Sort((a, b) => string.Compare(a.Method, b.Method, StringComparison.OrdinalIgnoreCase));
         res.Unknown.Sort((a, b) => string.Compare(a.Method, b.Method, StringComparison.OrdinalIgnoreCase));
+        res.Framework.Sort((a, b) => string.Compare(a.Method, b.Method, StringComparison.OrdinalIgnoreCase));
         res.Ms = sw.ElapsedMilliseconds;
         return res;
     }
@@ -401,7 +421,10 @@ internal static class PatchScanProbe
 
         // ---- ① 全量清单（最多 240 行）：声明类型/程序集/owner 数/owner 原串/补丁数 ----
         var multi = 0;
-        var suiteHits = new List<MethodBase>();
+        // M-6 修正（评审）：重点 dump 先保证套件 owner 方法（最多 8 个），再用常用游戏方法补足
+        // 10 个——旧实现按字典序取前 10 个 target/suite 命中，套件方法可能被第三方 target 挤出。
+        var suiteCandidates = new List<MethodBase>();
+        var targetCandidates = new List<MethodBase>();
         var targetNames = new[]
         {
             "BagComponent", "EndlessManager", "SurvivalPlanningComponent", "SurvivalResultsManager",
@@ -422,18 +445,34 @@ internal static class PatchScanProbe
                 patchCount = CountPatches(pi);
             }
             if (owners.Count >= 2) multi++;
-            var isSuite = owners.Any(o => o != null && o.IndexOf("survivallog", StringComparison.OrdinalIgnoreCase) >= 0);
+            // M-6 修正（评审）：套件 owner 判定必须用第一方前缀 com.local.survivallog.*；
+            // 第三方 GUID 也含 "survivallog" 字样（com.dev./com.ivmakk.survivallog.*），旧判定会把
+            // 第三方方法当"套件挂点"挑进重点 dump，套件真实挂点反而被挤出。
+            var isSuite = owners.Any(o => o != null
+                && o.StartsWith("com.local.survivallog.", StringComparison.OrdinalIgnoreCase));
             var isTarget = TargetNameOf(m, targetNames);
-            if ((isSuite || isTarget) && suiteHits.Count < 10 && !suiteHits.Contains(m)) suiteHits.Add(m);
+            if (isSuite) suiteCandidates.Add(m);
+            else if (isTarget) targetCandidates.Add(m);
             if (i <= 240)
                 P($"#{i} decl={SafeFull(m)} asm={SafeAsm(m)} owners={owners.Count}[{string.Join("|", owners)}] " +
                   $"patches={patchCount} scope={(InScopeProbe(m) ? "game" : "other")} suite={isSuite} target={isTarget}");
         }
         if (all.Count > 240) P($"...（全量清单截断，共 {all.Count} 行，仅前 240 行入证据）");
         P($"owner 数 ≥2 的方法: {multi}");
+        var suiteHits = new List<MethodBase>();
+        foreach (var m in suiteCandidates)
+        {
+            if (suiteHits.Count >= 8) break;
+            suiteHits.Add(m);
+        }
+        foreach (var m in targetCandidates)
+        {
+            if (suiteHits.Count >= 10) break;
+            suiteHits.Add(m);
+        }
 
         // ---- ② 套件已挂方法重点 dump（5~10 个）：PatchInfo 逐字段 + 多反射路径 ----
-        P($"--- 重点方法 dump（{suiteHits.Count} 个：套件 owner 或常用游戏方法） ---");
+        P($"--- 重点方法 dump（{suiteHits.Count} 个：套件 owner 优先，常用游戏方法补足） ---");
         foreach (var m in suiteHits) DumpDetail(m);
 
         // ---- ③ 产品扫描器 dry-run（与探针同一 API；耗时=性能裁定依据） ----
@@ -442,20 +481,25 @@ internal static class PatchScanProbe
         var r = PatchScan.Scan();
         var scanMs = scanSw.ElapsedMilliseconds;
         P($"扫描耗时 {r.Ms}ms（stopwatch {scanMs}ms）；GetAllPatchedMethods={r.PatchedMethods} " +
-          $"游戏侧={r.InScope} 跳过={r.Skipped} 单owner={r.SingleOwner} ≥2owner={r.MultiOwnerGame}");
+          $"游戏侧={r.InScope} 非游戏侧={r.Skipped} 单owner={r.SingleOwner} " +
+          $"游戏侧≥2owner={r.MultiOwnerGame} 框架侧≥2owner={r.MultiOwnerFramework}");
         foreach (var c in r.Items)
             P($"COLLIDE {c.Key} asm={c.Assembly} patches={c.PatchCount} owners=[" +
               string.Join(" | ", c.Owners.Select(o => o.Id + " => " + (o.Guid ?? "<未知>") + " / " + o.Display)) + "]");
         foreach (var c in r.Unknown)
             P($"UNKNOWN {c.Key} asm={c.Assembly} patches={c.PatchCount} owners=[" +
               string.Join(" | ", c.Owners.Select(o => o.Id)) + "]");
-        P($"汇总: 碰撞 {r.Total} 组（可归属 {r.Items.Count} / 全未知 {r.Unknown.Count}）");
+        foreach (var c in r.Framework)
+            P($"FRAMEWORK_NOT_COUNTED {c.Key} asm={c.Assembly} patches={c.PatchCount} owners=[" +
+              string.Join(" | ", c.Owners.Select(o => o.Id + " => " + (o.Guid ?? "<未知>") + " / " + o.Display)) + "]");
+        P($"汇总: 游戏侧碰撞 {r.Total} 组（可归属 {r.Items.Count} / 全未知 {r.Unknown.Count}）" +
+          $" + 框架侧 {r.MultiOwnerFramework} 组未计入（裁定 A 披露）");
 
         // ---- ④ 性能裁定 ----
         var verdict = r.Ms > 50 ? ">50ms → 需后台 Task（本次实现仍按主线程，见报告）" : "≤50ms → 主线程直接扫（裁定 1 前段）";
         P($"性能结论: {verdict}");
-        Summary = $"DONE methods={r.PatchedMethods} game={r.InScope} collisions={r.Total} " +
-                  $"(routed={r.Items.Count} unknown={r.Unknown.Count}) {r.Ms}ms";
+        Summary = $"DONE methods={r.PatchedMethods} game={r.InScope} other={r.Skipped} collisions={r.Total} " +
+                  $"(routed={r.Items.Count} unknown={r.Unknown.Count}) framework={r.MultiOwnerFramework} {r.Ms}ms";
     }
 
     private static void DumpDetail(MethodBase m)

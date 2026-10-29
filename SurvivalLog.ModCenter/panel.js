@@ -35,7 +35,8 @@
  * 处置建议三 sec；多卡片间分隔线）+ 固定风险文案 + 关闭/停用此 mod/卸载此 mod… 三钮
  * （停用走 MC_TOGGLE_MOD 既有启停链、卸载…转 T10 卸载确认弹窗）；C# 未回包 5s 超时兜底。
  * v2 生命周期任务 12 = L2 补丁碰撞实测：侧栏仓库卡下方"补丁碰撞 N 组"汇总行（MC_SCAN_DATA
- * 驱动；点击弹汇总窗，列出全部碰撞组含未知来源，含"重新扫描"→ MC_SCAN）＋ 行内聚合橙标 ⇄
+ * 驱动；点击弹汇总窗，列出全部碰撞组含未知来源；框架侧多 owner 组标注"框架侧 N 组未计入"
+ * 单独披露、不铺行——Ruling 14②；含"重新扫描"→ MC_SCAN）＋ 行内聚合橙标 ⇄
  * （C# 每 mod 一枚，click:"cf" 复用冲突详情弹窗的橙卡片；停用行 w:true → __mc-weak 弱化）；
  * 灰卡（lv=gray）标题用"同域 mod"（T11 M4）；T11 M2/M3/M5/M6 为 C# 侧表/文案修正。
  *
@@ -487,6 +488,7 @@
       tt = '\u8865\u4e01\u78b0\u649e ' + (s.total || 0) + ' \u7ec4';
       dd = '\u53ef\u5f52\u5c5e ' + (s.routed || 0) + ' \u7ec4'
         + ((s.unknown || 0) > 0 ? ' \u00b7 \u672a\u77e5\u6765\u6e90 ' + s.unknown + ' \u7ec4' : '')
+        + ((s.framework || 0) > 0 ? ' \u00b7 \u6846\u67b6\u4fa7 ' + s.framework + ' \u7ec4\u672a\u8ba1\u5165' : '')
         + ' \u00b7 \u6e38\u620f\u4fa7 ' + (s.game || 0) + '/' + (s.patched || 0) + ' \u65b9\u6cd5 \u00b7 ' + (s.ms || 0) + 'ms'
         + (s.at ? ' \u00b7 ' + scanTimeText(s.at) : '');
     }
@@ -1276,7 +1278,9 @@
     } else {
       h += '<div class="__mc-m-sub">\u626b\u63cf\u4e8e ' + esc(scanTimeText(s.at)) + ' \u00b7 \u5171 ' + (s.total || 0)
         + ' \u7ec4\uff08\u53ef\u5f52\u5c5e ' + (s.routed || 0) + ' / \u672a\u77e5\u6765\u6e90 ' + (s.unknown || 0)
-        + '\uff09\u00b7 \u6e38\u620f\u4fa7 ' + (s.game || 0) + ' \u4e2a\u65b9\u6cd5\uff08\u5df2\u6302\u8865\u4e01\u603b\u6570 '
+        + '\uff09'
+        + ((s.framework || 0) > 0 ? ' \u00b7 \u6846\u67b6\u4fa7 ' + s.framework + ' \u7ec4\u672a\u8ba1\u5165' : '')
+        + ' \u00b7 \u6e38\u620f\u4fa7 ' + (s.game || 0) + ' \u4e2a\u65b9\u6cd5\uff08\u5df2\u6302\u8865\u4e01\u603b\u6570 '
         + (s.patched || 0) + '\uff09\u00b7 ' + (s.ms || 0) + 'ms</div>'
         + '<div class="__mc-m-sec"><div class="__mc-m-h">\u78b0\u649e\u7ec4\uff08\u540c\u4e00\u6e38\u620f\u65b9\u6cd5 \u22652 \u4e2a\u8865\u4e01 owner\uff09</div>';
       var items = s.items || [];
@@ -1289,8 +1293,22 @@
           + '<div class="__mc-scan-n">\u8865\u4e01\u5b9e\u4f8b ' + (it.patches || 0) + ' \u4e2a \u00b7 '
           + (it.unknown ? '\u4e0d\u53ef\u5f52\u5c5e\uff08\u4ec5\u7edf\u8ba1\uff09' : '\u53ef\u5f52\u5c5e\u5df2\u88c5 mod') + '</div></div>';
       }
-      h += '</div>'
-        + '<div class="__mc-risk">\u540c\u4e00\u65b9\u6cd5\u591a\u4e2a\u8865\u4e01\u7684\u7ed3\u679c\u53d6\u51b3\u4e8e\u52a0\u8f7d\u987a\u5e8f\uff08\u540e\u5199\u8986\u76d6\u524d\u5199\uff09\uff1b\u8c03\u6574\u52a0\u8f7d\u987a\u5e8f\u4ec5\u7f13\u89e3\u5199\u5e8f\u7c7b\u51b2\u7a81\uff0c\u4e0d\u80fd\u89e3\u51b3\u6570\u503c\u53e0\u52a0\u7c7b\u51b2\u7a81\uff0c\u98ce\u9669\u81ea\u8d1f\u3002</div>'
+      h += '</div>';
+      // 裁定 A（Ruling 14②）：框架侧多 owner 组不铺行/不计入碰撞总数，但汇总必须披露
+      var fw = s.frameItems || [];
+      if (fw.length) {
+        h += '<div class="__mc-m-sec"><div class="__mc-m-h">\u6846\u67b6\u4fa7\u672a\u8ba1\u5165\uff08' + (s.framework || fw.length)
+          + ' \u7ec4\uff0c\u975e\u6e38\u620f\u65b9\u6cd5\uff09</div>'
+          + '<div class="__mc-m-txt" style="font-size:11.5px">\u6846\u67b6/\u5f15\u64ce\u65b9\u6cd5\u4e0a\u7684\u591a owner \u5171\u6302\uff1a\u771f\u5b9e\u5b58\u5728\uff08\u542b\u5df2\u88c5 mod\uff09\uff0c\u4f46\u4e0d\u53c2\u4e0e\u6e38\u620f\u903b\u8f91\u78b0\u649e\u5224\u5b9a\uff0c\u4e0d\u4ea7\u751f\u884c\u5185\u6a59\u6807\u3002</div>';
+        for (var fi = 0; fi < fw.length; fi++) {
+          var fit = fw[fi] || {};
+          h += '<div class="__mc-scan-grp"><div class="__mc-scan-m">' + esc(fit.method || '?') + '</div>'
+            + '<div class="__mc-scan-o">' + esc((fit.owners || []).join(' \u00b7 ')) + '</div>'
+            + '<div class="__mc-scan-n">\u8865\u4e01\u5b9e\u4f8b ' + (fit.patches || 0) + ' \u4e2a \u00b7 \u4ec5\u62ab\u9732\uff08\u672a\u8ba1\u5165\u78b0\u649e\u7ec4\uff09</div></div>';
+        }
+        h += '</div>';
+      }
+      h += '<div class="__mc-risk">\u540c\u4e00\u65b9\u6cd5\u591a\u4e2a\u8865\u4e01\u7684\u7ed3\u679c\u53d6\u51b3\u4e8e\u52a0\u8f7d\u987a\u5e8f\uff08\u540e\u5199\u8986\u76d6\u524d\u5199\uff09\uff1b\u8c03\u6574\u52a0\u8f7d\u987a\u5e8f\u4ec5\u7f13\u89e3\u5199\u5e8f\u7c7b\u51b2\u7a81\uff0c\u4e0d\u80fd\u89e3\u51b3\u6570\u503c\u53e0\u52a0\u7c7b\u51b2\u7a81\uff0c\u98ce\u9669\u81ea\u8d1f\u3002</div>'
         + '<div class="__mc-m-sub" style="margin-top:8px">\u8303\u56f4\uff1a' + esc(s.scope || '') + '\uff08\u6846\u67b6/\u5f15\u64ce/\u63d2\u4ef6\u81ea\u8eab\u65b9\u6cd5\u4e0d\u7edf\u8ba1\uff09</div>';
     }
     h += '<div class="__mc-m-acts"><button type="button" class="__mc-btn __mc-btn-mini" data-pact="rescan"'
@@ -1815,7 +1833,9 @@
       renderSide();
       if (ST.patchOpen) { setModal(patchModalHtml()); bindPatchModal(); }
       if (wasWait) toastRaw(event.error ? '\u626b\u63cf\u5931\u8d25' : ('\u626b\u63cf\u5b8c\u6210\uff1a\u78b0\u649e ' + (event.total || 0) + ' \u7ec4'),
-        event.error || ('\u53ef\u5f52\u5c5e ' + (event.routed || 0) + ' \u7ec4 \u00b7 \u672a\u77e5\u6765\u6e90 ' + (event.unknown || 0) + ' \u7ec4 \u00b7 ' + (event.ms || 0) + 'ms'));
+        event.error || ('\u53ef\u5f52\u5c5e ' + (event.routed || 0) + ' \u7ec4 \u00b7 \u672a\u77e5\u6765\u6e90 ' + (event.unknown || 0) + ' \u7ec4'
+          + ((event.framework || 0) > 0 ? ' \u00b7 \u6846\u67b6\u4fa7 ' + event.framework + ' \u7ec4\u672a\u8ba1\u5165' : '')
+          + ' \u00b7 ' + (event.ms || 0) + 'ms'));
     }
     /* v2 任务 9：排序数据（MC_ORDER_DATA：guids=生效序 / rows=显示元数据 / def=默认序）。
      * 面板开着且在排序模式才重绘；数据本体存 ST.ordRows（重进排序模式前可参照）。 */

@@ -361,9 +361,10 @@ public sealed class CfData
 
 /// <summary>
 /// L2 补丁碰撞扫描数据（v2 任务 12，MC_SCAN_DATA 推送体，__mcEvent 通道）：
-/// at=扫描时间（Unix 毫秒）、patched=已挂补丁方法总数、game=游戏侧方法数、total=碰撞组数
-/// （routed 可归属 + unknown 全未知来源）、ms=扫描耗时、scope=过滤口径文案、error=扫描异常。
-/// items=全部碰撞组（可归属在前，未知来源在后；行内橙标只挂可归属组，未知来源只进本汇总）。
+/// at=扫描时间（Unix 毫秒）、patched=已挂补丁方法总数、game=游戏侧已挂补丁方法数（含单 owner；
+/// fix I-1 口径）、total=游戏侧碰撞组数（routed 可归属 + unknown 全未知来源）、framework=框架侧
+/// 多 owner 组数（裁定 A：披露但不计入 total/不铺行）、ms=扫描耗时、scope=过滤口径文案、
+/// error=扫描异常。items=游戏侧碰撞组；frameItems=框架侧多 owner 组（仅汇总披露）。
 /// </summary>
 public sealed class PatchScanData
 {
@@ -373,10 +374,12 @@ public sealed class PatchScanData
     public int Total;
     public int Routed;
     public int Unknown;
+    public int Framework;
     public long Ms;
     public string Scope;
     public string Error;
     public List<PatchScanItem> Items = new();
+    public List<PatchScanItem> FrameworkItems = new();
 
     public string ToJson()
     {
@@ -387,6 +390,7 @@ public sealed class PatchScanData
           .Append(",\"total\":").Append(Total.ToString(CultureInfo.InvariantCulture))
           .Append(",\"routed\":").Append(Routed.ToString(CultureInfo.InvariantCulture))
           .Append(",\"unknown\":").Append(Unknown.ToString(CultureInfo.InvariantCulture))
+          .Append(",\"framework\":").Append(Framework.ToString(CultureInfo.InvariantCulture))
           .Append(",\"ms\":").Append(Ms.ToString(CultureInfo.InvariantCulture))
           .Append(",\"scope\":").Append(JsonW.Str(Scope));
         if (!string.IsNullOrEmpty(Error)) sb.Append(",\"error\":").Append(JsonW.Str(Error));
@@ -395,6 +399,12 @@ public sealed class PatchScanData
         {
             if (i > 0) sb.Append(',');
             Items[i].Write(sb);
+        }
+        sb.Append("],\"frameItems\":[");
+        for (var i = 0; i < FrameworkItems.Count; i++)
+        {
+            if (i > 0) sb.Append(',');
+            FrameworkItems[i].Write(sb);
         }
         sb.Append("]}");
         return sb.ToString();

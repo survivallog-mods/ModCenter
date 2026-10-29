@@ -727,15 +727,19 @@ PendingWriter 合并语义对临时文件 `selftest-pending.json` 自证（旧�
 
 - 环境：本机 BepInEx 6 IL2CPP 构型，`0Harmony 2.10.2.0`（HarmonyX），20 插件（12 套件 + 6 第三方 + 2 探针）。
 - **结论：Il2CppInterop 挂的游戏方法补丁 owner 可读，归组可用**。`Harmony.GetAllPatchedMethods()`
-  返回 58 个已挂补丁方法；`Harmony.GetPatchInfo(m)` 对每个方法返回 `HarmonyLib.Patches`，
+  返回 58 个已挂补丁方法（**游戏侧 55 / 非游戏侧 3**：`System.Console.SetOut`、
+  `BepInEx.BaseChainloader.ModifyLoadOrder`、`Vuplex.BaseWebView.HandleMessageEmitted`）；
+  `Harmony.GetPatchInfo(m)` 对每个方法返回 `HarmonyLib.Patches`，
   `Patches.Owners`（`ReadOnlyCollection<string>`）与各补丁实例 `Patch.owner` 字段**两路一致**，
   `Patch.PatchMethod` 可读（补丁方法声明类/名完整）。`GetAllPatchedMethods().Contains(m)` 为 True
   （patch 字典键与 Attribute 补丁的目标 MethodBase 同一身份）。
-- 套件已挂方法 dump（5~10 个）：`BagComponent.OnInit`（cabinetsize）、`EndlessManager.FallMapPoint` /
+- 套件已挂方法 dump（8 个第一方挂点）：`BagComponent.OnInit`（cabinetsize）、`EndlessManager.FallMapPoint` /
   `Initialize` / `SurvivalPlanningComponent.OnInitBuffs`（endlessguard）、`SurvivalResultsManager.OnBuySurvivalPlan`
   （planpick）、`WebUIVm.HandleCallback` / `GameTimeManager.ChangeGameSpeed`（predisasterspeed）、
   `Ac_ToolTable_RefreshBag.SendAction`（cabineteverywhere.coalesce）——owner=各 mod Harmony id，
   与 `new Harmony(Guid)` 约定逐一吻合；补丁方法声明类均在插件程序集。
+  （fix M-6：探针重点 dump 的"套件 owner"判定改为第一方前缀 `com.local.survivallog.`；此前
+  `IndexOf("survivallog")` 会把 `com.dev./com.ivmakk.survivallog.*` 第三方也当套件，导致套件挂点被挤出。）
 - **本机实测的 ≥2 owner 方法共 9 个**：8 个游戏侧（BetterTrade × ProjectCook × StorageHub × StatsUI
   两两/三方共挂：FurnitureTagRules.Evaluate/TryGetMatchRank/EnsureCache、FurnitureTagComponent.TryGetPutRank、
   WebUILayer.OnUpdate、WebUI_BackpackUI.CallShowAction、ItemManager.CollectTradeContainers、
@@ -744,7 +748,7 @@ PendingWriter 合并语义对临时文件 `selftest-pending.json` 自证（旧�
   套件仅 CabinetSize / CabinetEverywhere / EndlessGuard / PlanPick / PreDisasterSpeed 五处 Harmony 挂点，
   目标互不重叠）——扫描报告非空来自真实第三方两两碰撞；套件归属/行内橙标/停用弱化用一次性
   验证插件构造实证（见 6.13.3）。
-- 性能：全量枚举 + 每方法 PatchInfo 读取 0~7ms（本机），**主线程直接扫**（裁定 1，无需后台 Task）。
+- 性能：全量枚举 + 每方法 PatchInfo 读取 **0~8ms**（本机），**主线程直接扫**（裁定 1，无需后台 Task）。
 
 ### 6.13.2 机制（`PatchScan.cs`）
 
@@ -752,9 +756,13 @@ PendingWriter 合并语义对临时文件 `selftest-pending.json` 自证（旧�
   结果缓存 `PatchScan._last`，快照 ics / MC_CF 卡片 / MC_SCAN_DATA 三处同源。
 - **归组**：同方法 ≥2 owner 一条；owner 双路径合并去重（Patches.Owners + Patch.owner，防版本差异）。
   `patchedCount` = prefix+postfix+transpiler+finalizer+ilmanipulator 实例数。
-- **范围过滤**：只看游戏侧方法（声明类型程序集=`HotUpdate` 或命名空间 `GameCore.*`）；框架
-  （BepInEx/HarmonyLib/MonoMod）、引擎（UnityEngine/Vuplex）、插件自身内部方法不计。实测牺牲
-  Vuplex `HandleMessageEmitted` 三 owner 组（UI 框架消息入口，不是游戏方法），换取零框架噪音。
+- **范围过滤与统计口径**：只看游戏侧方法（声明类型程序集=`HotUpdate` 或命名空间 `GameCore.*`）；
+  框架（BepInEx/HarmonyLib/MonoMod）、引擎（UnityEngine/Vuplex）、插件自身内部方法不计。
+  `InScope`/`Skipped` 按**全部已挂补丁方法**计数（含单 owner）；碰撞组数单独 `MultiOwnerGame`
+  统计——面板"游戏侧 55/58 方法"不再等于碰撞组数（fix I-1）。框架侧多 owner 组
+  （`MultiOwnerFramework`/`Framework`）继续过滤不铺行，但 `MC_SCAN_DATA.framework/frameItems`
+  与面板汇总行/弹窗**必须披露"框架侧 N 组未计入"**（Ruling 14②；实测 Vuplex
+  `BaseWebView.HandleMessageEmitted` 3 owner 真实共挂不再隐身）。
 - **owner→mod 归属**（裁定 2）：①精确 GUID 全表 ②前缀（owner 以 `<GUID>.` 开头，如
   `com.local.survivallog.quickaction.trace` → quickaction）③其余=未知来源（显示"未知来源（id）"，
   不臆造归属）。两遍扫描保证精确优先于前缀。
@@ -763,17 +771,23 @@ PendingWriter 合并语义对临时文件 `selftest-pending.json` 自证（旧�
   建议）。**未知来源组不铺行**，只进扫描汇总（`MC_SCAN_DATA` 的 `unknown` 计数与 `[未知来源]` 组）。
 - **卡片文案**（裁定 3）：reason=对同一游戏方法 X 挂了 N 个补丁（共 M 个补丁实例），结果取决于
   加载顺序（后写覆盖前写）；tips=停用其中一方 / 尝试调整加载顺序（仅缓解写序类冲突，风险自负）。
-- **面板**：侧栏仓库入口卡下方"补丁碰撞 N 组"汇总行（可归属/未知来源/游戏侧方法数/耗时/扫描时刻；
-  点击弹汇总窗，列出全部组，含"重新扫描"→ MC_SCAN）；橙标点击走既有 cf 弹窗。
+- **面板**：侧栏仓库入口卡下方"补丁碰撞 N 组"汇总行（可归属/未知来源/框架侧未计入/游戏侧方法数/
+  耗时/扫描时刻；点击弹汇总窗，列出全部游戏侧组 + 框架侧"未计入"披露区，含"重新扫描"→ MC_SCAN）；
+  橙标点击走既有 cf 弹窗。
 - **M7（T11 Minor）**：套件行 `General.Enabled=false` 时，行内 cf 类徽标（红/橙/灰）保留但加
   `w:true`（面板 `.__mc-weak` 透明度 .45）且 tip 前缀"（已停用）"——保留信息量又不误导。
+  **裁定 C（Ruling 15）语义**：停用=入口隐藏/General.Enabled 关闭（套件行为停写），**已挂
+  Harmony 补丁不从账本移除**；扫描仍会看到该 owner，徽标因此保留、仅标注停用态（不表述为
+  "补丁已移除"）。
 
 ### 6.13.3 装机实测记录（2026-10-29 主菜单阶段）
 
-- **真实环境**（6 第三方在场）：扫描 8 组（可归属 8 / 未知来源 0 / 58 方法 / 0ms）。BetterTrade
-  与 ProjectCook 各 7 组（行内各一枚 ⇄ 聚合标），StatsUI 1 组，StorageHub 2 组；cf 弹窗逐卡对拍=
-  方法名+双方显示名+原因+tips（含"后写覆盖前写"/"风险自负"）；汇总弹窗 8 组全列；"重新扫描"
-  往返（时间戳更新、弹窗就地重绘）。
+- **真实环境**（6 第三方在场）：扫描 8 组（可归属 8 / 未知来源 0 / **游戏侧 55/58 方法** /
+  **框架侧 1 组未计入** / 0~8ms）。BetterTrade 与 ProjectCook 各 7 组（行内各一枚 ⇄ 聚合标），
+  StatsUI 1 组，StorageHub 2 组；cf 弹窗逐卡对拍=方法名+双方显示名+原因+tips（含"后写覆盖前写"/
+  "风险自负"）；汇总弹窗 8 组全列 + "框架侧未计入（1 组，非游戏方法）"披露区
+  （`BaseWebView.HandleMessageEmitted`：StorageHub/NeighborBasket/BetterTrade 3 owner）；"重新扫描"
+  往返（时间戳更新、弹窗就地重绘）。DOM 文本证据 `task-12-cdp.txt`（fix round）。
 - **构造验证**（一次性插件，验后删除）：
   ① `T12L2Dummy` 以 `com.local.survivallog.quickaction.trace` 给 `BagComponent.OnInit` 挂 no-op
   postfix → 与 CabinetSize 成一组；**前缀归属**到 QuickAction/CabinetSize，两行橙标；cf 弹窗橙卡
@@ -803,6 +817,9 @@ PendingWriter 合并语义对临时文件 `selftest-pending.json` 自证（旧�
   跳过、M7 停用弱化、灰卡标题改面板侧；`Payload.cs` 增 `IcInfo.w` + `PatchScanData/Item`；
   `Meta.cs` 删非 L1 第三方域登记（M2）+ 附加显示名（M5）；panel.js 增汇总行/汇总弹窗/`__mc-weak`。
   实证与实测见 §6.13；测试插件（T12L2Dummy/ExpandedStorage/T12UnknownDummy）验后已删。
+  **fix round 1**（评审 I-1/M-6 + Ruling 14）：`InScope/Skipped` 改为全量已挂补丁方法计数
+  （游戏侧 55/58，碰撞组数独立）；框架侧多 owner 组 `framework/frameItems` 汇总披露（"框架侧 N 组
+  未计入"）；探针重点 dump 改第一方前缀判定；停用文案按 Ruling 15 明确"补丁不移除"。
 
 - 2026-10-29 v2 任务 6（决策层 + gamekb 通道）：新增 `RepoDecision.cs`（RepoRow/五态 Build/
   12 仓清单/GuidOf/DllRelOf/SnapshotLocal + PendingWriter 主线程唯一写者三口）与

@@ -1797,7 +1797,8 @@ internal static class ConfigBridge
     }
 
     /// <summary>T11 M7：停用套件行的冲突/碰撞/同域徽标保留但弱化（面板降透明度）+ tip 前缀
-    /// "（已停用）"——保留信息量又不误导（停用 = 行为已还原，冲突当前不生效）。</summary>
+    /// "（已停用）"——保留信息量又不误导。裁定 C（Ruling 15）：停用语义=入口隐藏/General.Enabled
+    /// 关闭（套件行为停写），**已挂 Harmony 补丁不从账本移除**；因此徽标保留、只标停用态。</summary>
     private static void WeakenCfIcs(List<IcInfo> ics)
     {
         foreach (var ic in ics)
