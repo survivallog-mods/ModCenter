@@ -5,6 +5,12 @@
 > 已 md5 核对**逐字节相同**，行号通用。下文行号如无特别说明均指这两份同内容文件。
 > 消费方：Task 5（游戏内注入器）。本文件是后续任务的锚点单源，改动挂钩点须同步本文。
 
+> **v2 复核（2026-10-29，发版链与文档同步任务）**：两处入口锚点未变——主菜单
+> `#app .container .menu` 尾部 appendChild、ESC 菜单 `#app .left-panel .menu-list`
+> insertBefore `.btn-restart, .btn-exit`。v2 新增的仓库页/排序模式/冲突体检/待生效条
+> 全部是面板内 DOM（`#__mc_overlay`），不新增游戏侧挂钩点、不改表字段读取面，
+> 本文件锚点结论与 `tools/gamekb/moddeps.json` 登记继续有效。
+
 ## 结论速览
 
 | 入口 | 页面（iframe id / pageId） | 容器选择器 | 按钮类 | 追加方式 |
