@@ -7,49 +7,58 @@ using System.Security.Cryptography;
 using System.Text;
 using BepInEx;
 using BepInEx.Bootstrap;
-using BepInEx.Preloader.Core.Patching;
 using BepInEx.Unity.IL2CPP;
 using HarmonyLib;
-using SurvivalLog.ModCenter;
 
-namespace MCCleaner;
+namespace SurvivalLog.ModCenter;
 
 /// <summary>
-/// MC 启动清理器（ModCenter v2 生命周期组件一）：BepInEx patcher 阶段的纯前置执行器——
-/// 无任何 Patch 方法，仅借 Initialize 在启动最早阶段执行动作（探针 E1 已实证可行）。
-/// 单槽基座级组件：始终以 BepInEx\patchers\MCCleaner.dll 单份在场，游戏内通道不更新自身，
-/// 见 spec §4.7（双槽同装已被 CLR 程序集身份合并证伪，Ruling 8）。
-/// T2：Initialize 依次执行——①序列化自证（标记文件 BepInEx\ModCenter\selftest.flag 触发，
-/// 裁定 2：补丁器阶段 cfg 读取不可靠，弃 cfg 键 Debug.SelfTest 改标记文件）；②pending 执行器
-/// （幂等 / MD5 校验 / 失败保留 / 原子重写，spec §3）。T3：③挂 BaseChainloader&lt;BasePlugin&gt;.
-/// ModifyLoadOrder postfix 实现加载序覆盖（pending.order 驱动 + 硬依赖保护，纯内存不写文件）。
-/// T4：④marker 翻译（Ruling 1，先翻译后执行）——读 ModCenter cfg [DisabledTp] 意图翻译为
-/// disable/enable 派生 op 当场改名（v1 的"退出时分离进程改名"退役；强杀残留概念消失：
-/// 意图在 cfg，每次启动先于插件加载执行，此阶段 dll 无锁直接 File.Move）。enable 仅认显式
-/// marker=false 键（Ruling 9：cfg 无键的手工禁用 .disabled 不动）。
-/// T10：⑤disable 幂等化带出——dll 与 .disabled 同时在场视为幂等成功（删裸 dll 保 .disabled，
-/// v1 语义，不再每 boot 一条 FAIL）；⑥末尾目录清理（RunDirSweep）——ops 消化完且 ModCenter
-/// 目录只剩 staging/pending.json 时整目录清掉（ModCenter 自卸载链收尾；清理器自身不动，Ruling 8）。
-/// 后续任务继续追加（重启等）。
-/// 自证文件（硬规则，不依赖 LogOutput.log）：BepInEx\MCCleaner_loaded.txt（T1 生命周期）
-/// + BepInEx\MCCleaner_ops.txt（T2 起 op 执行证据，追加行：时间/操作/结果/原因；
-/// T3 起加载序对拍：[ORDER] #NN guid 一行一项 + [ORDER-PROTECTED] guid(依赖 dep)；
-/// T4 起 marker 翻译：[MARKER] disable/enable &lt;dll&gt;）。
+/// 启动清理器执行体（T16 单 dll 化）：本类物理位于 <c>plugins\SurvivalLog.ModCenter.dll</c>，
+/// 由冻结引导壳 <c>BepInEx\patchers\MCShell.dll</c> 在补丁器阶段 <c>Assembly.LoadFrom</c> 后
+/// 反射调用 <see cref="Run"/>——清理逻辑随 ModCenter 本体发版（游戏内更新 ModCenter 即更新
+/// 清理逻辑），版本线只有一条（csproj &lt;Version&gt;）。纪律：本文件只允许 BepInEx.* /
+/// HarmonyLib / System.IO / System.Reflection 等，**不得引用任何 IL2CPP 游戏类型**
+/// （Il2Cppmscorlib / Il2CppSystem / HotUpdate / UnityEngine 一律不碰）——补丁器阶段这些
+/// 程序集尚未就绪。
+///
+/// 原 MCCleaner/CleanerPatcher.cs 的逻辑整体迁入（T2/T3/T4/T10），分段与证据格式保持不变：
+/// ①序列化/加载序自证（标记文件 BepInEx\ModCenter\selftest.flag 触发）；②pending 执行器
+/// （幂等 / MD5 校验 / 失败保留 / 原子重写）；③marker 翻译（Ruling 1，先翻译后执行）；
+/// ④加载序覆盖（封闭泛型 BaseChainloader&lt;BasePlugin&gt;.ModifyLoadOrder postfix）；
+/// ⑤末尾目录 sweep（Ruling 12，引导壳不动）。
+///
+/// T16 自卸载两阶段墓碑（物理约束：本 dll 在 boot 时被壳加载而锁定，无法自删）：
+/// - boot N：遇到 delete 自身 dll 的 op **不执行**，写 <c>BepInEx\ModCenter\uninstalled.flag</c>
+///   （时间戳 + cfg 路径）、该 op 从清单移除（视为已接管），证据 [SELFUNINST]；
+/// - boot N+1：壳见 flag → 删本体 + cfg + ModCenter 目录 → 不加载本体 → 退出。
+///
+/// T16 自更新：本 dll 被壳加载后，同程序集身份不允许在同靴内被 Chainloader 重新 LoadFrom，
+/// 因此自身 install/replace 不能在本靴落盘（否则 Chainloader 拿不到新程序集）。执行器遇到
+/// 自身 replace/install 时若目标已是期望内容（壳已在加载前预置）→ 幂等成功；否则写
+/// <c>BepInEx\ModCenter\selfupdate.flag</c>（staged / md5 / target）并把 op 视为已接管——
+/// 下一靴壳在 LoadFrom **之前**替换本体，当靴即运行新程序集（游戏内更新后一次重启生效）。
 /// </summary>
-[PatcherPluginInfo("com.local.survivallog.mccleaner", "MC Cleaner", "1.0.0")]
-public class CleanerPatcher : BasePatcher
+public static class CleanupRunner
 {
-    /// <summary>自证文件：BepInEx 根目录下 MCCleaner_loaded.txt</summary>
+    /// <summary>生命周期自证：BepInEx 根目录下 MCCleaner_loaded.txt（沿用 T1 证据格式）。</summary>
     private static string EvidencePath =>
         Path.Combine(Paths.BepInExRootPath, "MCCleaner_loaded.txt");
 
-    /// <summary>op 执行证据：BepInEx 根目录下 MCCleaner_ops.txt</summary>
+    /// <summary>op 执行证据：BepInEx 根目录下 MCCleaner_ops.txt（沿用 T2 证据格式）。</summary>
     private static string OpsEvidencePath =>
         Path.Combine(Paths.BepInExRootPath, "MCCleaner_ops.txt");
 
     /// <summary>序列化自证触发标记（裁定 2）：BepInEx\ModCenter\selftest.flag 存在即跑一轮，跑完即删。</summary>
     private static string SelfTestFlagPath =>
         Path.Combine(Paths.BepInExRootPath, "ModCenter", "selftest.flag");
+
+    /// <summary>T16 墓碑（壳的接口）：boot N 写，boot N+1 壳读取后删本体并退出。</summary>
+    public static string UninstalledFlagPath =>
+        Path.Combine(Paths.BepInExRootPath, "ModCenter", "uninstalled.flag");
+
+    /// <summary>T16 自更新预置（壳的接口）：面板写，下一靴壳在 LoadFrom 前替换本体。</summary>
+    public static string SelfUpdateFlagPath =>
+        Path.Combine(Paths.BepInExRootPath, "ModCenter", "selfupdate.flag");
 
     private static readonly UTF8Encoding Utf8NoBom = new(false);
 
@@ -78,18 +87,20 @@ public class CleanerPatcher : BasePatcher
         catch { }
     }
 
-    public override void Initialize()
+    /// <summary>
+    /// 壳的反射入口（补丁器阶段，先于插件加载）。生命周期自证行含**本程序集版本**——游戏内
+    /// 更新 ModCenter 后下一靴证据即带新版本，证明清理逻辑随 dll 生效。
+    /// </summary>
+    public static void Run()
     {
-        // 生命周期自证：时间戳 + 本 dll 实际加载位置（Assembly.Location 原值）
-        Ev("Initialize reached, dll=" + typeof(CleanerPatcher).Assembly.Location);
+        var asm = typeof(CleanupRunner).Assembly;
+        Ev("CleanupRunner.Run v" + asm.GetName().Version + " dll=" + asm.Location);
         ClearOrderProtected(); // 终审必修 9：上一靴的披露文件先清，本靴加载序 postfix 按实际重写
 
         RunSelfTestIfFlagged(); // T2 Step1：McPending 序列化自证；T3：加载序重排自证（同标记触发）
-        var selfUninst = RunPendingOps(); // T2 Step2：pending 执行器；T4：内置 marker 翻译段（先翻译后执行，Ruling 1）；T10：返回本靴是否执行过 ModCenter 自卸载删除
+        var selfUninst = RunPendingOps(); // T2 Step2：pending 执行器；T4：内置 marker 翻译段（先翻译后执行，Ruling 1）；T10：返回本靴是否执行过 ModCenter 自卸载接管
         InstallOrderOverride(); // T3：挂 ModifyLoadOrder postfix（order 读取在 postfix 内，晚于全部 op 落地）
-        RunDirSweep(selfUninst); // T10：末尾目录清理（Ruling 12：卸载收尾=目录 sweep，MCCleaner.dll 不动）
-
-        // ---- 后续任务在此之后追加执行段（重启等）----
+        RunDirSweep(selfUninst); // T10：末尾目录清理（Ruling 12：卸载收尾=目录 sweep，引导壳不动）
     }
 
     // ==================== T2 Step 1：序列化自证 ====================
@@ -117,7 +128,7 @@ public class CleanerPatcher : BasePatcher
                 new()
                 {
                     Type = McPending.TypeInstall,
-                    Target = "plugins/名\"称\\測試 路徑\n.dll", // 引号+反斜杠+换行+中文+空格（仅序列化用例，不落盘）
+                    Target = "plugins/名\"稱\\測試 路徑\n.dll", // 引号+反斜杠+换行+中文+空格（仅序列化用例，不落盘）
                     Staged = "staging/暫存 測試.bin",
                     Md5 = "d41d8cd98f00b204e9800998ecf8427e",
                 },
@@ -224,13 +235,15 @@ public class CleanerPatcher : BasePatcher
 
     /// <summary>
     /// 执行 pending.json（spec §3）：按序逐条执行；幂等（目标不在场=成功）；单条失败保留该条
-    /// 并记证据；install/replace 先 MD5 校验；install/replace 目标为清理器槽（Ruling 8）拒绝执行；
+    /// 并记证据；install/replace 先 MD5 校验；install/replace 目标为引导壳槽（patchers）拒绝执行；
     /// 有成功条目时以剩余条目原子重写清单（order 原样回传，不破坏 T3 顺序覆盖）。
     /// T4（Ruling 1）：执行前先做 marker 翻译——cfg [DisabledTp] 意图 → 派生 disable/enable op
     /// （同 target 持久 op 优先跳过翻译）；派生 op 与持久 op 走同一 ExecuteOp，但执行完即弃
     /// （成功不写清单、失败只留证据——源是 cfg marker，下次启动按现值重译重试）。
-    /// T10：返回本靴是否成功执行过 ModCenter 自卸载删除（dll 或自身 cfg 的 delete 且成功）——
+    /// T10：返回本靴是否接管过 ModCenter 自卸载删除（dll 或自身 cfg 的 delete）——
     /// RunDirSweep 用它区分"真自卸载"与"面板被手工停用/移入子目录"，防止误删用户 custom order。
+    /// T16：自身 dll 的 delete 不执行（写墓碑）；自身 dll 的 install/replace 不本靴落盘
+    /// （写 selfupdate 预置，下一靴壳加载前执行）。
     /// 任何异常不阻断游戏启动。
     /// </summary>
     private static bool RunPendingOps()
@@ -317,6 +330,22 @@ public class CleanerPatcher : BasePatcher
             ? op.Staged + " -> " + op.Target
             : op.Target);
 
+    /// <summary>
+    /// 本程序集（插件本体 dll）是否为目标文件：补丁器阶段壳已 LoadFrom 本 dll，Windows 文件锁使
+    /// 自删/自替换不能在**同一靴**内安全完成；T16 用墓碑（delete）与自更新预置（install/replace）
+    /// 两阶段接管。.disabled 变体不算自身目标（那是"未加载形态"，可安全改名/删除）。
+    /// </summary>
+    private static bool IsSelfDllPath(string absPath)
+    {
+        try
+        {
+            var self = typeof(CleanupRunner).Assembly.Location;
+            if (string.IsNullOrEmpty(self) || string.IsNullOrEmpty(absPath)) return false;
+            return string.Equals(Path.GetFullPath(absPath), Path.GetFullPath(self), StringComparison.OrdinalIgnoreCase);
+        }
+        catch { return false; }
+    }
+
     /// <summary>执行单条 op。返回 true=成功（幂等不在场也算），false=失败（reason 给证据）。</summary>
     private static bool ExecuteOp(McPending.Op op, out string reason)
     {
@@ -327,6 +356,16 @@ public class CleanerPatcher : BasePatcher
             {
                 var t = ResolveRel(op.Target);
                 if (t == null) { reason = "非法相对路径: " + op.Target; return false; }
+                if (IsSelfDllPath(t))
+                {
+                    // T16 两阶段墓碑：本靴不删已被壳加载的本体；写 flag，下一靴壳在加载前删除。
+                    WriteUninstalledFlag();
+                    OpsEv("[SELFUNINST] boot-N 接管: " + op.Target
+                          + " 不本靴删除（壳已加载锁定）→ 墓碑 " + UninstalledFlagPath
+                          + "；下一靴壳删本体+cfg+目录后不加载");
+                    reason = "ModCenter 自卸载接管（墓碑已写，下一靴由壳删除本体）";
+                    return true;
+                }
                 if (!File.Exists(t)) { reason = "目标不在场(幂等)"; return true; }
                 try { File.Delete(t); return true; }
                 catch (Exception ex) { reason = "删除失败: " + ex.Message; return false; }
@@ -337,12 +376,44 @@ public class CleanerPatcher : BasePatcher
             {
                 var t = ResolveRel(op.Target);
                 if (t == null) { reason = "非法相对路径: " + op.Target; return false; }
-                if (IsCleanerSlot(op.Target))
+                if (IsShellSlot(op.Target))
                 {
-                    reason = "拒绝执行: 清理器属基座级组件，请用安装器更新 (Target=" + op.Target + ")";
+                    reason = "拒绝执行: 引导壳属基座级组件，请用安装器更新 (Target=" + op.Target + ")";
                     return false;
                 }
                 if (string.IsNullOrEmpty(op.Md5)) { reason = "缺少 md5"; return false; }
+
+                // T16 幂等：目标已是期望内容（壳已在加载前预置 / 重跑同一清单）→ 成功，不重复写盘。
+                if (File.Exists(t))
+                {
+                    try
+                    {
+                        if (string.Equals(Md5Of(t), op.Md5, StringComparison.OrdinalIgnoreCase))
+                        { reason = "目标已是期望内容(幂等)"; return true; }
+                    }
+                    catch { /* 读不了就走正常路径，由后续 md5/落盘报因 */ }
+                }
+
+                if (IsSelfDllPath(t))
+                {
+                    // T16 自更新预置：同程序集身份不允许本靴内被 Chainloader 重新 LoadFrom——
+                    // 本靴不落盘，写 selfupdate.flag（staged/md5/target），下一靴壳在 LoadFrom 前替换。
+                    var s2 = ResolveRel(op.Staged);
+                    if (s2 == null) { reason = "非法暂存路径: " + op.Staged; return false; }
+                    if (!File.Exists(s2)) { reason = "staged 不在场: " + op.Staged; return false; }
+                    string actual2;
+                    try { actual2 = Md5Of(s2); }
+                    catch (Exception ex) { reason = "md5 计算失败: " + ex.Message; return false; }
+                    if (!string.Equals(actual2, op.Md5, StringComparison.OrdinalIgnoreCase))
+                    { reason = "md5 不匹配: 期望 " + op.Md5 + " 实得 " + actual2; return false; }
+                    WriteSelfUpdateFlag(s2, actual2, t);
+                    OpsEv("[SELFUPDATE] boot-N 接管: " + op.Target
+                          + " 不本靴落盘（壳已加载锁定）→ 预置 " + SelfUpdateFlagPath
+                          + "；下一靴壳在 LoadFrom 前替换后加载新程序集");
+                    reason = "ModCenter 自更新接管（下一靴壳加载前替换）";
+                    return true;
+                }
+
                 var s = ResolveRel(op.Staged);
                 if (s == null) { reason = "非法暂存路径: " + op.Staged; return false; }
                 if (!File.Exists(s)) { reason = "staged 不在场: " + op.Staged; return false; }
@@ -404,6 +475,51 @@ public class CleanerPatcher : BasePatcher
         }
     }
 
+    // ==================== T16：自卸载墓碑 / 自更新预置（壳的接口） ====================
+
+    /// <summary>写自卸载墓碑（幂等：已在场不重写）。内容=时间戳 + 自身 cfg 绝对路径。</summary>
+    private static void WriteUninstalledFlag()
+    {
+        try
+        {
+            var dir = Path.Combine(Paths.BepInExRootPath, "ModCenter");
+            Directory.CreateDirectory(dir);
+            if (File.Exists(UninstalledFlagPath)) return;
+            File.WriteAllText(UninstalledFlagPath,
+                DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss") + "\n" + McCfgPath() + "\n", Utf8NoBom);
+        }
+        catch (Exception ex) { OpsEv("[SELFUNINST] 墓碑写入 FAIL: " + ex.Message); }
+    }
+
+    /// <summary>
+    /// 写自更新预置（面板写；壳在下一靴 LoadFrom 前读取并替换本体）。原子写：tmp → move。
+    /// 内容三行：staged 绝对路径 / staged md5 / target 绝对路径。多行写入必须一次落盘
+    /// （壳对格式不合法只留证据并继续加载旧 dll，不会损坏本体）。
+    /// </summary>
+    public static void WriteSelfUpdateFlag(string stagedAbsPath, string md5, string targetAbsPath)
+    {
+        try
+        {
+            var dir = Path.Combine(Paths.BepInExRootPath, "ModCenter");
+            Directory.CreateDirectory(dir);
+            var tmp = SelfUpdateFlagPath + ".tmp";
+            File.WriteAllText(tmp,
+                stagedAbsPath + "\n" + md5 + "\n" + targetAbsPath + "\n", Utf8NoBom);
+            if (File.Exists(SelfUpdateFlagPath)) File.Delete(SelfUpdateFlagPath);
+            File.Move(tmp, SelfUpdateFlagPath);
+        }
+        catch (Exception ex)
+        {
+            try { OpsEv("[SELFUPDATE] 预置写入 FAIL: " + ex.Message); } catch { }
+        }
+    }
+
+    /// <summary>撤销/卸载时清自更新预置（不存在=幂等）。</summary>
+    public static void DeleteSelfUpdateFlag()
+    {
+        try { if (File.Exists(SelfUpdateFlagPath)) File.Delete(SelfUpdateFlagPath); } catch { }
+    }
+
     /// <summary>
     /// BepInEx 根相对路径 → 绝对路径（-LiteralPath 等价语义：'/' 归一为 '\' 后 Path.Combine，
     /// 不吃通配/相对段歧义；绝对路径/盘符/../ 均拒绝返回 null）。
@@ -417,11 +533,14 @@ public class CleanerPatcher : BasePatcher
         return Path.Combine(Paths.BepInExRootPath, n);
     }
 
-    /// <summary>自身槽守卫（Ruling 8）：install/replace 目标为 MCCleaner.dll（任意目录）或 patchers\ 下任何文件。</summary>
-    private static bool IsCleanerSlot(string rel)
+    /// <summary>引导壳槽守卫（T16，Ruling 8 的替代）：install/replace 目标为 MCShell.dll（任意目录）
+    /// 或 patchers\ 下任何文件（含遗留 MCCleaner.dll）→ 拒绝执行（基座级组件不走游戏内通道）。</summary>
+    private static bool IsShellSlot(string rel)
     {
         var n = rel.Trim().Replace('/', '\\');
-        if (Path.GetFileName(n).Equals("MCCleaner.dll", StringComparison.OrdinalIgnoreCase)) return true;
+        var baseName = Path.GetFileName(n);
+        if (baseName.Equals("MCShell.dll", StringComparison.OrdinalIgnoreCase)) return true;
+        if (baseName.Equals("MCCleaner.dll", StringComparison.OrdinalIgnoreCase)) return true; // 旧件兼容
         var first = n.Split('\\')[0];
         return first.Equals("patchers", StringComparison.OrdinalIgnoreCase);
     }
@@ -582,13 +701,15 @@ public class CleanerPatcher : BasePatcher
     /// <summary>
     /// ops 执行完后的收尾：<c>BepInEx\ModCenter</c> 目录在"清单已消化（无 pending.json 或 ops 空）
     /// 且目录内只剩 staging/pending.json"时整目录清掉（staging 递归删）。Ruling 12：卸载收尾=本段
-    /// 目录 sweep，<c>MCCleaner.dll</c> 不动（Ruling 8 基座级）；"分离进程自删清理器运行槽"的旧口径作废。
-    /// **order 有主（非空）时的强守卫（T10 fix I-2）**：仅当本靴确实成功执行过 ModCenter 自卸载
+    /// 目录 sweep，引导壳不动（T16：壳在 patchers，与目录无关）；"分离进程自删清理器运行槽"的旧口径作废。
+    /// **order 有主（非空）时的强守卫（T10 fix I-2）**：仅当本靴确实接管过 ModCenter 自卸载
     /// delete（dll 或自身 cfg，见 <see cref="IsSelfUninstallDelete"/>）且面板全形态不在场
     /// （<see cref="SelfDllPresent"/>：plugins 递归下的 dll / .disabled；<see cref="SelfCfgPresent"/>：
     /// 自身 cfg）才允许连 pending.json/order 一起清；否则保留——手工把 dll 改名 .disabled、移入
     /// 子目录、或只是清空了目录都不能静默删除用户 custom order（清理器每靴仍会应用它，与面板
-    /// 在场与否无关）。目录内有任何其他文件（selftest.flag 等）→ 保守放弃；任何异常不阻断启动。
+    /// 在场与否无关）。T16 墓碑在场时本段必然 SKIP（flag 属"其他内容"），由下一靴壳清目录。
+    /// 目录内有任何其他文件（selftest.flag / uninstalled.flag / selfupdate.flag 等）→ 保守放弃；
+    /// 任何异常不阻断启动。
     /// </summary>
     private static void RunDirSweep(bool selfUninstThisBoot)
     {
@@ -646,7 +767,7 @@ public class CleanerPatcher : BasePatcher
                 // 终审必修 9：依赖保护披露文件是派生件（每靴重建），不阻断自卸载目录 sweep
                 if (!Directory.Exists(e) && name.Equals("order_protected.txt", StringComparison.OrdinalIgnoreCase)) continue;
                 OpsEv("[DIRSWEEP] SKIP 目录内有非 staging/pending.json 内容: " + name + "（保守不动）");
-                return; // 目录内有其他内容（selftest 等）：保守放弃
+                return; // 目录内有其他内容（selftest/墓碑/自更新等）：保守放弃
             }
 
             try
@@ -702,8 +823,8 @@ public class CleanerPatcher : BasePatcher
 
     // ==================== T3：加载序覆盖（Harmony 改序 + 依赖保护） ====================
 
-    /// <summary>Harmony 实例 ID（补丁器阶段自用，与插件侧 Harmony ID 无冲突）。</summary>
-    private const string OrderHarmonyId = "com.local.survivallog.mccleaner.order";
+    /// <summary>Harmony 实例 ID（补丁器阶段自用，与插件侧 Harmony ID 无冲突；T16 换 ModCenter 前缀）。</summary>
+    private const string OrderHarmonyId = "com.local.survivallog.modcenter.order";
 
     /// <summary>终审必修 9：依赖保护披露文件（面板排序视图读取并展示"被硬依赖保护 N 项"）。
     /// 每靴覆盖，格式每行 <c>&lt;guid&gt;\t&lt;被依赖guid&gt;</c>；无 order/无保护 = 空文件。</summary>
@@ -750,7 +871,7 @@ public class CleanerPatcher : BasePatcher
                 OpsEv("[ORDER] HOOK-FAIL 未解析到 BaseChainloader<BasePlugin>.ModifyLoadOrder，加载序覆盖不生效");
                 return;
             }
-            var postfix = new HarmonyMethod(typeof(CleanerPatcher).GetMethod(
+            var postfix = new HarmonyMethod(typeof(CleanupRunner).GetMethod(
                 nameof(ModifyLoadOrderPostfix),
                 BindingFlags.NonPublic | BindingFlags.Static));
             new Harmony(OrderHarmonyId).Patch(original, postfix: postfix);

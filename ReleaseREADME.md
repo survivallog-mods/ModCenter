@@ -17,10 +17,10 @@
 ## 安装
 需先装好基座（见 SurvivalLog.Base 包）。把两个文件分别放到游戏目录：
 
-- `BepInEx\plugins\SurvivalLog.ModCenter.dll`（面板本体）
-- `BepInEx\patchers\MCCleaner.dll`（启动清理器：更新/卸载/排序在下次启动插件加载前执行）
+- `BepInEx\plugins\SurvivalLog.ModCenter.dll`（面板本体；更新/卸载/排序/停用的执行逻辑也在其中）
+- `BepInEx\patchers\MCShell.dll`（引导壳：每次启动把本体的清理逻辑叫起来，本身不含业务逻辑）
 
-重启游戏——主菜单左下和游戏内 ESC 菜单会出现「MOD 管理」入口。清理器是基座级组件，**游戏内更新不会替换它**；升级请用安装器/网盘完整包。
+重启游戏——主菜单左下和游戏内 ESC 菜单会出现「MOD 管理」入口。引导壳是**永久冻结**的基座级组件（版本固定 1.0.0 只是属性占位）：只有它的接口签名变更才需要随安装器更新；清理逻辑随 ModCenter.dll 本体发版，游戏内更新本体即更新清理逻辑。若从旧版升级，请删除旧的 `BepInEx\patchers\MCCleaner.dll`（安装器会自动清理）。
 
 ## 配置
 首次启动游戏时按默认值自动生成 `BepInEx\config\com.local.survivallog.modcenter.cfg`（全中文注释）。
@@ -36,8 +36,10 @@
 - 第三方 mod 的禁用只是让插件不加载（改名 `.disabled`），不会删除它的文件；卸载才是彻底删除
 - 更新/卸载/排序都写成待办清单，下次启动、插件加载前执行；强杀游戏也不会让已卸载的 mod 复活
 - 冲突体检只提示不自动处理；调整加载顺序只能规避部分冲突（写序类），不能解决数值叠加类冲突，风险自负
-- 游戏内更新只替换 ModCenter 本体，不更新清理器（清理器随安装器/网盘升级）
+- 游戏内更新会同时更新 ModCenter 本体与其内置的清理逻辑；引导壳 MCShell.dll 永不参与游戏内更新
+- 卸载 ModCenter 本体后需再重启一次：第一次重启写卸载标记，第二次重启由引导壳删除本体、配置与 `BepInEx\ModCenter\` 记录（这是 DLL 被加载时无法自删的物理限制）
 
 ## 卸载
-删除 `BepInEx\plugins\SurvivalLog.ModCenter.dll` 与 `BepInEx\patchers\MCCleaner.dll`；
+删除 `BepInEx\plugins\SurvivalLog.ModCenter.dll` 与 `BepInEx\patchers\MCShell.dll`；
 若存在 `BepInEx\ModCenter\`（待办清单/暂存目录）一并删除。各 mod 的配置文件不受影响。
+（面板内"卸载本面板"走两阶段：确认后第一次重启标记、第二次重启完成删除。）

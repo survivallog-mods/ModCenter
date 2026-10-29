@@ -1,11 +1,13 @@
 <Project Sdk="Microsoft.NET.Sdk">
 
-  <!-- MC 启动清理器（ModCenter v2 生命周期组件一）：BepInEx patcher 阶段纯前置执行器。
-       独立小版本线（1.0.0），不跟套件版本号。 -->
+  <!-- MC 壳（ModCenter v2 生命周期组件一）：永久冻结的 BepInEx patcher 引导壳。
+       版本号 1.0.0 是 [PatcherPluginInfo] 的占位值，**不是独立版本线**——壳永不变更，
+       只有壳与 ModCenter.dll 的接口签名（uninstalled.flag / selfupdate.flag / CleanupRunner.Run）
+       发生变更时才需要随安装器更新本 dll。 -->
   <PropertyGroup>
     <TargetFramework>net6.0</TargetFramework>
-    <AssemblyName>MCCleaner</AssemblyName>
-    <RootNamespace>MCCleaner</RootNamespace>
+    <AssemblyName>MCShell</AssemblyName>
+    <RootNamespace>MCShell</RootNamespace>
     <Version>1.0.0</Version>
     <LangVersion>latest</LangVersion>
     <Nullable>disable</Nullable>
@@ -16,25 +18,12 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <!-- 两端共用契约（T2）：物理归属插件项目，此处仅 link 编译同一文件 -->
-    <Compile Include="../SurvivalLog.ModCenter/Contracts/McPending.cs" />
-  </ItemGroup>
-
-  <ItemGroup>
-    <Reference Include="0Harmony">
-      <HintPath>E:\SteamLibrary\steamapps\common\Survival Log\BepInEx\core\0Harmony.dll</HintPath>
-      <Private>false</Private>
-    </Reference>
     <Reference Include="BepInEx.Core">
       <HintPath>E:\SteamLibrary\steamapps\common\Survival Log\BepInEx\core\BepInEx.Core.dll</HintPath>
       <Private>false</Private>
     </Reference>
     <Reference Include="BepInEx.Preloader.Core">
       <HintPath>E:\SteamLibrary\steamapps\common\Survival Log\BepInEx\core\BepInEx.Preloader.Core.dll</HintPath>
-      <Private>false</Private>
-    </Reference>
-    <Reference Include="BepInEx.Unity.IL2CPP">
-      <HintPath>E:\SteamLibrary\steamapps\common\Survival Log\BepInEx\core\BepInEx.Unity.IL2CPP.dll</HintPath>
       <Private>false</Private>
     </Reference>
   </ItemGroup>

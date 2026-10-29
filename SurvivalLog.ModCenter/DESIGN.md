@@ -2,17 +2,20 @@
 
 > 本文档随源码存放在 mod 自己的文件夹内；**每次迭代改动必须同步更新本文档**
 > （文档维护规则见 `docs\00-目录说明.md`）。
-> 版本：ModCenter `1.7.0`（作者定号，硬规则 1）；清理器 `MCCleaner` 走**独立小版本线** `1.0.0`
-> （Ruling 7，不跟套件号）。版本号一律由作者定，实施任务不得自选/递增。
+> 版本：ModCenter `1.7.0`（作者定号，硬规则 1）。**版本线只有一条**（Ruling 21 单 dll 化）：
+> 清理逻辑并入 `SurvivalLog.ModCenter.dll`；`BepInEx\patchers\MCShell.dll` 是**永久冻结**的
+> 引导壳（1.0.0 仅是 `[PatcherPluginInfo]` 属性占位，不构成版本线，只有壳接口签名变更才需
+> 随安装器更新）。版本号一律由作者定，实施任务不得自选/递增。
 > 菜单锚点单源：本目录 `ANCHORS.md`（挂钩点变更必须同步该文件与 `tools/gamekb/moddeps.json`）。
-> 当前状态（v2，2026-10-28/29）：**双件套** = 插件本体（`BepInEx\plugins\SurvivalLog.ModCenter.dll`）
-> + 启动清理器（`BepInEx\patchers\MCCleaner.dll`，**单槽基座级**，Ruling 8），二者经
-> `BepInEx\ModCenter\pending.json`（+`staging\`）交接；游戏内生命周期五链
+> 当前状态（v2，2026-10-28/29）：**单 dll 化** = 插件本体（`BepInEx\plugins\SurvivalLog.ModCenter.dll`，
+> 内含 CleanupRunner 清理执行体）+ 冻结引导壳（`BepInEx\patchers\MCShell.dll`，只负责在补丁器
+> 阶段唤起 CleanupRunner，并处理卸载墓碑/自更新预置），二者经 `BepInEx\ModCenter\pending.json`
+> （+`staging\`）交接；游戏内生命周期五链
 > （更新/安装/卸载/排序/停用）+ 冲突体检三层（L1 已知库 / L2 运行时碰撞 / L3 功能域）。
 >
 > **文档结构**：A 部（§1–§10）= v2 现行设计；B 部（附录）= **v1（历史）**原文归档
 > （v1 章节号保留原编号，正文引用写作「v1 §4.1」）。v1 中已被 v2 取代的机制
-> （DllDisabler 退出机械、双槽清理器、`[Disabled]` 名单等）见 §7 退役记录。
+> （DllDisabler 退出机械、单槽 MCCleaner（Ruling 8）、`[Disabled]` 名单等）见 §7 退役记录。
 > 实测报告与证据文件在 suite 仓 `.superpowers/sdd/2026-10-28-modcenter-v2-lifecycle/`，
 > 统一索引见 §9。
 
@@ -38,56 +41,71 @@ v2 在此之上补齐**生命周期闭环**（作者 2026-10-28 拍板，spec §
 |---|---|---|
 | D1 | 热更新口径 | 游戏内检测/下载/落盘 + 重启生效；不做进程内热换 |
 | D2 | 卸载彻底度 | 真删除（dll + cfg + ModCenter 记录）；执行点在下次启动、插件加载之前 |
-| D3 | 排序机制 | A1：启动清理器 Harmony 改序（Cecil 改写第三方 dll 依赖属性被否——改玩家文件，对方发新版即失效） |
+| D3 | 排序机制 | A1：启动清理（CleanupRunner）Harmony 改序（Cecil 改写第三方 dll 依赖属性被否——改玩家文件，对方发新版即失效） |
 | D4 | 冲突体检 | 三层全上；行内警示标 + 点击详情 + 玩家自决 |
 | D5 | 安装范围 | 套件 12 组织仓；第三方仍=玩家手丢 dll 面板纳管；不做第三方商店（转载红线）；基座修复走网盘 |
-| D6 | 更新触发 | 面板打开自动查一次（快速失败）+ 手动刷新；**无后台轮询** |
+| D6 | 更新触发 | **面板打开时自动查一次**（10 分钟会话缓存；Ruling 22）+ 手动刷新 60 秒冷却；**无后台轮询** |
 | D7 | 本地 ≥ 远端 | **只告警不拦截**；确认窗红字"版本回退风险"，是否降级由玩家决定；保留"重装当前版本"入口 |
 | D8 | gamekb 不符 | **只告警不拦截**；行内 ⊘ 橙 + 确认窗红字，按钮保持可用；本地版本读不到 → "未校验游戏版本"照常放行 |
 | D9 | 面板形态 | 融合式（仓库入口卡 + 排序模式融入侧栏）；徽标全图标化；排序用拖拽 + 键盘 ↑↓ 替代（WCAG 2.2 AA），不用按钮堆 |
 | D10 | 列表密度 | 徽标 18px 圆片 / 侧栏 280px / 行内距 6px；第三方显示名去掉"（第三方）"后缀 |
 
 非目标：进程内热换；第三方 mod 商店/代下载；BepInEx 基座自动安装；自动处置冲突；
-后台静默轮询更新；清理器游戏内自更新（Ruling 8）。
+后台静默轮询更新；**引导壳游戏内自更新**（T16：壳永久冻结，清理逻辑随 ModCenter.dll
+本体更新，只有壳接口签名变更才需安装器）。
 
-## 2. 架构：双件套 + pending 契约
+## 2. 架构：单 dll + 冻结引导壳
 
-### 2.1 双件套职责边界
+### 2.1 职责边界
 
-四个约束拼出的唯一形状：体检要活在运行态（插件侧）、UI/网络要活在游戏内（插件侧）、
-文件操作要活在插件加载前（补丁器侧）、纯退出路径已被 D2 否决。
+四个约束拼出的形状：体检要活在运行态（插件侧）、UI/网络要活在游戏内（插件侧）、
+文件操作要活在插件加载前（补丁器侧）、纯退出路径已被 D2 否决。T16 把这些拼成
+**单 dll + 一个 40-60 行的冻结引导壳**（方案 A，Ruling 21）：
 
 ```
-┌─ ModCenter 插件本体（BepInEx\plugins，现有 dll 扩展）───────────┐
-│ 面板 UI：仓库页/更新/卸载/体检/排序模式/待生效条（panel.js）      │
-│ 网络层：GitHub API + 资产下载 + 镜像回退（RepoClient）           │
-│ 决策层：五态比对 + gamekb 门 + 待办写入（RepoDecision/GameVersion/PendingWriter）
-│ 体检三层 + 警示标渲染（Meta 静态表 / PatchScan / ConfigBridge）   │
-└───────────────────────┬────────────────────────────────────────┘
+┌─ ModCenter 插件本体（BepInEx\plugins\SurvivalLog.ModCenter.dll）──────────┐
+│ 面板 UI：仓库页/更新/卸载/体检/排序模式/待生效条（panel.js）                │
+│ 网络层：GitHub API + 资产下载 + 镜像回退（RepoClient）                      │
+│ 决策层：五态比对 + gamekb 门 + 待办写入（RepoDecision/GameVersion/PendingWriter）│
+│ 体检三层 + 警示标渲染（Meta 静态表 / PatchScan / ConfigBridge）             │
+│ CleanupRunner（补丁器阶段由壳反射调用，禁碰 IL2CPP）：                     │
+│ ① marker 翻译 ② pending 执行（幂等/MD5/原子重写）③ 加载序 Harmony 覆盖     │
+│ ④ 目录 sweep ⑤ 自卸载墓碑/自更新预置（两阶段，写 flag 由壳下一靴执行）      │
+└───────────────────────┬───────────────────────────────────────────────────┘
                         │ 写/读（唯一运行期介质）
      BepInEx\ModCenter\pending.json（+ staging\ 暂存目录）
                         │ 启动时读取执行
-┌─ MC 启动清理器（BepInEx\patchers\MCCleaner.dll，单槽）───────────┐
-│ ① marker 翻译：cfg [DisabledTp] → disable/enable 派生 op（先翻译后执行）
-│ ② 执行 pending ops：delete / install / replace / disable / enable
-│    幂等 + MD5 校验 + 原子重写；install 目标指向清理器自身/patchers 一律拒绝
-│ ③ 顺序覆盖：Harmony postfix ModifyLoadOrder（封闭泛型，硬依赖保护）
-│ ④ 目录 sweep：ops 消化完且 ModCenter 目录只剩 staging/pending → 收尾清目录
-└────────────────────────────────────────────────────────────────┘
+┌─ MCShell（BepInEx\patchers\MCShell.dll，永久冻结）────────────────────────┐
+│ ① 墓碑分支：见 uninstalled.flag → 删本体+cfg+ModCenter 目录 → 不加载 → 退出 │
+│ ② 自更新分支：见 selfupdate.flag → 加载前替换本体（一次重启即生效）          │
+│ ③ 定位本体 → Assembly.LoadFrom → 反射调 CleanupRunner.Run()                 │
+│ 任何异常自吞写证据，绝不阻断游戏启动                                        │
+└────────────────────────────────────────────────────────────────────────────┘
 ```
 
 纪律：
 
 - **插件本体是唯一的意图生产者**：面板交互、网络下载、决策全部在这里；所有文件动作
-  一律落成 `pending.json` 的 op，由清理器在下次启动执行。插件运行期不直接删除/替换
-  plugins 下任何文件（运行中被锁，且强杀会留下半状态）。
-- **清理器是唯一的文件操作执行者**：补丁器阶段运行（plugins 文件无锁，实证 E4），
-  不读游戏运行态、不联网、不弹 UI；任何单条失败只记证据并保留该 op，不阻断启动。
-- 二者共享同一份契约源码：`Contracts/McPending.cs` 由插件项目常规编译，清理器
-  csproj 以 `<Compile Include="../SurvivalLog.ModCenter/Contracts/McPending.cs" />`
-  link 编译同一文件（零复制分叉）。
-- 清理器是**基座级组件**（与 BepInEx 基座同边界）：单槽、版本随安装器/网盘分发，
-  不参与游戏内自更新（Ruling 8）。
+  一律落成 `pending.json` 的 op，由 CleanupRunner 在下次启动执行。插件运行期不直接
+  删除/替换 plugins 下任何文件（运行中被锁，且强杀会留下半状态）。
+- **CleanupRunner 是唯一的文件操作执行者**：由壳在补丁器阶段唤起（plugins 文件无锁，
+  实证 E4），不读游戏运行态、不联网、不弹 UI；任何单条失败只记证据并保留该 op，
+  不阻断启动。代码纪律：只允许 BepInEx.*/HarmonyLib/System.IO 等，**禁碰任何 IL2CPP
+  游戏类型**（Il2Cppmscorlib/Il2CppSystem/HotUpdate/UnityEngine）——它在插件加载前运行。
+  边界：玩家把本体手工改名 `.disabled` 时壳不加载它（尊重停用意图），本靴清理不运行；
+  面板同时不在，无新意图产生，显式启用后下一靴继续。
+- **契约源码只有一份**：`Contracts/McPending.cs` 直接编译进插件项目（T16 起不再有
+  MCCleaner link 编译的第二份）；壳不解析 pending.json，只认两个 flag 文件与
+  `CleanupRunner.Run()` 三个接口。
+- **引导壳永久冻结**（基座级，与 BepInEx 基座同边界）：无独立版本线（1.0.0 仅属性占位），
+  不参与游戏内更新；只有壳接口签名（flag 格式 / Run 签名）变更才需要安装器更新。
+- **物理约束（T16 实证）**：ModCenter.dll 被壳 `Assembly.LoadFrom` 后文件被 CLR 锁定，
+  `File.Delete` 失败；同程序集身份也不允许同靴内被 Chainloader 重新 `LoadFrom`。
+  因此自删/自替换必须**两阶段**：boot N 只写 flag（墓碑/预置），boot N+1 壳在加载前执行。
+- **自更新一次重启生效**：面板更新 ModCenter 时在 pending op 之外写 `selfupdate.flag`；
+  壳在下一靴 LoadFrom 之前替换本体，当靴即加载新程序集——清理逻辑随新 dll 生效
+  （证据行含程序集版本）。无壳预置时（旧面板/异常）则由 CleanupRunner 在 boot N 补写
+  预置并接管，代价=多一次重启。
 
 ### 2.2 pending.json 契约
 
@@ -122,9 +140,14 @@ v2 在此之上补齐**生命周期闭环**（作者 2026-10-28 拍板，spec §
   （`path.tmp` → `File.Replace`/`File.Move`）；无成功条目不重写（零 churn）。
 - **order-only 文件**：`ops` 为空但 `order` 存在时，执行器零动作、不改写清单；
   顺序覆盖由 postfix 在链式加载排序时应用（§5.4）。
-- **清理器自身槽守卫**：install/replace 的 target 文件名为 `MCCleaner.dll`（任意目录）
-  **或**位于 `patchers\` 下 → 拒绝执行、op 保留、证据记
-  `拒绝执行: 清理器属基座级组件，请用安装器更新`（Ruling 8）。
+- **引导壳槽守卫（T16）**：install/replace 的 target 文件名为 `MCShell.dll` / 旧 `MCCleaner.dll`
+  （任意目录）**或**位于 `patchers\` 下 → 拒绝执行、op 保留、证据记
+  `拒绝执行: 引导壳属基座级组件，请用安装器更新`。
+- **自操作两阶段（T16 物理约束）**：delete 目标=本体 dll → 本靴不删（已被壳 LoadFrom 锁定），
+  写 `uninstalled.flag`（时间戳 + cfg 路径）并从清单移除（视为已接管）；install/replace
+  目标=本体 dll → 本靴不落盘（同程序集身份不允许同靴重新 LoadFrom），写 `selfupdate.flag`
+  （staged 绝对路径 / staged md5 / target 绝对路径 三行）并从清单移除；两者由壳在下一靴
+  **加载前**执行。目标已是期望内容（`MD5(target)==op.md5`）→ 幂等成功（壳已预置/清单重跑）。
 - 执行器**不清理 staging**：暂存文件在 op 成功消费后仍留在盘上，由目录 sweep
   在清单消化完时统一回收（§5.5）。
 - 写入纪律：**主线程唯一写者**（`PendingWriter`，Ticker/消息分发上下文），写前原子替换；
@@ -132,18 +155,22 @@ v2 在此之上补齐**生命周期闭环**（作者 2026-10-28 拍板，spec §
 
 ### 2.3 分发边界与版本线
 
-- **zip 布局（release.ps1 产出）**：
-  `BepInEx\plugins\SurvivalLog.ModCenter.dll` + `BepInEx\patchers\MCCleaner.dll` + `README.md`；
+- **zip 布局（release.ps1 产出，T16）**：
+  `BepInEx\plugins\SurvivalLog.ModCenter.dll` + `BepInEx\patchers\MCShell.dll` + `README.md`；
   `release.ps1` 打包后**断言**三件套在场且 dll 恰两枚（防 deps.json/探针混入）。`update.json`
-  仍是五字段 `{mod, version, asset, md5, gamekb}`，不因清理器多一个版本字段（契约冻结）。
-- **安装器分发**：`installer.iss` 的 `mod_center` 组件包含 `BepInEx\patchers\MCCleaner.dll`；
-  `[InstallDelete]` 在安装前预删该文件（升级覆盖旧清理器；取消勾选时一并移除）。
+  仍是五字段 `{mod, version, asset, md5, gamekb}`（契约冻结）。
+- **旧清理器清理**：包内不再含 `MCCleaner.dll`；升级由安装器 `[InstallDelete]` 预删旧件
+  （保留该条目的目的就是 v1 旧清理器升级清理），手动升级玩家需自行删除（并存会重复执行
+  改名/排序）。
+- **安装器分发**：`installer.iss` 的 `mod_center` 组件包含 `BepInEx\patchers\MCShell.dll`；
+  `[InstallDelete]` 预删旧 `MCShell.dll` / `MCCleaner.dll` 与 `BepInEx\ModCenter\` 的
+  自更新预置/墓碑（安装器替换本体后旧意图必须作废）。
   套件发布 `publish.ps1` 把各仓 zip 解包成 `release\SurvivalLog.<Mod>_v<ver>\` 供 ISCC 引用。
 - **游戏内更新链**：只解包 `BepInEx/plugins/*.dll`（直下条目），不碰 patchers；
-  清理器更新只走安装器/网盘（Ruling 8）。ModCenter 自身更新同样只替换插件 dll。
+  ModCenter 自身更新同样只替换插件 dll（**清理逻辑随本体更新**）；引导壳永不参与游戏内更新。
 - **版本线**：ModCenter csproj `<Version>` 为唯一权威，`ModCenterPlugin.Version` const
-  必须一致（`release.ps1` 校验）；`MCCleaner.csproj` 独立小版本线，`release.ps1`
-  构建后额外核对产物程序集版本与 csproj 一致。发版号由作者定（硬规则 1）。
+  必须一致（`release.ps1` 校验）。`MCShell.csproj` `<Version>1.0.0</Version>` 是
+  `[PatcherPluginInfo]` 的**固定占位**，不是独立版本线（壳永不变更，接口签名变更才需安装器）。
 
 ### 2.4 组件清单
 
@@ -160,27 +187,40 @@ v2 在此之上补齐**生命周期闭环**（作者 2026-10-28 拍板，spec §
 | `PatchScan.cs` | L2 运行时补丁碰撞：`Harmony.GetAllPatchedMethods()` → owner 归组 → 游戏侧过滤 → GUID 精确/前缀归属 → 行内橙标/MC_CF 橙卡/MC_SCAN_DATA；`Debug.PatchScan` 探针 |
 | `RestartHelper.cs` | 通用分离进程启动器（`StartDetachedPS`，EncodedCommand）+ 一键重启（PID 精确等待 → 9s Steam 延迟补偿 → `steam://` 重拉）+ `QuitGame()` |
 | `DllDisabler.cs` | **仅意图写入与扫描**：`[DisabledTp]` marker 读/写、Enable 即时反向改名、ScanOnLoad 预 Bind、AbsentDisabled 缺席行、Tier2 软停重放。退出改名机械已退役（§7.1） |
-| `Contracts/McPending.cs` | pending 契约（常量/Op/Load/Save/LoadOrder/原子写/手写解析），插件与清理器 link 共用 |
-| `MCCleaner/CleanerPatcher.cs` | 启动清理器（`BasePatcher`）：marker 翻译 → pending 执行器 → 自身槽守卫 → ModifyLoadOrder postfix → 目录 sweep；`OrderReorder` 纯函数（依赖保护）；自证 `MCCleaner_loaded.txt` / `MCCleaner_ops.txt` |
-| `MCCleaner/MCCleaner.csproj` | 独立 csproj（net6.0，`<Version>1.0.0</Version>`），只引用 BepInEx core/preloader/IL2CPP/0Harmony（`Private=false`）；link 编译 `McPending.cs` |
+| `Contracts/McPending.cs` | pending 契约（常量/Op/Load/Save/LoadOrder/原子写/手写解析），插件项目直接编译（T16 起单份，无 link） |
+| `CleanupRunner.cs` | 插件内的清理执行体（`public static Run()`，壳反射入口；**禁碰 IL2CPP 类型**）：marker 翻译 → pending 执行器（含引导壳槽守卫 / 自操作两阶段）→ ModifyLoadOrder postfix → 目录 sweep；`OrderReorder` 纯函数（依赖保护）；自证 `MCCleaner_loaded.txt` / `MCCleaner_ops.txt`（文件名沿用 T1/T2 证据格式，内容加程序集版本） |
+| `MCShell/ShellPatcher.cs` | 永久冻结引导壳（`BasePatcher`）：墓碑分支 → 自更新预置 → 定位本体/LoadFrom/反射调 `CleanupRunner.Run()`；任何异常自吞写 `MCShell_loaded.txt`，绝不阻断启动 |
+| `MCShell/MCShell.csproj` | 壳 csproj（net6.0，`<Version>1.0.0</Version>` 固定属性占位、非版本线）；只引用 BepInEx.Core / BepInEx.Preloader.Core（`Private=false`）；**不引用插件项目**（反射解耦） |
 
 ### 2.5 启动时序（每次 boot）
 
-1. **补丁器阶段**：BepInEx 加载 `patchers\MCCleaner.dll` → `Initialize()` 写
-   `MCCleaner_loaded.txt`（时间戳 + Assembly.Location）。
-2. **marker 翻译**（Ruling 1/Ruling 9）：读 ModCenter cfg `[DisabledTp]`；
+1. **补丁器阶段（MCShell）**：BepInEx 加载 `patchers\MCShell.dll` → `Initialize()` 写
+   `MCShell_loaded.txt`（时间戳 + 壳位置）。**墓碑分支优先**（存在
+   `BepInEx\ModCenter\uninstalled.flag`）：递归删 `plugins\` 下的本体 dll（含 `.disabled`）+
+   自身 cfg + `BepInEx\ModCenter\` 目录（含 flag）→ **不加载**本体 → 退出。
+   否则**自更新预置**（存在 `selfupdate.flag`）在 LoadFrom 前校验 md5 并替换本体
+   （一次重启即加载新程序集）；最后定位 `plugins\SurvivalLog.ModCenter.dll`（根 + 递归兜底）
+   → `Assembly.LoadFrom` → 反射调 `CleanupRunner.Run()`（T16 探针实证：Chainloader 随后
+   复用同一程序集实例 `SAME-ASM copies=1`，插件数不变、面板可开、无 IL2CPP 新增异常）。
+2. **CleanupRunner 生命周期自证**：写 `MCCleaner_loaded.txt`
+   （时间戳 + `CleanupRunner.Run v<程序集版本>` + dll 路径）——游戏内更新后此行的版本号
+   即新程序集版本，证明清理逻辑随 dll 生效。
+3. **marker 翻译**（Ruling 1/Ruling 9）：读 ModCenter cfg `[DisabledTp]`；
    `true + dll 在场` → disable 派生 op；`false + .disabled 在场` → enable 派生 op；
    **无键 + .disabled 在场 → 不动**（玩家手工禁用保持）。持久 pending 同 target 优先，
    翻译 op 执行完即弃（成功不写清单，失败留 `[MARKER]` 证据下次重译）。
-3. **执行 pending ops**：逐条执行、幂等、MD5 校验、原子重写（§2.2）。证据
-   `MCCleaner_ops.txt` 追加行（时间/操作/结果/原因）。
-4. **挂加载序覆盖**：Harmony postfix 挂封闭泛型
+4. **执行 pending ops**：逐条执行、幂等、MD5 校验、原子重写（§2.2）。证据
+   `MCCleaner_ops.txt` 追加行（时间/操作/结果/原因）。自操作两阶段：
+   delete 本体 → 写 `uninstalled.flag`；install/replace 本体 → 写 `selfupdate.flag`
+   （证据 `[SELFUNINST]` / `[SELFUPDATE]`）；目标 md5 已一致 → 幂等成功。
+5. **挂加载序覆盖**：Harmony postfix 挂封闭泛型
    `BaseChainloader<BasePlugin>.ModifyLoadOrder`；postfix 在链式加载器排序时读
    `pending.order` 并应用 `OrderReorder`（纯内存，不写文件）。失败记
    `[ORDER] HOOK-FAIL` 后放弃，不阻断启动。
-5. **目录 sweep**：ops 消化完且 `BepInEx\ModCenter` 只剩 `staging`/`pending.json` →
-   整个目录回收（ModCenter 自卸载收尾；`MCCleaner.dll` 不动）。
-6. **插件加载**：链式加载器按生效序加载各插件 → ModCenter `Load()`（自证、cfg、
+6. **目录 sweep**：ops 消化完且 `BepInEx\ModCenter` 只剩 `staging`/`pending.json` →
+   整个目录回收（ModCenter 自卸载收尾；引导壳在 patchers，与本目录无关）。存在
+   `uninstalled.flag` / `selfupdate.flag` 时属"其他内容"→ 保守 SKIP。
+7. **插件加载**：链式加载器按生效序加载各插件 → ModCenter `Load()`（自证、cfg、
    探针、Quit 双钩子）→ 面板可用。
 
 补丁器阶段环境陷阱（实证，写新代码必读）：
@@ -192,6 +232,12 @@ v2 在此之上补齐**生命周期闭环**（作者 2026-10-28 拍板，spec §
 - 补丁器阶段不引 `System.Text.Json`（可用性未实证）：pending 读写一律手写解析/序列化。
 - plugins 下文件在补丁器阶段**无锁**（E4 实证 `File.Delete` 成功），这是"真删除"的前提。
 - `Paths.PluginPath` 也可能未赋值：递归扫描/缺席行需回退 `BepInExRootPath\plugins`。
+- **CleanupRunner/壳禁碰 IL2CPP 游戏类型**（T16）：它们在本体插件 Load 之前运行；
+  只允许 BepInEx.* / HarmonyLib / System.IO / System.Reflection / 0Harmony 等。
+- **已加载 dll 不可删**（T16 实证）：`File.Delete` 对壳 LoadFrom 的本体失败
+  （`UnauthorizedAccessException`）；同程序集身份也不允许同靴重新 `LoadFrom`
+  （`FileLoadException: Assembly with same name is already loaded`）。这是两阶段
+  墓碑/预置的物理依据。
 
 ## 3. 消息协议全表
 
@@ -209,7 +255,7 @@ v2 在此之上补齐**生命周期闭环**（作者 2026-10-28 拍板，spec §
 
 | type | 字段 | 行为 |
 |---|---|---|
-| `MC_OPEN` | `host` | 键盘门开（FocusTick）+ L2 立即扫描 + 推全量快照 + `MC_SCAN_DATA` + `MC_REPO_DATA`（缓存）+ `MC_PENDING_SUMMARY` |
+| `MC_OPEN` | `host` | 键盘门开（FocusTick）+ L2 立即扫描 + 推全量快照 + `MC_SCAN_DATA` + `MC_REPO_DATA`（10 分钟缓存；过期则起一轮后台 fetch——D6/Ruling 22）+ `MC_PENDING_SUMMARY` |
 | `MC_CLOSE` | `why?` | 键盘门双还原 + 立即落盘全部脏 cfg；`why='host-doc-gone'` 为孤儿看门狗补发 |
 | `MC_SET` | `guid, section, key, value` | 写值（Meta 键或第三方真实键）→ 回 `MC_SET_OK{k,badge}` / `MC_SET_FAIL{k,err}`；未登记键拒绝 |
 | `MC_TOGGLE_MOD` | `guid, enabled` | 套件=直写该 mod `General.Enabled`（热还原）；第三方=marker/软停三层语义；回推新快照 |
@@ -222,11 +268,11 @@ v2 在此之上补齐**生命周期闭环**（作者 2026-10-28 拍板，spec §
 | `MC_ORDER_GET` | — | 返回生效序（pending.order 命中前置 + 其余 GUID 字母序）+ 行元数据 + 默认序 |
 | `MC_ORDER_SAVE` | `guids[]` | 白名单精确校验（可排序集必须不重不漏）；通过 → 写 pending.order；回 `MC_ORDER_OK` / `MC_ORDER_FAIL{err}` |
 | `MC_UNINST` | `guid` | 构造卸载明细（self/套件/链上第三方/缺席行四路由）→ `MC_UNINST_DATA`；不可达 → `MC_TOAST` 拒因 |
-| `MC_UNINST_DO` | `guid` | 写 delete（dll+cfg；缺席行只 `.disabled`）+ 清 marker + 移除 order 记录 + FlushDirty + 刷新 |
+| `MC_UNINST_DO` | `guid` | 写 delete（dll+cfg；缺席行只 `.disabled`）+ 清 marker + 移除 order 记录 + FlushDirty + 刷新；`self=true` 时另清自更新预置（T16） |
 | `MC_CF` | `guid` | 冲突详情 → `MC_CF_DATA{guid,cards[]}`（L1/L2/L3 同源卡片） |
 | `MC_SCAN` | — | L2 重扫（主线程）→ 推新快照 + `MC_SCAN_DATA` |
 | `MC_RESTART` | — | FlushDirty → 拉分离进程（PID 精确等待→9s→steam 协议重拉）→ 1.6s 后 `Application.Quit()`；请求失败不退出 |
-| `MC_PENDING_UNDO` | — | 删除 `pending.json`（ops+order 全清）→ 同拍推快照/摘要 + toast |
+| `MC_PENDING_UNDO` | — | 删除 `pending.json`（ops+order 全清）+ 删除自更新预置 flag（T16）→ 同拍推快照/摘要 + toast |
 
 ### 3.2 出（C# → 面板）
 
@@ -294,7 +340,7 @@ v2 在此之上补齐**生命周期闭环**（作者 2026-10-28 拍板，spec §
 - **仓库视图**：12 行五态；`Remote=null` 渲染"检查失败"（**绝不显示"已是最新"**）；
   已有待生效意图的行按钮换 ⟳ 待生效。
 - **卸载确认**：完整文件明细（dll/cfg/记录）+ 固定记录行 + "不受影响"说明；
-  self 分支特别文案（面板消失、清理器基座级保留）。
+  self 分支特别文案（两靴后面板消失、引导壳 MCShell 基座级保留）。
 - **进度四态弹窗**：确认 → 内联进度条（下载/校验/解包/写入待生效）→ ok / err；
   进度更新不重建弹窗；可"隐藏（后台继续）"。
 - 全部弹窗为面板内浮层；ESC 先关弹窗再关面板；✕/点遮罩为保底路径。
@@ -461,8 +507,10 @@ PendingWriter 合并语义对临时文件 `selftest-pending.json` 自证（旧�
 - **入口与视图**：侧栏顶部仓库入口卡（13px 迷你 ↑ + "N 个可更新 · M 个可安装 · K 个版本告警"），
   点击进仓库视图：12 行五态（`ok/update/downgrade/warn/install`）+ "检查更新" + "全部更新（N）" +
   上次检查时间与网络状态（直连/镜像）。
-- **查询节流**：打开自动查一次（10 分钟会话缓存），手动检查 60 秒冷却（冷却内只 toast
-  "刚检查过（GitHub 匿名限额 60 次/小时）"）；**绝不后台轮询**。一轮 fetch = 12 次 API 请求。
+- **查询节流**：**面板打开即自动查一次**（D6/Ruling 22：`MC_OPEN` 分支调用
+  `HandleRepoGet(force=false)`，10 分钟会话缓存内只推缓存不重复 fetch），手动检查 60 秒
+  冷却（冷却内只 toast"刚检查过（GitHub 匿名限额 60 次/小时）"）；**绝不后台轮询**。
+  一轮 fetch = 12 次 API 请求。
 - **fetch**：主线程取本地态（`SnapshotLocal` + `GameVersion.ReadCached() ?? ReadLocal()`）→
   后台 `Task.Run` 12 仓顺序 `FetchLatest`（失败=null）→ `RepoDecision.Build` 纯函数 →
   主线程整体替换行数据（fetch 期间旧值保持，零跨线程行读写）→ 推 `MC_REPO_DATA` +
@@ -471,7 +519,8 @@ PendingWriter 合并语义对临时文件 `selftest-pending.json` 自证（旧�
   `MC_DL`）→ **zip MD5 对 update.json**（失败=删 zip、清 staging、不写 pending）→
   解包 `BepInEx/plugins/*.dll`（只取直下条目，防子目录夹带）到 `staging\` 同名暂存 →
   zip 即刻清理 → 主线程 `PendingWriter.AddUpdate`（`op.Md5` = **暂存 dll 自身 MD5**，
-  Ruling 11）→ 刷新 pending/摘要/快照（行内 ⟳ 出现、↑/↓ 消失）→ `MC_DL ok` + toast。
+  Ruling 11；若目标是 ModCenter 本体，另写 `BepInEx\ModCenter\selfupdate.flag`——T16 一次
+  重启自更新）→ 刷新 pending/摘要/快照（行内 ⟳ 出现、↑/↓ 消失）→ `MC_DL ok` + toast。
 - **两层校验闭环**：zip 层（下载时对 update.json.md5）=来源可信；dll 层（清理器执行前
   对 `op.md5`）=写盘到安装间完整。
 - **守卫**：未知仓键/未检查过/检查中/Remote=null/已有待生效意图/非动作态 → `MC_TOAST`
@@ -516,15 +565,20 @@ PendingWriter 合并语义对临时文件 `selftest-pending.json` 自证（旧�
   enable 复活，卸载意图只由 pending delete 承载；套件/self 跳过）→
   `pending.order` 移除该 guid → `FlushDirty()`（marker 立即落盘，不留防抖窗口）→
   刷新摘要/快照/仓库数据。重复确认同目标 delete → 幂等 toast，不二次写。
-- **强杀免疫**：意图已落盘；下次启动清理器在插件加载前 `File.Delete`（E4 无锁）——
+- **强杀免疫**：意图已落盘；下次启动 CleanupRunner 在插件加载前 `File.Delete`（E4 无锁）——
   即使确认后立即 `taskkill`，被卸载 mod 也不会复活。
-- **ModCenter 自身卸载**：删除 `plugins/SurvivalLog.ModCenter.dll` + 自身 cfg（真实存在才列）
-  + 自身 order 条目；面板本体消失后，清理器目录 sweep 收尾（§2.5-5），`MCCleaner.dll`
-  **保留**（基座级，Ruling 8/Ruling 12；可用安装器卸载或手动删除）。
+- **ModCenter 自身卸载（T16 两阶段墓碑）**：DLL 被壳 `Assembly.LoadFrom` 后文件锁定，
+  **不能在本靴自删**。boot N：CleanupRunner 遇到 delete 本体的 op 不执行，写
+  `BepInEx\ModCenter\uninstalled.flag`（时间戳 + cfg 路径）、该 op 从清单移除（视为已接管），
+  证据 `[SELFUNINST]`；boot N+1：壳见 flag → 递归删 `plugins\` 下本体（含 `.disabled`）+
+  自身 cfg + `BepInEx\ModCenter\` 目录（含 flag）→ **不加载**本体 → 退出（入口消失）。
+  引导壳 `MCShell.dll` 保留（基座级；可用安装器卸载或手动删除）。⇒ 面板内"卸载本面板"
+  需要**两次重启**；面板弹窗与 README 均按此口径。
 - **目录 sweep**（`RunDirSweep`）：ops 消化完、`BepInEx\ModCenter` 只剩 `staging`/`pending.json`
-  时整目录递归删除。守卫：order 非空时必须 `selfUninst=true`（本靴成功执行过 ModCenter
+  时整目录递归删除。守卫：order 非空时必须 `selfUninst=true`（本靴接管过 ModCenter
   自卸载）**且**面板 dll/cfg 全形态不在场（递归 plugins 扫 dll 与 `.disabled`、cfg 按
-  `McCfgPath`）；否则 SKIP（防手工停用/子目录安装时误删 order 记录）。有其它内容/解析
+  `McCfgPath`）；否则 SKIP（防手工停用/子目录安装时误删 order 记录）。T16 自卸载靴因
+  `uninstalled.flag` 属"其它内容"必然 SKIP，目录由 boot N+1 壳清理。有其它内容/解析
   失败一律保守放弃。
 - **带出项**：已有 delete 意图的行只显 ⟳（吃 ↑/↓/⊘）；`ORD.src` 存 guid（拖拽会话不受
   键盘重排影响）；`HandleOrderSave` 异常回 `MC_ORDER_FAIL` 且复位 saving。
@@ -573,7 +627,8 @@ PendingWriter 合并语义对临时文件 `selftest-pending.json` 自证（旧�
   让 toast 先上屏）。拉起失败（PS 不可用）→ toast 报错且**不退出**（口径："已请求重启"≠
   "重启成功"，不假装成功）。连点/双发只会拉起一条等待链（`_restartRequested` 守卫）。
 - **撤销**（`MC_PENDING_UNDO`）：删除 `pending.json`（ops 清空；**order 一并清空**=回到默认
-  字母序——"撤销全部待生效操作"包含本会话刚保存的顺序），同拍强制重读 + 推新快照/摘要
+  字母序——"撤销全部待生效操作"包含本会话刚保存的顺序）+ 删除自更新预置 flag（T16），
+  同拍强制重读 + 推新快照/摘要
   （行内 ⟳ 与底条一起消失）+ toast；删除失败只报错不清内存态。staging 不做运行期清理
   （启动清理器 DirSweep 回收）。
 - **面板**：`pendEl` 事件委托（`[data-x]`）——撤销直接入 outbox；立即重启开面板内浮层确认
@@ -657,7 +712,7 @@ PendingWriter 合并语义对临时文件 `selftest-pending.json` 自证（旧�
   `Ac_ToolTable_RefreshBag.SendAction`（cabineteverywhere.coalesce）——owner=各 mod Harmony id，
   与 `new Harmony(Guid)` 约定吻合；补丁方法声明类均在插件程序集。
   + 1 个第一方非游戏挂点：`BepInEx.BaseChainloader.ModifyLoadOrder`（owner=
-  `com.local.survivallog.mccleaner.order`，排序清理器补丁）。
+  `com.local.survivallog.modcenter.order`，CleanupRunner 排序补丁）。
   （fix round 1 时第一方候选上限=8，实际 dump 为 **7 个套件游戏侧挂点 + ModifyLoadOrder**；
   `GameTimeManager.ChangeGameSpeed` 恰因上限被截断未入 dump。fix round 2 上限提至 10 后 9 个
   第一方全部入 dump。另 fix M-6：探针"套件 owner"判定改第一方前缀 `com.local.survivallog.`；
@@ -779,7 +834,7 @@ v1 的第三方重启级禁用流程 = 面板写 `[DisabledTp]` marker → 游�
 在场代表玩家手工禁用，清理器不动（v1 字面实现会把它自动恢复，属破坏行为）。
 面板"缺席行"仍可供显式启用（写 false → 下次启动改名）。
 
-### 7.2 双槽方案证伪（Ruling 8）
+### 7.2 双槽方案证伪（Ruling 8）→ 单 dll 化定案（T16 / Ruling 21）
 
 - **原方案**（spec 初稿 §4.7）：清理器双槽 `MCCleanerA.dll` + `MCCleanerB.dll` 同装，
   游戏内更新写非运行槽、重启轮换，避免"自己更新自己"的死锁。
@@ -788,12 +843,19 @@ v1 的第三方重启级禁用流程 = 面板写 `[DisabledTp]` marker → 游�
   `Assembly.Location = ...\MCCleanerA.dll`。两份 dll 程序集简单名+版本完全相同
   （`MCCleaner 1.0.0.0`），CLR 按**同一程序集身份**解析，第二份复用了第一个 Assembly 对象。
   ⇒ 槽自识别（写 A 读 B）不可靠，双槽前提不成立。
-- **定案**：清理器**单槽** `BepInEx\patchers\MCCleaner.dll`，定位为基座级组件（同 BepInEx
-  基座边界，spec §11）；不参与游戏内自更新，版本随安装器/网盘分发。游戏内更新链仍覆盖
-  ModCenter 本体与全部套件 mod（plugins 在补丁器阶段未加载、无锁）。执行器守卫：install/replace
-  目标为 `MCCleaner.dll`（任意目录）或 `patchers\` 下任何文件 → 拒绝执行并留证据。
+- **中间定案（Ruling 8，已被 T16 取代）**：清理器**单槽** `BepInEx\patchers\MCCleaner.dll`，
+  基座级组件、不参与游戏内自更新；执行器守卫 patchers\ 下目标。该定案牺牲了"清理逻辑可
+  随面板更新"，且 T16 单 dll 化后不再成立。
+- **T16 定案（Ruling 21，方案 A）**：清理逻辑全部并入 `SurvivalLog.ModCenter.dll`
+  （`CleanupRunner`），`patchers\` 只留**永久冻结**的引导壳 `MCShell.dll`（无独立版本线，
+  1.0.0 仅属性占位）。游戏内更新 ModCenter 即更新清理逻辑；壳只在接口签名变更时随安装器更新。
+  - 自更新：面板写 `selfupdate.flag`，壳在下一靴 LoadFrom 前替换本体 → **一次重启生效**；
+  - 自卸载：boot N 写 `uninstalled.flag`（墓碑），boot N+1 壳删本体+cfg+目录 → 两阶段。
 - **教训**：同名同版本程序集在 CLR 中会被身份合并；用文件名/路径区分"槽位/实例"不可靠，
-  必须用独立 AssemblyName 或独立进程。该教训也约束未来任何"双份 dll 同载"设计。
+  必须用独立 AssemblyName 或独立进程。T16 追加两条更硬的物理事实：**已加载程序集文件不可
+  `File.Delete`**（`UnauthorizedAccessException`），**同程序集身份不允许同靴重新
+  `Assembly.LoadFrom`**（`FileLoadException`）——因此自操作必须靠"下一靴加载前执行"的
+  两阶段 flag，而不是"自己替换自己"。
 
 ### 7.3 其他退役/作废口径
 
@@ -801,8 +863,9 @@ v1 的第三方重启级禁用流程 = 面板写 `[DisabledTp]` marker → 游�
 |---|---|---|
 | `[Disabled]<guid>` 名单 | v1 T13/T14 的本插件 cfg 停用名单 | 退役；套件启停直写各 mod `General.Enabled`，第三方用 `[DisabledTp]` marker；旧 cfg 孤儿节无人读（惰性） |
 | `ConsumeToast` / 残留补拉 toast | v1 强杀残留提示 | 退役（无残留补拉概念）；panel.js 的 `MC_TOAST` 渲染保留（面板自身结果通知仍用） |
-| 分离进程自删清理器运行槽 | spec 初稿 §4.3 / Ruling 12 前文案 | **作废**：清理器基座级不清自身；卸载收尾改为目录 sweep（`RunDirSweep`），`MCCleaner.dll` 永不动 |
+| 分离进程自删清理器运行槽 | spec 初稿 §4.3 / Ruling 12 前文案 | **作废**：引导壳在 patchers 本就不在本体运行槽；卸载收尾=两阶段墓碑 + 目录清理（T16），壳永不动 |
 | 双槽 A/B 轮换 | spec 初稿 §4.7 / plan T14 文案 | **作废**（§7.2），单槽 |
+| 单槽 MCCleaner.dll 基座级（Ruling 8） | 清理器独立 1.0.x 版本线、不参与游戏内自更新 | **作废**（T16/Ruling 21）：清理逻辑并入 ModCenter.dll；patchers 只留冻结 `MCShell.dll`；游戏内更新本体即更新清理逻辑 |
 | `StartDetached`（DllDisabler） | v1 退出改名执行器 | 迁 `RestartHelper.StartDetachedPS`，唯一用途=一键重启 |
 | 第三方 `[Disabled]` 标记名单 | v1 T6/T14 | 退役（T16 已换 `.disabled` 真禁用），本版不留读取方 |
 
@@ -814,7 +877,10 @@ v1 的第三方重启级禁用流程 = 面板写 `[DisabledTp]` marker → 游�
 | op | 已达成状态 | 行为 |
 |---|---|---|
 | delete | target 不在场 | 成功（幂等） |
+| delete | target = 本体 dll（T16） | **不执行**：写 `uninstalled.flag`、op 视为已接管（移除），下一靴壳删除 |
 | install | target 已存在 | 可覆盖（先删旧再 copy） |
+| install/replace | `MD5(target) == op.md5`（T16） | 成功（目标已是期望内容，壳已预置/清单重跑） |
+| install/replace | target = 本体 dll（T16） | **不本靴落盘**：写 `selfupdate.flag`、op 视为已接管（移除），下一靴壳加载前替换 |
 | replace | target 不在场 | 同 install（可安装） |
 | disable | target 不在场且 `.disabled` 在场 | 成功（幂等，原因注明） |
 | disable | 双在场 | 删裸 dll、保留 `.disabled`、成功（T10 幂等化） |
@@ -861,34 +927,40 @@ v1 的第三方重启级禁用流程 = 面板写 `[DisabledTp]` marker → 游�
    `Take(10)`/`12` 两处一起改。
 4. **补丁器阶段陷阱**（§2.5）：`Paths.ConfigPath`/`PluginPath` 可能为空；cfg 按 GUID 命名；
    不引 `System.Text.Json`；路径只接受 BepInEx 根相对且拒绝 `..`/盘符/绝对路径；
-   plugins 文件此时无锁（真删除前提）。
-5. **发版链三处版本 + 三件套断言**：ModCenter csproj `<Version>` = `Plugin.cs` const；
-   `MCCleaner.csproj` 独立版本；`release.ps1` 断言 zip 内
-   `BepInEx/plugins/SurvivalLog.ModCenter.dll` + `BepInEx/patchers/MCCleaner.dll` + `README.md`
-   且 dll 恰两枚；`installer.iss` 的 `mod_center` 组件必须含 patchers 文件、
-   `[InstallDelete]` 必须预删旧 `MCCleaner.dll`。发版号由作者定（硬规则 1），
+   plugins 文件此时无锁（真删除前提）。**CleanupRunner 与壳禁碰 IL2CPP 游戏类型**（它们在本体
+   Load 之前运行）；已加载 dll 不可删、不可同靴重新 LoadFrom（T16 实证）——自操作一律两阶段。
+5. **发版链（单一版本 + 三件套断言）**：ModCenter csproj `<Version>` = `Plugin.cs` const；
+   `MCShell.csproj` 固定 1.0.0（属性占位，不校验版本）；`release.ps1` 断言 zip 内
+   `BepInEx/plugins/SurvivalLog.ModCenter.dll` + `BepInEx/patchers/MCShell.dll` + `README.md`
+   且 dll 恰两枚；`installer.iss` 的 `mod_center` 组件必须含 `MCShell.dll`、
+   `[InstallDelete]` 必须保留旧 `MCCleaner.dll`（v1 升级清理）并预删旧 `MCShell.dll` 与
+   `BepInEx\ModCenter\` 的 selfupdate/uninstalled flag。发版号由作者定（硬规则 1），
    CHANGELOG 必须有 `## v<版本>` 节，否则 `release.ps1` 发版模式拒绝。
 6. **安装器与 pending 队列的交互（待作者裁定的开放点）**：安装器只替换 dll，不清理
    `BepInEx\ModCenter\pending.json`/`staging`。若玩家在旧版面板里排了待生效 op 后直接跑
-   安装器升级，下次启动清理器仍会执行旧 op（例如把刚装的新版 replace 回旧暂存 dll）。
-   当前按"不越权删除用户意图"保守处理；若要收口，可在 `[InstallDelete]` 预删
-   `pending.json`（staging 由目录 sweep 回收）——需作者拍板。
+   安装器升级，下次启动 CleanupRunner 仍会执行旧 op（例如把刚装的新版 replace 回旧暂存 dll）。
+   当前按"不越权删除用户意图"保守处理；T16 起自更新/自卸载预置 flag（selfupdate/uninstalled）
+   已被 `[InstallDelete]` 预删（安装器替换本体后旧意图必须作废）。若要收口 pending.json，
+   可在 `[InstallDelete]` 预删——需作者拍板。
 7. **L1 冲突库维护**：新增条目只改 `Meta.KnownConflicts`（GUID 优先、dll 名兜底）；
    必须有反汇编/实机证据，不收录纯立绘/零钩子 mod（karina 为反例，表尾有注释）；
    第三方只有进入 L1 才带 L3 类型。
 8. **快照/协议兼容纪律**：新增字段一律可选、空表不输出；`ics`/`g`/`w` 均有推断缺省；
    改 panel.js 与 C# 两侧时先跑 `mc_fixture.js menu` + `toggle`（主菜单阶段即可）。
 9. **证据文件清单**（BepInEx 根，硬规则 9）：`ModCenter_loaded.txt`、`ModCenter_kb.txt`、
-   `MCCleaner_loaded.txt`、`MCCleaner_ops.txt`、`ModCenter_patchscan.txt`、
-   `ModCenter_gamever.txt`、`ModCenter_reposelftest.txt`、`ModCenter_netspeed.txt`、
-   `ModCenter_probe.txt`（按需）；另有派生披露文件 `BepInEx\ModCenter\order_protected.txt`
-   （加载序依赖保护，每靴由清理器覆盖，见 §5.4）。自动化验证后清理游戏侧部署与临时文件，
-   证据副本存 suite 仓 sdd 目录。
-10. **pending 契约变更必须同步发版 MCCleaner（终审必修 10）**：新增 pending op 类型或
-   契约字段（`McPending.Op`/`order`/`order_protected` 等）时，**必须同步升级并用安装器/网盘
-   分发 MCCleaner**。旧清理器对未知 op 走 `default` 分支 → FAIL 且条目永久保留在
-   pending.json（每次启动重试、永远卡住）；契约字段只增不改时旧清理器可忽略新字段，
-   但新 op 类型没有兼容降级路径。发版检查单把"MCCleaner 版本随契约变更升级"列为发版门。
+   `MCShell_loaded.txt`（壳生命周期/墓碑/自更新）、`MCCleaner_loaded.txt` / `MCCleaner_ops.txt`
+   （CleanupRunner 执行证据，文件名沿用 T1/T2 格式，loaded 行含程序集版本）、
+   `ModCenter_patchscan.txt`、`ModCenter_gamever.txt`、`ModCenter_reposelftest.txt`、
+   `ModCenter_netspeed.txt`、`ModCenter_probe.txt`（按需）；另有派生披露文件
+   `BepInEx\ModCenter\order_protected.txt`（加载序依赖保护，每靴由 CleanupRunner 覆盖，见 §5.4）
+   与接口 flag `BepInEx\ModCenter\uninstalled.flag` / `selfupdate.flag`（两阶段自操作，见 §2.1）。
+   自动化验证后清理游戏侧部署与临时文件，证据副本存 suite 仓 sdd 目录。
+10. **壳接口变更才需安装器（T16 取代终审必修 10）**：pending 契约（`McPending.Op`/`order`/
+    `order_protected` 等）与清理逻辑同住 ModCenter.dll，**随本体发版即可**，不再需要同步
+   分发独立清理器。但引导壳是永久冻结件：**改动以下接口任一 → 必须同步更新安装器里的
+   MCShell.dll**：①`uninstalled.flag` 的存在性/内容格式与删除范围；②`selfupdate.flag`
+   的三行格式与替换语义；③`SurvivalLog.ModCenter.CleanupRunner.Run()` 的签名/类型名/程序集名。
+   壳对未知/损坏 flag 一律留证据后按旧路径继续（绝不阻断启动）。
 11. **框架侧过滤是启发式（终审必修 10）**：`PatchScan` 的框架/引擎方法过滤按程序集与命名
    空间启发式判定，不是硬编码全表；未来游戏大版本拆程序集或引入新命名空间时，真实游戏
    方法可能被误归"框架侧"（只披露、不计入碰撞组），须在游戏更新后复核过滤规则与
@@ -914,6 +986,7 @@ v1 的第三方重启级禁用流程 = 面板写 `[DisabledTp]` marker → 游�
 | T11 L1 + L3 | 37 项单元自证 + 43 项 CDP；红/灰多图标、灰卡、停用弱化 | `task-11-report.md`、`task-11-cdp.txt`、`task-11-selftest.txt` |
 | T12 L2 碰撞 | 真实 8 组（55/58 游戏侧方法、框架侧 1 组披露）；构造未知来源/前缀归属 | `task-12-report.md`、`task-12-patchscan-evidence.txt`、`task-12-shot-*.png` |
 | T13 重启 + 撤销 | 确认→3.4s 退出→13.4s Steam 重拉→清理器消费 op→底条归零；撤销 ops+order 全清 | `task-13-report.md`、`task-13-live-timeline.txt`、`task-13-cleaner-evidence.txt` |
+| T16 单 dll 化 | 探针 4 点全绿（LoadFrom / 反射调用 / 同程序集 `SAME-ASM copies=1` / 无新增 IL2CPP 异常）；五类 op、marker 翻译、排序 20/20、两阶段自卸载、游戏内自更新（新程序集版本证据）、D6、夹具 menu+toggle | `task-16-report.md`、`evidence-t16/*` |
 
 ## 10. v2 迭代清单（任务与落点）
 
@@ -933,9 +1006,11 @@ v1 的第三方重启级禁用流程 = 面板写 `[DisabledTp]` marker → 游�
 | T12 L2 碰撞 | `3e169ad..295aac3` | `PatchScan.cs`；橙标/汇总/探针 | §6.2、§6.3 |
 | T13 重启 + 撤销 | `295aac3..46111e2` | `RestartHelper` 实装；MC_RESTART / MC_PENDING_UNDO | §5.7 |
 | T14 发版链 + 文档同步 | 本任务 | `release.ps1` 双产物；installer.iss；DESIGN/CHANGELOG | §2.3、§8.5 |
+| T16 单 dll 化（追加） | 本任务 | `CleanupRunner.cs` 迁入；`MCShell/` 冻结壳；删除 `MCCleaner/`；release/installer/DESIGN 同步 | §2、§7.2、§8.5/§8.10 |
 
 - 版本与发版（2026-10-28 起，v2 迁移后）：版本号单源=本仓 csproj `<Version>`（作者定义）；
-  清理器独立 1.0.x；单 mod 发版=本仓 `.\release.ps1`；套件编排=suite `tools\publish.ps1`
+  **T16 起只有一条版本线**（清理逻辑在 ModCenter.dll 内）；`MCShell.dll` 固定 1.0.0
+  属性占位、不构成版本线；单 mod 发版=本仓 `.\release.ps1`；套件编排=suite `tools\publish.ps1`
   （各仓 `-PackageOnly`）；N 网发布仍是作者另行确认的手工步骤，不自动化。
 - v1 历史迭代条目见附录 B「v1 §7」。
 

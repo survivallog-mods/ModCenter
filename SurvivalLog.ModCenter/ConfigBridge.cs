@@ -983,6 +983,7 @@ internal static class ConfigBridge
             // 原子写中断的 .tmp 孤儿同清（不是意图介质，留着只会误导排障）
             var tmp = McPending.File + ".tmp";
             if (System.IO.File.Exists(tmp)) System.IO.File.Delete(tmp);
+            CleanupRunner.DeleteSelfUpdateFlag(); // T16：撤销全部待生效 = 自更新预置一并撤销
         }
         catch (Exception e)
         {
@@ -1836,6 +1837,8 @@ internal static class ConfigBridge
                 PendingWriter.AddDelete(dllOp, u.CfgRel); // 主线程唯一写者（原子写）
                 if (u.DisabledTwin) PendingWriter.AddDelete(dllOp + ".disabled", null);
             }
+            // T16：卸载本体时清掉可能存在的自更新预置（避免"先自更新再卸载"的靴先装新件）
+            if (u.Self) CleanupRunner.DeleteSelfUpdateFlag();
             if (u.Tp && u.Loaded) DllDisabler.Enable(u.DllBaseRel); // 在链上第三方：marker 清除（裁定路径）
             // 缺席行：**不动 marker**（终审必修 2）。marker=true + 裸 dll 不在场时清理器零动作；
             // 若在此清成 false，撤销卸载/删除失败后下一次启动会被翻译成 enable（.disabled 反向
@@ -2211,6 +2214,10 @@ internal static class ConfigBridge
                             // v2 任务 7：开门即推待生效摘要（面板底部条初始态；BuildSnapshot 内已刷新 _pendOps）
                             _pendSig = PendingSig();
                             PushPendingSummary();
+                            // T16/D6（Ruling 22）：面板打开即查一次仓库更新（10 分钟会话缓存 +
+                            // 手动刷新 60 秒冷却保留，均在 HandleRepoGet 内判定）——缓存内只推
+                            // 已有数据不重复 fetch；首次打开/缓存过期才起一轮后台 12 仓 fetch。
+                            HandleRepoGet(false);
                             // 任务 4：v1"上次停用未完成"残留 toast 已删——改名执行迁启动清理器，无残留概念
                             break;
                         case "MC_CLOSE": // 面板关闭：键盘门双还原（任务 8）+ 立即落盘全部脏 cfg（防抖收口）

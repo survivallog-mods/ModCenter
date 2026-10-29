@@ -215,6 +215,19 @@ public static class PendingWriter
                 Md5 = RepoClient.Md5Of(stagedAbsPath), // 清理器执行侧对 staged 本件强校验（T2 实测语义）
             },
         });
+
+        // T16 自更新预置（壳的接口）：更新对象是 ModCenter 本体时，除上条 pending op
+        // （撤销/待生效摘要/⟳ 徽标照常）外再写 BepInEx\ModCenter\selfupdate.flag——
+        // 下一靴壳在 LoadFrom **之前**替换本体，当靴即加载新程序集。原因：本体被壳 LoadFrom 后
+        // 同程序集身份不允许在本靴内被 Chainloader 重新加载，CleanupRunner 只能在下一靴落盘。
+        // 写预置失败不影响已落盘的 pending op（旧 CleanupRunner 会自行写预置，代价=多一次重启）。
+        if (!string.IsNullOrEmpty(row.Guid)
+            && string.Equals(row.Guid, ModCenterPlugin.Guid, StringComparison.OrdinalIgnoreCase))
+        {
+            var targetAbs = Path.Combine(Paths.BepInExRootPath,
+                RepoDecision.DllRelOf(row.RepoKey).Replace('/', '\\'));
+            CleanupRunner.WriteSelfUpdateFlag(stagedAbsPath, RepoClient.Md5Of(stagedAbsPath), targetAbs);
+        }
     }
 
     /// <summary>卸载意图（T10）：dll + cfg 两条 delete op（cfgRel 传 GUID 命名 cfg 的 BepInEx 根相对

@@ -6,8 +6,10 @@
 ## v<待作者定号>
 
 > 版本号由作者定（硬规则 1）：发版前把本节标题改成实际版本号（如 `## v1.8.0`），并同步
-> 本仓 csproj `<Version>` 与 `ModCenterPlugin.Version`；清理器 `MCCleaner.csproj` 走独立
-> 1.0.x 线。`release.ps1` 发版模式会校验本节标题与 csproj 版本一致，未定号前只能 `-PackageOnly`。
+> 本仓 csproj `<Version>` 与 `ModCenterPlugin.Version`。T16 单 dll 化后**只有一条版本线**
+> （清理逻辑并入 ModCenter.dll）；`patchers\MCShell.dll` 是永久冻结的引导壳（1.0.0 只是
+> 属性占位），只有壳接口签名变更才需随安装器更新。`release.ps1` 发版模式会校验本节标题
+> 与 csproj 版本一致，未定号前只能 `-PackageOnly`。
 
 ### 新功能
 
@@ -19,14 +21,18 @@
 - **套件仓库页与更新确认链**：12 仓五态、只告警不拦截（版本回退 / gamekb 不符）、
   全部更新（仅 Update 态）、下载进度与失败清理。
 - **待生效条**：聚合摘要、撤销全部（含加载顺序）、立即重启（Steam 重拉）。
-- **新组件 MCCleaner**：`BepInEx\patchers\MCCleaner.dll`（独立 1.0.x 版本线；单槽基座级，
-  不在游戏内自更新）。
+- **新组件 MCShell**：`BepInEx\patchers\MCShell.dll`（永久冻结的引导壳，单槽基座级；
+  清理逻辑已并入 `SurvivalLog.ModCenter.dll` 的 `CleanupRunner`——游戏内更新 ModCenter
+  即更新清理逻辑，版本线只有一条）。自卸载为两阶段墓碑（第一次重启写标记，第二次重启
+  由壳删除本体）；游戏内自更新由壳在加载前预置替换（一次重启即生效）。
 
 ### 兼容与注意
 
 - 打包布局变化：zip 现含 `BepInEx\plugins\SurvivalLog.ModCenter.dll` +
-  `BepInEx\patchers\MCCleaner.dll` + `README.md`；手动安装需两个 dll 都放到对应目录。
-- 升级请用安装器/网盘包更新清理器；游戏内更新只替换插件本体。
+  `BepInEx\patchers\MCShell.dll` + `README.md`；手动安装需两个 dll 都放到对应目录。
+- 从旧版升级：请删除 `BepInEx\patchers\MCCleaner.dll`（安装器 `[InstallDelete]` 自动清理；
+  旧清理器与新逻辑并存会重复执行改名/排序）。游戏内更新只替换 ModCenter.dll（含清理逻辑），
+  引导壳 MCShell.dll 只有接口签名变更才随安装器更新。
 - 旧版 `[Disabled]` 名单退役（无读取方）；第三方停用状态沿用 `[DisabledTp]` marker，
   停用/启用为重启级。
 
