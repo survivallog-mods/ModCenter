@@ -489,6 +489,8 @@ internal static class Meta
     /// 防"同域"盲目误报）。只用于"同域共存"灰标，只标注不判定。同域灰标的产出条件（控制器裁定）：
     /// 域内已装 ≥2 个且至少一个在本表登记——即只把"已登记且已装"的 mod 计入域内计数。
     /// 排除项 karinasprite 与 L1 一致不登记（纯立绘替换零钩子）。
+    /// v2 任务 12（T11 M2）：非 L1 第三方（bettertrade/statsui）登记删除——spec §4.4"第三方仅在
+    /// 进入 L1 名录后带类型"，未收录者不参与域计数（防跨域误报）。
     /// </summary>
     internal static readonly Dictionary<string, string> Domains = new(StringComparer.OrdinalIgnoreCase)
     {
@@ -505,13 +507,37 @@ internal static class Meta
         ["com.local.survivallog.quickaction"] = "速度",
         ["com.local.survivallog.robotspeed"] = "机器人",
         ["com.local.survivallog.roleunlock"] = "角色",
-        // 已收录第三方（L1 名录）+ 原型已知第三方（交易/面板）
+        // 已收录第三方（L1 名录）
         ["com.jangfullmoon.storagecapacityexpansion"] = "储物",
-        ["survivallog.expandedstorage"] = "储物",
-        ["com.ivmakk.survivallog.bettertrade"] = "交易",
-        ["com.ivmakk.survivallog.statsui"] = "面板"
+        ["survivallog.expandedstorage"] = "储物"
         // 排除：com.jangfullmoon.karinasprite —— 纯立绘替换零钩子（spec §4.4 档案已排除），与 L1 同口径不登记。
     };
+
+    /// <summary>
+    /// 非 Meta 九表的套件成员显示名（T11 M5）：L3 who / L2 owner / L1 冲突对象里出现时给中文名
+    /// （此前 CabinetBurden/ModCenter 只能显示插件自报英文名）。只影响显示，不参与路由/匹配。
+    /// </summary>
+    private sealed class ExtraName
+    {
+        public string Guid;
+        public string En;
+        public string Name;
+    }
+
+    private static readonly ExtraName[] ExtraNames =
+    {
+        new() { Guid = "com.local.survivallog.cabinetburden", En = "CabinetBurden", Name = "柜子负重解放" },
+        new() { Guid = "com.local.survivallog.modcenter", En = "ModCenter", Name = "Mod 管理中心" },
+    };
+
+    /// <summary>非 Meta 九表套件成员的中文名（GUID 精确；null=未登记）。</summary>
+    internal static string ExtraNameOf(string guid)
+    {
+        if (string.IsNullOrEmpty(guid)) return null;
+        foreach (var e in ExtraNames)
+            if (string.Equals(e.Guid, guid, StringComparison.OrdinalIgnoreCase)) return e.Name;
+        return null;
+    }
 
     /// <summary>
     /// L1 匹配（GUID 优先、dll 文件名兜底）。两条路径各自全表扫描：先 GUID 全表，命中即返；
@@ -552,7 +578,8 @@ internal static class Meta
         !string.IsNullOrEmpty(guid) && Domains.TryGetValue(guid, out var d) ? d : null;
 
     /// <summary>冲突对象显示名：Who 里的 Meta.En → "中文名（En）"（如 柜子容量（CabinetSize））；
-    /// 未登记原样返回（表外对象也能读）。括号口径：让 spec 内部名逐字可核 + 面板可读。</summary>
+    /// 非 Meta 九表套件成员（CabinetBurden/ModCenter，T11 M5）走附加表；未登记原样返回
+    /// （表外对象也能读）。括号口径：让 spec 内部名逐字可核 + 面板可读。</summary>
     internal static string DisplayNameOf(string enOrGuid)
     {
         if (string.IsNullOrEmpty(enOrGuid)) return "";
@@ -560,6 +587,10 @@ internal static class Meta
             if (string.Equals(mm.En, enOrGuid, StringComparison.OrdinalIgnoreCase)
                 || string.Equals(mm.Guid, enOrGuid, StringComparison.OrdinalIgnoreCase))
                 return mm.Name + "（" + enOrGuid + "）";
+        foreach (var e in ExtraNames)
+            if (string.Equals(e.En, enOrGuid, StringComparison.OrdinalIgnoreCase)
+                || string.Equals(e.Guid, enOrGuid, StringComparison.OrdinalIgnoreCase))
+                return e.Name + "（" + enOrGuid + "）";
         return enOrGuid;
     }
 

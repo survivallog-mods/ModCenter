@@ -139,9 +139,11 @@ internal static class ConfigBridge
             if (mm.OvrHost != null) mi.Ovr = ReadOvr(cfg, mm.OvrHost);
             if (mm.BagOvrHost != null) mi.BagOvr = ReadBagOvr(cfg, mm.BagOvrHost);
             // v2 任务 11：冲突徽标置最前（L1 红/灰 + L3 同域灰；点击 cf 拉详情弹窗）
+            // v2 任务 12：L2 碰撞橙标插在 L1 与 L3 之间（同 cf 弹窗复用）；停用行徽标弱化（M7）
             // v2 任务 8：随后仓库态（↑蓝可更新/↓橙可降级/↑+⊘版本告警，点击 upd 弹确认窗）
             // + 待生效 ⟳（T7）。已有待生效意图的行不再给可动作徽标（裁定 3：⟳ 出现、↑/↓ 消失）。
             var ics = CfIcsFor(cfRows, mm.Guid);
+            if (!mi.Enabled) WeakenCfIcs(ics); // T11 M7：套件停用（General.Enabled=false）→ cf 徽标弱化+tip 前缀
             var repoIcs = RepoIcsOf(mm.Guid, repoPend);
             if (repoIcs != null) ics.AddRange(repoIcs);
             if (pendByRow.TryGetValue(mm.Guid, out var pendTip))
@@ -1713,7 +1715,9 @@ internal static class ConfigBridge
             list.Add(new CfRow
             {
                 Guid = md.GUID,
-                Name = mm != null ? mm.Name : (string.IsNullOrEmpty(md.Name) ? md.GUID : md.Name),
+                // T11 M5：CabinetBurden/ModCenter（Meta 九表外）走附加中文名表，L3 who 不再露英文自报名
+                Name = mm != null ? mm.Name
+                    : (Meta.ExtraNameOf(md.GUID) ?? (string.IsNullOrEmpty(md.Name) ? md.GUID : md.Name)),
                 Entry = Meta.MatchL1(md.GUID, dllName),
                 Domain = Meta.DomainOf(md.GUID),
             });
@@ -1767,8 +1771,10 @@ internal static class ConfigBridge
     }
 
     /// <summary>行内冲突 ics（BuildSnapshot/BuildTp 共用）：L1 每条一图标（red/gray，click=cf），
-    /// 末尾 L3 同域灰（域内已装 ≥2 且均为域表登记项——第三方未登记不计数，防盲目误报）。
-    /// 未加载行（套件 dll 缺失/缺席行）不产冲突标。无命中=空表。</summary>
+    /// 随后 L2 碰撞橙标（v2 任务 12；每 mod 聚合一枚，click=cf），末尾 L3 同域灰（域内已装 ≥2 且
+    /// 均为域表登记项——第三方未登记不计入，防盲目误报）。
+    /// T11 M3：L1 已有卡片（红/灰任一）的 mod 跳过 L3 灰标——避免"红+灰/双灰"噪音（expandedstorage
+    /// 只出 L1 灰卡）。未加载行（套件 dll 缺失/缺席行）不产冲突标。无命中=空表。</summary>
     private static List<IcInfo> CfIcsFor(List<CfRow> all, string guid)
     {
         var list = new List<IcInfo>();
@@ -1777,13 +1783,29 @@ internal static class ConfigBridge
         foreach (var r in all)
             if (string.Equals(r.Guid, guid, StringComparison.OrdinalIgnoreCase)) { row = r; break; }
         if (row == null) return list;
-        foreach (var e in EntriesFor(row, all)) list.Add(EntryIc(e));
-        if (row.Domain != null)
+        var entries = EntriesFor(row, all);
+        foreach (var e in entries) list.Add(EntryIc(e));
+        // v2 任务 12：L2 运行时碰撞（只统计可归属已装 mod 的组；未知来源只进扫描汇总，裁定 3）
+        var l2 = PatchScan.IcsFor(guid);
+        if (l2 != null) list.Add(l2);
+        if (row.Domain != null && entries.Count == 0) // T11 M3：L1 已有卡片 → 不再叠 L3 灰标
         {
             var mates = DomainMates(row, all);
             if (mates.Count >= 2) list.Add(DomainIc(row, mates));
         }
         return list;
+    }
+
+    /// <summary>T11 M7：停用套件行的冲突/碰撞/同域徽标保留但弱化（面板降透明度）+ tip 前缀
+    /// "（已停用）"——保留信息量又不误导（停用 = 行为已还原，冲突当前不生效）。</summary>
+    private static void WeakenCfIcs(List<IcInfo> ics)
+    {
+        foreach (var ic in ics)
+            if (ic.Click == "cf")
+            {
+                ic.W = true;
+                ic.Tip = "（已停用）" + ic.Tip;
+            }
     }
 
     /// <summary>行内 L1 图标：tip=原因摘要（Title）+ 对象 + 建议数（控制器裁定 2；完整原因在弹窗）。</summary>
@@ -1810,12 +1832,13 @@ internal static class ConfigBridge
         {
             K = "gray",
             Click = "cf",
-            Tip = "同域共存（" + row.Domain + " 功能域）· 与 " + string.Join("、", others) + " · 仅标注不判定 · 点击查看",
+            Tip = "同域共存（" + row.Domain + "功能域）· 与 " + string.Join("、", others) + " · 仅标注不判定 · 点击查看",
         };
     }
 
-    /// <summary>MC_CF {guid} → MC_CF_DATA {guid,cards[]}：卡片顺序与行内 ics 同源（L1 色级序 + L3 同域）。
-    /// 未在链上/缺席行 → 空 cards（面板给空态壳，不误报）。</summary>
+    /// <summary>MC_CF {guid} → MC_CF_DATA {guid,cards[]}：卡片顺序与行内 ics 同源（L1 色级序 →
+    /// L2 碰撞卡（v2 任务 12）→ L3 同域卡；T11 M3：L1 已有卡片则不出 L3 卡）。未在链上/缺席行 →
+    /// 空 cards（面板给空态壳，不误报）。</summary>
     private static void HandleCf(string guid)
     {
         var rows = InstalledCfRows();
@@ -1826,8 +1849,10 @@ internal static class ConfigBridge
         var data = new CfData { Guid = guid };
         if (row != null)
         {
-            foreach (var e in EntriesFor(row, rows)) data.Cards.Add(EntryCard(e));
-            if (row.Domain != null)
+            var entries = EntriesFor(row, rows);
+            foreach (var e in entries) data.Cards.Add(EntryCard(e));
+            foreach (var c in PatchScan.CollisionsFor(row.Guid)) data.Cards.Add(PatchCard(c)); // T12 L2
+            if (row.Domain != null && entries.Count == 0) // T11 M3：L1 已有卡片 → 不再叠 L3 灰卡
             {
                 var mates = DomainMates(row, rows);
                 if (mates.Count >= 2) data.Cards.Add(DomainCard(row, mates));
@@ -1851,6 +1876,25 @@ internal static class ConfigBridge
         return c;
     }
 
+    /// <summary>L2 碰撞卡（v2 任务 12）：lv=orange / tag=碰撞；title=方法名；reason 按控制器
+    /// 裁定 3 文案（"对同一游戏方法 X 挂了补丁，结果取决于加载顺序（后写覆盖前写）"）；tips=
+    /// 停用一方 / 调序（仅缓解写序类冲突，风险自负）。who=owner 显示串（未知来源带标注）。</summary>
+    private static CfCardInfo PatchCard(PatchCollision c)
+    {
+        var card = new CfCardInfo
+        {
+            Lv = "orange",
+            Tag = Meta.TagOf("orange"),
+            Title = "运行时补丁碰撞 · " + c.Method,
+            Reason = "对同一游戏方法 " + c.Method + " 挂了 " + c.Owners.Count + " 个补丁（共 " + c.PatchCount
+                   + " 个补丁实例），结果取决于加载顺序（后写覆盖前写）。",
+        };
+        card.Who.AddRange(c.Who());
+        card.Tips.Add("停用其中一方");
+        card.Tips.Add("尝试调整加载顺序（仅缓解写序类冲突，风险自负）");
+        return card;
+    }
+
     /// <summary>L3 同域卡（原型 cfHtml 的灰卡同构；who=域内全部已装登记 mod）。文案为通用标注，
     /// 不含判定结论——spec §4.4"只标注不判定"。tips 照原型同域卡两句。</summary>
     private static CfCardInfo DomainCard(CfRow row, List<CfRow> mates)
@@ -1867,6 +1911,22 @@ internal static class ConfigBridge
         c.Tips.Add("保留一方");
         c.Tips.Add("维持现状（接受叠加结果）");
         return c;
+    }
+
+    /// <summary>MC_SCAN（v2 任务 12）：手动刷新 L2 补丁碰撞——重扫（主线程）→ 推新快照
+    /// （行内橙标随之重算）+ MC_SCAN_DATA（面板汇总行与汇总弹窗）。</summary>
+    private static void HandlePatchScan()
+    {
+        PatchScan.Refresh();
+        PushRender(BuildSnapshot().ToJson());
+        PushScanData();
+    }
+
+    /// <summary>推 MC_SCAN_DATA（最近一轮结果；扫描异常也推——面板显示错误态而不装死）。</summary>
+    private static void PushScanData()
+    {
+        try { PushEvent(PatchScan.BuildData().ToJson()); }
+        catch (Exception e) { Log("warn MC_SCAN_DATA 推送失败: " + e.Message); }
     }
 
     // ============ 消息泵（主线程，Ticker 每帧调） ============
@@ -1922,7 +1982,10 @@ internal static class ConfigBridge
                     {
                         case "MC_OPEN":
                             FocusTick.NotifyOpen(); // 任务 8：面板开⇒键盘门交给网页（FocusTick 0.3s 沿触发）
+                            // v2 任务 12：L2 补丁碰撞实测（主线程轻量；打开即扫 + MC_SCAN 手动，绝不后台轮询）
+                            PatchScan.Refresh();
                             PushRender(BuildSnapshot().ToJson());
+                            PushScanData();
                             // v2 任务 7：开门即推待生效摘要（面板底部条初始态；BuildSnapshot 内已刷新 _pendOps）
                             _pendSig = PendingSig();
                             PushPendingSummary();
@@ -1973,6 +2036,10 @@ internal static class ConfigBridge
                         // v2 任务 11：冲突详情（行内红/灰图标点击 → 回 MC_CF_DATA{guid,cards[]}）
                         case "MC_CF":
                             HandleCf(GetStr(el, "guid"));
+                            break;
+                        // v2 任务 12：L2 补丁碰撞手动刷新（重扫 → 快照橙标 + MC_SCAN_DATA 汇总）
+                        case "MC_SCAN":
+                            HandlePatchScan();
                             break;
                         case "MC_EVIDENCE": // 验证辅助（只读）：写证据文件供装机断言（见 DESIGN §6.4）
                             WriteEvidence(GetStr(el, "tag"));

@@ -61,6 +61,11 @@ public sealed class ModCenterPlugin : BasePlugin
     // 全程一轮 12 次 API 请求（匿名限流预算内），证据落 BepInEx/ModCenter_reposelftest.txt。
     internal static ConfigEntry<bool> DebugRepoSelfTest;
 
+    // v2 任务 12：L2 补丁碰撞探针开关（默认关，仿 NetSelfTest）。true 时启动 10s 后主线程 dump
+    // Harmony.GetAllPatchedMethods 全量清单 + 套件已挂方法 PatchInfo 逐字段/多反射路径，
+    // 并跑一轮 PatchScan.Scan() dry-run；证据落 BepInEx/ModCenter_patchscan.txt（硬规则 9）。
+    internal static ConfigEntry<bool> DebugPatchScan;
+
     public override void Load()
     {
         Instance = this;
@@ -91,6 +96,11 @@ public sealed class ModCenterPlugin : BasePlugin
             "①游戏版本通道四候选 dump（证据 ModCenter_gamever.txt）→ ②后台 fetch 全部 12 仓 → 五态决策\n" +
             "（真基线轮 + 强制通道失败轮 + 合成分支自证轮）→ ③PendingWriter 合并语义对临时文件自证（验后即删）。\n" +
             "证据写 BepInEx/ModCenter_reposelftest.txt。一轮消耗 12 次 GitHub 匿名 API 请求，验完请改回 false。");
+
+        DebugPatchScan = Config.Bind("Debug", "PatchScan", false,
+            "L2 补丁碰撞探针（默认关，仅供开发验证）。true 时启动 10 秒后跑一轮（仅此一轮）：\n" +
+            "Harmony.GetAllPatchedMethods 全量清单 + 套件已挂方法 PatchInfo 逐字段 dump（owners/补丁方法声明类/多反射路径）\n" +
+            "+ 面板扫描器 dry-run（碰撞组数与耗时）。证据写 BepInEx/ModCenter_patchscan.txt。验完请改回 false。");
 
         FocusTick.Reset(); // 任务 8：清上一轮键盘门自证文件（每轮运行从空文件开始）
 
@@ -177,11 +187,16 @@ internal sealed class ModCenterTicker : MonoBehaviour
     private int _repoPhase;
     private float _repoAge;
 
+    // v2 任务 12：L2 补丁碰撞探针状态机：-1 未启用/已收割；0 等 10s；1 主线程 dump 完等收割
+    private int _patchPhase;
+    private float _patchAge;
+
     public void Update()
     {
         ProbePump();
         NetProbePump();
         RepoProbePump();
+        PatchScanPump();
 
         if (!_residueSoftDone)
         {
@@ -292,6 +307,34 @@ internal sealed class ModCenterTicker : MonoBehaviour
                 {
                     ModCenterPlugin.Log("reposelftest 探针收割: " + RepoProbe.Summary);
                     _repoPhase = -1;
+                }
+                break;
+        }
+    }
+
+    /// <summary>
+    /// L2 补丁碰撞探针泵（v2 任务 12，NetProbePump 同款）：等 10s 起 PatchScanProbe——Harmony 账本
+    /// 全部主线程读（裁定 1），dump 与 dry-run 同步跑完置 Done 旗，本泵收割打印。一轮即终态。
+    /// </summary>
+    private void PatchScanPump()
+    {
+        if (_patchPhase < 0) return;
+        var gate = ModCenterPlugin.DebugPatchScan;
+        if (gate == null || !gate.Value) { _patchPhase = -1; return; }
+
+        switch (_patchPhase)
+        {
+            case 0:
+                _patchAge += Time.unscaledDeltaTime;
+                if (_patchAge < 10f) return;
+                _patchPhase = 1;
+                PatchScanProbe.Start();
+                break;
+            case 1:
+                if (PatchScanProbe.Done)
+                {
+                    ModCenterPlugin.Log("patchscan 探针收割: " + PatchScanProbe.Summary);
+                    _patchPhase = -1;
                 }
                 break;
         }

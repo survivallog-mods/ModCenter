@@ -214,6 +214,7 @@ public sealed class IcInfo
     public string Tip;   // 悬停 title 全文（原型：悬停 title 全文）
     public string Click; // cf | upd；null/空 不输出（纯状态）
     public string G;     // 可选字形符（↓/⊘ 消歧）；null 不输出
+    public bool? W;      // v2 任务 12（T11 M7）：行已停用 → 徽标弱化（面板降透明度+tip 已加"（已停用）"）
 
     internal void Write(StringBuilder sb)
     {
@@ -221,6 +222,7 @@ public sealed class IcInfo
           .Append(",\"tip\":").Append(JsonW.Str(Tip));
         if (!string.IsNullOrEmpty(Click)) sb.Append(",\"click\":").Append(JsonW.Str(Click));
         if (!string.IsNullOrEmpty(G)) sb.Append(",\"g\":").Append(JsonW.Str(G));
+        if (W == true) sb.Append(",\"w\":true");
         sb.Append('}');
     }
 }
@@ -354,6 +356,72 @@ public sealed class CfData
         }
         sb.Append("]}");
         return sb.ToString();
+    }
+}
+
+/// <summary>
+/// L2 补丁碰撞扫描数据（v2 任务 12，MC_SCAN_DATA 推送体，__mcEvent 通道）：
+/// at=扫描时间（Unix 毫秒）、patched=已挂补丁方法总数、game=游戏侧方法数、total=碰撞组数
+/// （routed 可归属 + unknown 全未知来源）、ms=扫描耗时、scope=过滤口径文案、error=扫描异常。
+/// items=全部碰撞组（可归属在前，未知来源在后；行内橙标只挂可归属组，未知来源只进本汇总）。
+/// </summary>
+public sealed class PatchScanData
+{
+    public long At;
+    public int Patched;
+    public int Game;
+    public int Total;
+    public int Routed;
+    public int Unknown;
+    public long Ms;
+    public string Scope;
+    public string Error;
+    public List<PatchScanItem> Items = new();
+
+    public string ToJson()
+    {
+        var sb = new StringBuilder(3072);
+        sb.Append("{\"type\":\"MC_SCAN_DATA\",\"at\":").Append(At.ToString(CultureInfo.InvariantCulture))
+          .Append(",\"patched\":").Append(Patched.ToString(CultureInfo.InvariantCulture))
+          .Append(",\"game\":").Append(Game.ToString(CultureInfo.InvariantCulture))
+          .Append(",\"total\":").Append(Total.ToString(CultureInfo.InvariantCulture))
+          .Append(",\"routed\":").Append(Routed.ToString(CultureInfo.InvariantCulture))
+          .Append(",\"unknown\":").Append(Unknown.ToString(CultureInfo.InvariantCulture))
+          .Append(",\"ms\":").Append(Ms.ToString(CultureInfo.InvariantCulture))
+          .Append(",\"scope\":").Append(JsonW.Str(Scope));
+        if (!string.IsNullOrEmpty(Error)) sb.Append(",\"error\":").Append(JsonW.Str(Error));
+        sb.Append(",\"items\":[");
+        for (var i = 0; i < Items.Count; i++)
+        {
+            if (i > 0) sb.Append(',');
+            Items[i].Write(sb);
+        }
+        sb.Append("]}");
+        return sb.ToString();
+    }
+}
+
+/// <summary>一条碰撞组的面板投影：method=短类型名.方法名、patches=补丁实例数、
+/// unknown=全部 owner 未知来源、owners=owner 显示串（含"未知来源（id）"标注）。</summary>
+public sealed class PatchScanItem
+{
+    public string Method;
+    public int Patches;
+    public bool Unknown;
+    public List<string> Owners = new();
+
+    internal void Write(StringBuilder sb)
+    {
+        sb.Append("{\"method\":").Append(JsonW.Str(Method))
+          .Append(",\"patches\":").Append(Patches.ToString(CultureInfo.InvariantCulture));
+        if (Unknown) sb.Append(",\"unknown\":true");
+        sb.Append(",\"owners\":[");
+        for (var i = 0; i < Owners.Count; i++)
+        {
+            if (i > 0) sb.Append(',');
+            sb.Append(JsonW.Str(Owners[i]));
+        }
+        sb.Append("]}");
     }
 }
 

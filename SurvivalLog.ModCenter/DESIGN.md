@@ -721,7 +721,88 @@ PendingWriter 合并语义对临时文件 `selftest-pending.json` 自证（旧�
 - 证据全文存 `.superpowers/sdd/2026-10-28-modcenter-v2-lifecycle/task-6-gamever.txt` /
   `task-6-reposelftest.txt`（BepInEx 侧原件已按惯例清，副本在 sdd 目录）。
 
+## 6.13 体检 L2：运行时补丁碰撞实测（v2 生命周期任务 12，2026-10-29）
+
+### 6.13.1 探针实证（开放点 1 收口；证据 `BepInEx/ModCenter_patchscan.txt`）
+
+- 环境：本机 BepInEx 6 IL2CPP 构型，`0Harmony 2.10.2.0`（HarmonyX），20 插件（12 套件 + 6 第三方 + 2 探针）。
+- **结论：Il2CppInterop 挂的游戏方法补丁 owner 可读，归组可用**。`Harmony.GetAllPatchedMethods()`
+  返回 58 个已挂补丁方法；`Harmony.GetPatchInfo(m)` 对每个方法返回 `HarmonyLib.Patches`，
+  `Patches.Owners`（`ReadOnlyCollection<string>`）与各补丁实例 `Patch.owner` 字段**两路一致**，
+  `Patch.PatchMethod` 可读（补丁方法声明类/名完整）。`GetAllPatchedMethods().Contains(m)` 为 True
+  （patch 字典键与 Attribute 补丁的目标 MethodBase 同一身份）。
+- 套件已挂方法 dump（5~10 个）：`BagComponent.OnInit`（cabinetsize）、`EndlessManager.FallMapPoint` /
+  `Initialize` / `SurvivalPlanningComponent.OnInitBuffs`（endlessguard）、`SurvivalResultsManager.OnBuySurvivalPlan`
+  （planpick）、`WebUIVm.HandleCallback` / `GameTimeManager.ChangeGameSpeed`（predisasterspeed）、
+  `Ac_ToolTable_RefreshBag.SendAction`（cabineteverywhere.coalesce）——owner=各 mod Harmony id，
+  与 `new Harmony(Guid)` 约定逐一吻合；补丁方法声明类均在插件程序集。
+- **本机实测的 ≥2 owner 方法共 9 个**：8 个游戏侧（BetterTrade × ProjectCook × StorageHub × StatsUI
+  两两/三方共挂：FurnitureTagRules.Evaluate/TryGetMatchRank/EnsureCache、FurnitureTagComponent.TryGetPutRank、
+  WebUILayer.OnUpdate、WebUI_BackpackUI.CallShowAction、ItemManager.CollectTradeContainers、
+  Reducer_Data_Item.RA_GetCookingBagList）+ 1 个框架侧（Vuplex `BaseWebView.HandleMessageEmitted`，
+  3 owner）。**当前套件自身没有同方法多补丁场景**（brief 假设的"柜子系×快速系同挂表方法"未出现：
+  套件仅 CabinetSize / CabinetEverywhere / EndlessGuard / PlanPick / PreDisasterSpeed 五处 Harmony 挂点，
+  目标互不重叠）——扫描报告非空来自真实第三方两两碰撞；套件归属/行内橙标/停用弱化用一次性
+  验证插件构造实证（见 6.13.3）。
+- 性能：全量枚举 + 每方法 PatchInfo 读取 0~7ms（本机），**主线程直接扫**（裁定 1，无需后台 Task）。
+
+### 6.13.2 机制（`PatchScan.cs`）
+
+- **扫描时机**：MC_OPEN（面板打开即扫）+ MC_SCAN（手动"重新扫描"）；不后台轮询（裁定 1）。
+  结果缓存 `PatchScan._last`，快照 ics / MC_CF 卡片 / MC_SCAN_DATA 三处同源。
+- **归组**：同方法 ≥2 owner 一条；owner 双路径合并去重（Patches.Owners + Patch.owner，防版本差异）。
+  `patchedCount` = prefix+postfix+transpiler+finalizer+ilmanipulator 实例数。
+- **范围过滤**：只看游戏侧方法（声明类型程序集=`HotUpdate` 或命名空间 `GameCore.*`）；框架
+  （BepInEx/HarmonyLib/MonoMod）、引擎（UnityEngine/Vuplex）、插件自身内部方法不计。实测牺牲
+  Vuplex `HandleMessageEmitted` 三 owner 组（UI 框架消息入口，不是游戏方法），换取零框架噪音。
+- **owner→mod 归属**（裁定 2）：①精确 GUID 全表 ②前缀（owner 以 `<GUID>.` 开头，如
+  `com.local.survivallog.quickaction.trace` → quickaction）③其余=未知来源（显示"未知来源（id）"，
+  不臆造归属）。两遍扫描保证精确优先于前缀。
+- **行内橙标**（裁定 3）：每个 mod **聚合一枚** ⇄（tip=组数+前两组方法名+点击查看；多组不铺图标
+  洪水），click=cf 复用冲突详情弹窗；`MC_CF` 返回该 mod 涉及的每组一张橙卡（方法名+owner 名单+
+  建议）。**未知来源组不铺行**，只进扫描汇总（`MC_SCAN_DATA` 的 `unknown` 计数与 `[未知来源]` 组）。
+- **卡片文案**（裁定 3）：reason=对同一游戏方法 X 挂了 N 个补丁（共 M 个补丁实例），结果取决于
+  加载顺序（后写覆盖前写）；tips=停用其中一方 / 尝试调整加载顺序（仅缓解写序类冲突，风险自负）。
+- **面板**：侧栏仓库入口卡下方"补丁碰撞 N 组"汇总行（可归属/未知来源/游戏侧方法数/耗时/扫描时刻；
+  点击弹汇总窗，列出全部组，含"重新扫描"→ MC_SCAN）；橙标点击走既有 cf 弹窗。
+- **M7（T11 Minor）**：套件行 `General.Enabled=false` 时，行内 cf 类徽标（红/橙/灰）保留但加
+  `w:true`（面板 `.__mc-weak` 透明度 .45）且 tip 前缀"（已停用）"——保留信息量又不误导。
+
+### 6.13.3 装机实测记录（2026-10-29 主菜单阶段）
+
+- **真实环境**（6 第三方在场）：扫描 8 组（可归属 8 / 未知来源 0 / 58 方法 / 0ms）。BetterTrade
+  与 ProjectCook 各 7 组（行内各一枚 ⇄ 聚合标），StatsUI 1 组，StorageHub 2 组；cf 弹窗逐卡对拍=
+  方法名+双方显示名+原因+tips（含"后写覆盖前写"/"风险自负"）；汇总弹窗 8 组全列；"重新扫描"
+  往返（时间戳更新、弹窗就地重绘）。
+- **构造验证**（一次性插件，验后删除）：
+  ① `T12L2Dummy` 以 `com.local.survivallog.quickaction.trace` 给 `BagComponent.OnInit` 挂 no-op
+  postfix → 与 CabinetSize 成一组；**前缀归属**到 QuickAction/CabinetSize，两行橙标；cf 弹窗橙卡
+  who=动作加速（quickaction）、柜子容量（cabinetsize）；停用 CabinetSize 后其橙+灰标 `w:true`
+  （DOM class `__mc-weak`、tip"（已停用）"），重启前恢复。
+  ② `ExpandedStorage.dll`（GUID `survivallog.expandedstorage`，命中 L1 灰）→ BackpackExpand/
+  ExpandedStorage 各**仅 1 枚 L1 灰标**（M3：跳过 L3 同域灰），灰卡标题"同域 mod"（M4）。
+  ③ `T12UnknownDummy`（两个不可归属 id `t12.unk.a/b`）→ 与 StatsUI 混组的卡 who 显示
+  "未知来源（t12.unk.a）/（t12.unk.b）"；全未知组 `BagComponent.SetBagConfigId` 出现在汇总
+  `[未知来源]`（可归属 9 / 未知 1），**不挂任何行**；插件行自身 0 图标。
+- 截图（目检通过）：`task-12-shot-a-sidebar-orange.png`（侧栏橙标+汇总行）、`-b-cf-orange-modal.png`
+  （7 卡橙弹窗）、`-c-scan-modal.png`（汇总窗）、`-d-rescan.png`（重扫后）、`-e-suite-orange.png`
+  （套件橙卡+灰卡"同域 mod"）、`-f-weak-disabled.png`（停用弱化）、`-g-m3-l1gray.png`（M3/M4）、
+  `-h-unknown-who.png`（未知来源 who）、`-i-unknown-summary.png`（未知来源汇总）。
+- **T11 六 Minor（同任务修）**：M2 `Meta.Domains` 删除 bettertrade/statsui（第三方仅进 L1 名录后带
+  类型）→ 实测两行只剩橙标、无灰标；M3 L1 已有卡片跳过 L3 灰标（`CfIcsFor`/`HandleCf` 同规则）→
+  实测 1 枚灰；M4 灰卡标题"同域 mod"（含 L3 与 L1 灰卡）；M5 `Meta.DisplayNameOf` 补
+  CabinetBurden=柜子负重解放 / ModCenter=Mod 管理中心（L3 who 实测显示中文）；M6 "储物功能域"去空格；
+  M7 见 6.13.2。自检 23 PASS（`task-12-selftest.txt`）。
+
 ## 7. 迭代维护清单
+
+- 2026-10-29 v2 任务 12（L2 补丁碰撞）：新增 `PatchScan.cs`（`Harmony.GetAllPatchedMethods` →
+  `Patches.Owners`/`Patch.owner` 双路径归组 → 游戏侧过滤 + GUID 精确/前缀归属 → 碰撞组；行内
+  聚合橙标 / `MC_CF` 橙卡 / `MC_SCAN_DATA` 汇总；`Debug.PatchScan` 探针 + Ticker PatchScanPump，
+  证据 `ModCenter_patchscan.txt`）；`ConfigBridge.cs` 接 MC_OPEN/MC_SCAN、CfIcsFor 插 L2、M3 灰标
+  跳过、M7 停用弱化、灰卡标题改面板侧；`Payload.cs` 增 `IcInfo.w` + `PatchScanData/Item`；
+  `Meta.cs` 删非 L1 第三方域登记（M2）+ 附加显示名（M5）；panel.js 增汇总行/汇总弹窗/`__mc-weak`。
+  实证与实测见 §6.13；测试插件（T12L2Dummy/ExpandedStorage/T12UnknownDummy）验后已删。
 
 - 2026-10-29 v2 任务 6（决策层 + gamekb 通道）：新增 `RepoDecision.cs`（RepoRow/五态 Build/
   12 仓清单/GuidOf/DllRelOf/SnapshotLocal + PendingWriter 主线程唯一写者三口）与
