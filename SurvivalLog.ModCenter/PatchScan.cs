@@ -197,6 +197,8 @@ internal static class PatchScan
                 if (owners.Count == 0) continue;
                 // I-1 修正：scope 计数按"全部已挂补丁方法"统计（单 owner 也计入），
                 // 与多 owner 碰撞组数分开——面板"游戏侧 G/P 方法"不再等于碰撞组数。
+                // 计数缺口说明：GetPatchInfo 抛异常或返回 null 的方法（账本与读取不一致，实测 0 例）
+                // 不进入 InScope/Skipped 计数；口径=可读取 PatchInfo 的已挂补丁方法。
                 var inScope = InScope(m);
                 if (inScope) res.InScope++; else res.Skipped++;
                 if (owners.Count < 2) { res.SingleOwner++; continue; }
@@ -367,7 +369,8 @@ internal static class PatchScan
 /// L2 补丁碰撞自诊断探针（cfg Debug.PatchScan 门控，Ticker 10s 后拉起，一轮即终态；仿 NetProbe/
 /// RepoProbe）。实证点：Il2CppInterop 挂的游戏方法补丁，PatchInfo.patchMethods/owners 是否可读、
 /// 能否按 owner 归组。证据追加 BepInEx/ModCenter_patchscan.txt：全量已挂补丁方法清单（owners/
-/// 补丁数/声明类型/程序集）+ 套件已挂方法 5~10 个的 PatchInfo 逐字段 dump（Owners 属性、
+/// 补丁数/声明类型/程序集）+ 第一方套件挂点全量（上限 10，现有 9 个）+ 常用游戏方法补足的
+/// PatchInfo 逐字段 dump（Owners 属性、
 /// Patch.owner 字段、反射路径、GetAllPatchedMethods 身份、IL2CPP GetMethodBody 降级面）+
 /// 产品扫描器 dry-run 结果与耗时。Ticker 主线程只收割 Done 旗。
 /// </summary>
@@ -421,8 +424,10 @@ internal static class PatchScanProbe
 
         // ---- ① 全量清单（最多 240 行）：声明类型/程序集/owner 数/owner 原串/补丁数 ----
         var multi = 0;
-        // M-6 修正（评审）：重点 dump 先保证套件 owner 方法（最多 8 个），再用常用游戏方法补足
-        // 10 个——旧实现按字典序取前 10 个 target/suite 命中，套件方法可能被第三方 target 挤出。
+        // M-6 修正（评审 round 2）：重点 dump 先保证第一方套件 owner 方法，再用常用游戏方法补足；
+        // 候选上限从 8 提到 10（现有第一方挂点 9 个，避免再静默丢样本），总 dump 上限 12。
+        const int SuiteSampleCap = 10;
+        const int DumpCap = 12;
         var suiteCandidates = new List<MethodBase>();
         var targetCandidates = new List<MethodBase>();
         var targetNames = new[]
@@ -462,16 +467,16 @@ internal static class PatchScanProbe
         var suiteHits = new List<MethodBase>();
         foreach (var m in suiteCandidates)
         {
-            if (suiteHits.Count >= 8) break;
+            if (suiteHits.Count >= SuiteSampleCap) break;
             suiteHits.Add(m);
         }
         foreach (var m in targetCandidates)
         {
-            if (suiteHits.Count >= 10) break;
+            if (suiteHits.Count >= DumpCap) break;
             suiteHits.Add(m);
         }
 
-        // ---- ② 套件已挂方法重点 dump（5~10 个）：PatchInfo 逐字段 + 多反射路径 ----
+        // ---- ② 套件已挂方法重点 dump（第一方全量优先 + target 补足）：PatchInfo 逐字段 + 多反射路径 ----
         P($"--- 重点方法 dump（{suiteHits.Count} 个：套件 owner 优先，常用游戏方法补足） ---");
         foreach (var m in suiteHits) DumpDetail(m);
 

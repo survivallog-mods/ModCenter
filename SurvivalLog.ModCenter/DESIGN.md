@@ -733,13 +733,19 @@ PendingWriter 合并语义对临时文件 `selftest-pending.json` 自证（旧�
   `Patches.Owners`（`ReadOnlyCollection<string>`）与各补丁实例 `Patch.owner` 字段**两路一致**，
   `Patch.PatchMethod` 可读（补丁方法声明类/名完整）。`GetAllPatchedMethods().Contains(m)` 为 True
   （patch 字典键与 Attribute 补丁的目标 MethodBase 同一身份）。
-- 套件已挂方法 dump（8 个第一方挂点）：`BagComponent.OnInit`（cabinetsize）、`EndlessManager.FallMapPoint` /
-  `Initialize` / `SurvivalPlanningComponent.OnInitBuffs`（endlessguard）、`SurvivalResultsManager.OnBuySurvivalPlan`
+- 第一方已挂方法 dump（fix round 2 上限提高后，9 个第一方全部入 dump）：8 个套件游戏侧挂点——
+  `BagComponent.OnInit`（cabinetsize）、`EndlessManager.FallMapPoint` / `Initialize` /
+  `SurvivalPlanningComponent.OnInitBuffs`（endlessguard）、`SurvivalResultsManager.OnBuySurvivalPlan`
   （planpick）、`WebUIVm.HandleCallback` / `GameTimeManager.ChangeGameSpeed`（predisasterspeed）、
   `Ac_ToolTable_RefreshBag.SendAction`（cabineteverywhere.coalesce）——owner=各 mod Harmony id，
-  与 `new Harmony(Guid)` 约定逐一吻合；补丁方法声明类均在插件程序集。
-  （fix M-6：探针重点 dump 的"套件 owner"判定改为第一方前缀 `com.local.survivallog.`；此前
-  `IndexOf("survivallog")` 会把 `com.dev./com.ivmakk.survivallog.*` 第三方也当套件，导致套件挂点被挤出。）
+  与 `new Harmony(Guid)` 约定吻合；补丁方法声明类均在插件程序集。
+  + 1 个第一方非游戏挂点：`BepInEx.BaseChainloader.ModifyLoadOrder`（owner=
+  `com.local.survivallog.mccleaner.order`，排序清理器补丁）。
+  （fix round 1 时第一方候选上限=8，实际 dump 为 **7 个套件游戏侧挂点 + ModifyLoadOrder**；
+  `GameTimeManager.ChangeGameSpeed` 恰因上限被截断未入 dump。fix round 2 上限提至 10 后 9 个
+  第一方全部入 dump。另 fix M-6：探针"套件 owner"判定改第一方前缀 `com.local.survivallog.`；
+  此前 `IndexOf("survivallog")` 会把 `com.dev./com.ivmakk.survivallog.*` 第三方也当套件，
+  套件挂点反被挤出。）
 - **本机实测的 ≥2 owner 方法共 9 个**：8 个游戏侧（BetterTrade × ProjectCook × StorageHub × StatsUI
   两两/三方共挂：FurnitureTagRules.Evaluate/TryGetMatchRank/EnsureCache、FurnitureTagComponent.TryGetPutRank、
   WebUILayer.OnUpdate、WebUI_BackpackUI.CallShowAction、ItemManager.CollectTradeContainers、
@@ -757,12 +763,13 @@ PendingWriter 合并语义对临时文件 `selftest-pending.json` 自证（旧�
 - **归组**：同方法 ≥2 owner 一条；owner 双路径合并去重（Patches.Owners + Patch.owner，防版本差异）。
   `patchedCount` = prefix+postfix+transpiler+finalizer+ilmanipulator 实例数。
 - **范围过滤与统计口径**：只看游戏侧方法（声明类型程序集=`HotUpdate` 或命名空间 `GameCore.*`）；
-  框架（BepInEx/HarmonyLib/MonoMod）、引擎（UnityEngine/Vuplex）、插件自身内部方法不计。
+  框架（BepInEx/HarmonyLib/MonoMod）、引擎（UnityEngine/Vuplex）、插件自身内部方法不计入碰撞组数。
   `InScope`/`Skipped` 按**全部已挂补丁方法**计数（含单 owner）；碰撞组数单独 `MultiOwnerGame`
   统计——面板"游戏侧 55/58 方法"不再等于碰撞组数（fix I-1）。框架侧多 owner 组
   （`MultiOwnerFramework`/`Framework`）继续过滤不铺行，但 `MC_SCAN_DATA.framework/frameItems`
   与面板汇总行/弹窗**必须披露"框架侧 N 组未计入"**（Ruling 14②；实测 Vuplex
-  `BaseWebView.HandleMessageEmitted` 3 owner 真实共挂不再隐身）。
+  `BaseWebView.HandleMessageEmitted` 3 owner 真实共挂不再隐身）。计数口径=可读取 `PatchInfo` 的
+  已挂补丁方法；`GetPatchInfo` 异常/返回 null 的方法不入 `InScope/Skipped`（实测 0 例，注释留档）。
 - **owner→mod 归属**（裁定 2）：①精确 GUID 全表 ②前缀（owner 以 `<GUID>.` 开头，如
   `com.local.survivallog.quickaction.trace` → quickaction）③其余=未知来源（显示"未知来源（id）"，
   不臆造归属）。两遍扫描保证精确优先于前缀。
