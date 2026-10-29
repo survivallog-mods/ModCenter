@@ -1,3 +1,4 @@
+using System;
 using System.Collections.Generic;
 
 namespace SurvivalLog.ModCenter;
@@ -52,7 +53,25 @@ internal sealed class MetaItem
 }
 
 /// <summary>
-/// 元数据表（任务 6）：9 mod 页面定义唯一蓝本 = spec §7 v4 九张表
+/// L1 已知冲突库条目（v2 任务 11；spec 2026-10-28-lifecycle-v2 §4.4 首批逐字照用）。
+/// 匹配键=GUID 优先、dll 文件名兜底（大小写不敏感、仅比较文件名、.dll 后缀可省）；
+/// 匹配逻辑纯函数见 <see cref="Meta.MatchL1"/>。Level=red|orange|gray（面板 icGlyph 色级），
+/// Tag 由色级派生（红=冲突 / 橙=碰撞 / 灰=同域）。Who=冲突对象（Meta.En 内部名；卡片渲染时
+/// 转"中文名（En）"，既保 spec 逐字可核又读得懂）。表驱动：新增/撤收录只动表，不动逻辑。
+/// </summary>
+internal sealed class ConflictEntry
+{
+    public string MatchGuid; // BepInEx 插件 GUID（主匹配键）
+    public string MatchDll;  // dll 文件名（兜底匹配键；仅文件名，可带/不带 .dll）
+    public string Level;     // red | orange | gray
+    public string Title;     // 卡片副标题（弹窗 .sub）
+    public string[] Who;     // 冲突对象（Meta.En 内部名；未登记原样展示）
+    public string Reason;    // 原因（弹窗"原因"段逐字）
+    public string[] Tips;    // 处置建议（弹窗编号列表）
+}
+
+/// <summary>
+/// 元数据表（任务 6）：套件 mod 页面定义唯一蓝本 = spec §7 v4 九张表 + EndlessGuard/CabinetBurden 后续补登
 /// （docs/superpowers/specs/2026-10-24-modcenter-design.md §7；结构对照原型 v4 MODS 数组）。
 /// 纪律（作者 v3 评审 + spec §5.4）：**默认值与范围不写死为准**——快照时从
 /// ConfigEntry.DefaultValue/AcceptableValueRange 反射合入；此处的 Def/Min/Max 仅在
@@ -203,6 +222,47 @@ internal static class Meta
             // ③新增个性化清单（BagOverrides 绑定键，CabinetSize 侧 Resolve 最高优先级 + 受管集注入绕黑名单）；
             // ④全页面数值输入框去原生加减钮（panel.js numbox：type=text + inputmode=numeric + 仅数字清洗）。
             // 13 包 [Bag.<id>] 为 v4 绑定键直达反射桥；Preset（勿手改）/ExcludeIds/Debug.* 不进面板。
+        },
+        new MetaMod
+        {
+            Guid = "com.local.survivallog.cabinetburden",
+            Name = "柜子负重解放", En = "CabinetBurden",
+            Desc = "储物家具负重清零（0=官方'无重量上限'语义，柜子界面负重条自动隐藏）；名单自动发现，默认排除购物车/轿车；切换/改名单后重进存档对已存在容器生效。",
+            // CabinetBurden 的总开关在自己的 cfg [Burden] Enabled（非套件模板 General.Enabled）
+            EnabledSection = "Burden", EnabledKey = "Enabled",
+            Groups =
+            {
+                new MetaGroup
+                {
+                    Title = "负重名单（改后重进存档生效）",
+                    Items =
+                    {
+                        new MetaItem
+                        {
+                            Section = "Burden", Key = "IncludeBagIds", Label = "追加解放的包编号（逗号分隔）",
+                            Badge = "reload", Type = "sel", Def = "",
+                            Note = "如 5010,5012,5013（工作台抽屉）或 3,4（购物车/轿车）；留空=只覆盖自动发现的储物包"
+                        },
+                        new MetaItem
+                        {
+                            Section = "Burden", Key = "ExcludeBagIds", Label = "排除的包编号（优先级最高）",
+                            Badge = "reload", Type = "sel", Def = "3,4",
+                            Note = "默认排除 3(购物车)/4(轿车)——载具包走背包装备体系"
+                        },
+                        new MetaItem
+                        {
+                            Section = "Debug", Key = "ListOnReady", Label = "启动时在日志列出受管包",
+                            Badge = "cfg", Type = "bool", Def = true,
+                            Note = "首轮生效时在 LogOutput 列出全部受管储物包与负重改写（核对名单用）"
+                        },
+                        new MetaItem
+                        {
+                            Section = "Debug", Key = "Verbose", Label = "每轮输出明细",
+                            Badge = "cfg", Type = "bool", Def = false
+                        }
+                    }
+                }
+            }
         },
         new MetaMod
         {
@@ -428,4 +488,154 @@ internal static class Meta
         Section = "机器人提速", Key = key, Label = key,
         Badge = "now", Type = "float", Def = 2, Min = 0.5, Max = 10, St = 0.5
     };
+
+    // ============ L1 已知冲突库（v2 任务 11；spec §4.4 首批逐字） ============
+
+    /// <summary>
+    /// 首批两条（第三条 karinasprite 按 spec §4.4 明确排除，见表尾注释）。字段口径见
+    /// <see cref="ConflictEntry"/>。新增条目只改本表；快照 ics/弹窗卡片都由本表派生
+    /// （BuildSnapshot → <see cref="MatchL1"/>；MC_CF → 同表反向查对象）。
+    /// </summary>
+    internal static readonly List<ConflictEntry> KnownConflicts = new()
+    {
+        new ConflictEntry
+        {
+            MatchGuid = "com.jangfullmoon.storagecapacityexpansion",
+            MatchDll = "StorageCapacityExpansion.dll",
+            Level = "red",
+            Title = "储物改写冲突（已知冲突库）",
+            Who = new[] { "CabinetSize", "BackpackExpand", "CabinetEverywhere" },
+            Reason = "改写 73 件柜族家具 BagId 至共享包并改包尺寸、强写 ColdRate/PowerCost——与套件储物类数值改写相乘叠加（×1.5 ×1.5 = ×2.25），并可能使储物柜直达的镜像缓存错位失效",
+            Tips = new[] { "停用/卸载第三方侧（推荐）", "停用套件侧任一受影响 mod", "调整加载顺序无法解决数值叠加" }
+        },
+        new ConflictEntry
+        {
+            MatchGuid = "survivallog.expandedstorage",
+            MatchDll = "ExpandedStorage",
+            Level = "gray",
+            Title = "同域共存（类型标注）",
+            Who = new[] { "BackpackExpand" },
+            Reason = "仅玩家背包扩容/负重 ×10，与套件背包扩容机制正交但数值叠加可能超预期",
+            Tips = new[] { "保留一方", "维持现状（接受叠加结果）" }
+        }
+        // 明确排除（spec §4.4 末条，勿因"同作者/同包名族"误加）：
+        // com.jangfullmoon.karinasprite / KarinaSprite.dll —— 纯立绘替换、零游戏钩子，
+        // 反汇编鉴定档案已排除；收录只会产生误报。
+    };
+
+    // ============ L3 功能域标注（v2 任务 11；Guid → 域） ============
+
+    /// <summary>
+    /// 功能域标注表：12 套件 mod 全覆盖 + 已收录第三方（进 L1 名录后才有类型；其余第三方不登记，
+    /// 防"同域"盲目误报）。只用于"同域共存"灰标，只标注不判定。同域灰标的产出条件（控制器裁定）：
+    /// 域内已装 ≥2 个且至少一个在本表登记——即只把"已登记且已装"的 mod 计入域内计数。
+    /// 排除项 karinasprite 与 L1 一致不登记（纯立绘替换零钩子）。
+    /// v2 任务 12（T11 M2）：非 L1 第三方（bettertrade/statsui）登记删除——spec §4.4"第三方仅在
+    /// 进入 L1 名录后带类型"，未收录者不参与域计数（防跨域误报）。
+    /// </summary>
+    internal static readonly Dictionary<string, string> Domains = new(StringComparer.OrdinalIgnoreCase)
+    {
+        // 12 套件 mod（= 组织 12 仓；CabinetBurden 已补登 Meta 表，ModCenter 自身走附加名表）
+        ["com.local.survivallog.backpackexpand"] = "储物",
+        ["com.local.survivallog.cabinetburden"] = "储物",
+        ["com.local.survivallog.cabineteverywhere"] = "储物",
+        ["com.local.survivallog.cabinetsize"] = "储物",
+        ["com.local.survivallog.endlessguard"] = "其他",
+        ["com.local.survivallog.fridgechill"] = "储物",
+        ["com.local.survivallog.modcenter"] = "面板",
+        ["com.local.survivallog.planpick"] = "规划",
+        ["com.local.survivallog.predisasterspeed"] = "速度",
+        ["com.local.survivallog.quickaction"] = "速度",
+        ["com.local.survivallog.robotspeed"] = "机器人",
+        ["com.local.survivallog.roleunlock"] = "角色",
+        // 已收录第三方（L1 名录）
+        ["com.jangfullmoon.storagecapacityexpansion"] = "储物",
+        ["survivallog.expandedstorage"] = "储物"
+        // 排除：com.jangfullmoon.karinasprite —— 纯立绘替换零钩子（spec §4.4 档案已排除），与 L1 同口径不登记。
+    };
+
+    /// <summary>
+    /// 非 Meta 九表的套件成员显示名（T11 M5）：L3 who / L2 owner / L1 冲突对象里出现时给中文名
+    /// （此前 CabinetBurden/ModCenter 只能显示插件自报英文名）。只影响显示，不参与路由/匹配。
+    /// </summary>
+    private sealed class ExtraName
+    {
+        public string Guid;
+        public string En;
+        public string Name;
+    }
+
+    private static readonly ExtraName[] ExtraNames =
+    {
+        new() { Guid = "com.local.survivallog.cabinetburden", En = "CabinetBurden", Name = "柜子负重解放" },
+        new() { Guid = "com.local.survivallog.modcenter", En = "ModCenter", Name = "Mod 管理中心" },
+    };
+
+    /// <summary>非 Meta 九表套件成员的中文名（GUID 精确；null=未登记）。</summary>
+    internal static string ExtraNameOf(string guid)
+    {
+        if (string.IsNullOrEmpty(guid)) return null;
+        foreach (var e in ExtraNames)
+            if (string.Equals(e.Guid, guid, StringComparison.OrdinalIgnoreCase)) return e.Name;
+        return null;
+    }
+
+    /// <summary>
+    /// L1 匹配（GUID 优先、dll 文件名兜底）。两条路径各自全表扫描：先 GUID 全表，命中即返；
+    /// 再 dll 文件名全表（去目录、去 .dll 后缀、OrdinalIgnoreCase）。dllName 可传绝对路径。
+    /// 纯函数（无 BepInEx 依赖）——装载期外可由独立自检程序直接调用（T11 单元自证）。
+    /// </summary>
+    internal static ConflictEntry MatchL1(string guid, string dllName)
+    {
+        if (!string.IsNullOrEmpty(guid))
+            foreach (var e in KnownConflicts)
+                if (!string.IsNullOrEmpty(e.MatchGuid)
+                    && string.Equals(guid, e.MatchGuid, StringComparison.OrdinalIgnoreCase))
+                    return e;
+        var dll = DllBaseName(dllName);
+        if (dll.Length > 0)
+            foreach (var e in KnownConflicts)
+            {
+                var want = DllBaseName(e.MatchDll);
+                if (want.Length > 0 && string.Equals(dll, want, StringComparison.OrdinalIgnoreCase))
+                    return e;
+            }
+        return null;
+    }
+
+    /// <summary>dll 文件名基准：取最后一段路径、剥 .dll 后缀（大小写不敏感）；空入参 = 空串。</summary>
+    internal static string DllBaseName(string path)
+    {
+        if (string.IsNullOrEmpty(path)) return "";
+        var i = Math.Max(path.LastIndexOf('\\'), path.LastIndexOf('/'));
+        var name = i >= 0 ? path.Substring(i + 1) : path;
+        if (name.EndsWith(".dll", StringComparison.OrdinalIgnoreCase))
+            name = name.Substring(0, name.Length - 4);
+        return name;
+    }
+
+    /// <summary>GUID → 功能域；未登记 = null（L3 灰标不产出）。</summary>
+    internal static string DomainOf(string guid) =>
+        !string.IsNullOrEmpty(guid) && Domains.TryGetValue(guid, out var d) ? d : null;
+
+    /// <summary>冲突对象显示名：Who 里的 Meta.En → "中文名（En）"（如 柜子容量（CabinetSize））；
+    /// 非 Meta 九表套件成员（CabinetBurden/ModCenter，T11 M5）走附加表；未登记原样返回
+    /// （表外对象也能读）。括号口径：让 spec 内部名逐字可核 + 面板可读。</summary>
+    internal static string DisplayNameOf(string enOrGuid)
+    {
+        if (string.IsNullOrEmpty(enOrGuid)) return "";
+        foreach (var mm in Mods)
+            if (string.Equals(mm.En, enOrGuid, StringComparison.OrdinalIgnoreCase)
+                || string.Equals(mm.Guid, enOrGuid, StringComparison.OrdinalIgnoreCase))
+                return mm.Name + "（" + enOrGuid + "）";
+        foreach (var e in ExtraNames)
+            if (string.Equals(e.En, enOrGuid, StringComparison.OrdinalIgnoreCase)
+                || string.Equals(e.Guid, enOrGuid, StringComparison.OrdinalIgnoreCase))
+                return e.Name + "（" + enOrGuid + "）";
+        return enOrGuid;
+    }
+
+    /// <summary>色级 → 卡片标签（红=冲突 / 橙=碰撞 / 灰=同域）。</summary>
+    internal static string TagOf(string level) =>
+        level == "red" ? "冲突" : (level == "orange" ? "碰撞" : "同域");
 }
