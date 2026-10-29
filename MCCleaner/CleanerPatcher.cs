@@ -27,7 +27,10 @@ namespace MCCleaner;
 /// disable/enable 派生 op 当场改名（v1 的"退出时分离进程改名"退役；强杀残留概念消失：
 /// 意图在 cfg，每次启动先于插件加载执行，此阶段 dll 无锁直接 File.Move）。enable 仅认显式
 /// marker=false 键（Ruling 9：cfg 无键的手工禁用 .disabled 不动）。
-/// 后续任务继续追加（卸载/重启等）。
+/// T10：⑤disable 幂等化带出——dll 与 .disabled 同时在场视为幂等成功（删裸 dll 保 .disabled，
+/// v1 语义，不再每 boot 一条 FAIL）；⑥末尾目录清理（RunDirSweep）——ops 消化完且 ModCenter
+/// 目录只剩 staging/pending.json 时整目录清掉（ModCenter 自卸载链收尾；清理器自身不动，Ruling 8）。
+/// 后续任务继续追加（重启等）。
 /// 自证文件（硬规则，不依赖 LogOutput.log）：BepInEx\MCCleaner_loaded.txt（T1 生命周期）
 /// + BepInEx\MCCleaner_ops.txt（T2 起 op 执行证据，追加行：时间/操作/结果/原因；
 /// T3 起加载序对拍：[ORDER] #NN guid 一行一项 + [ORDER-PROTECTED] guid(依赖 dep)；
@@ -83,8 +86,9 @@ public class CleanerPatcher : BasePatcher
         RunSelfTestIfFlagged(); // T2 Step1：McPending 序列化自证；T3：加载序重排自证（同标记触发）
         RunPendingOps();        // T2 Step2：pending 执行器；T4：内置 marker 翻译段（先翻译后执行，Ruling 1）
         InstallOrderOverride(); // T3：挂 ModifyLoadOrder postfix（order 读取在 postfix 内，晚于全部 op 落地）
+        RunDirSweep();          // T10：末尾目录清理（ops 消化完且目录只剩 staging/pending.json → 整目录清掉）
 
-        // ---- 后续任务在此之后追加执行段（卸载/重启等）----
+        // ---- 后续任务在此之后追加执行段（重启等）----
     }
 
     // ==================== T2 Step 1：序列化自证 ====================
@@ -347,8 +351,21 @@ public class CleanerPatcher : BasePatcher
             {
                 var t = ResolveRel(op.Target);
                 if (t == null) { reason = "非法相对路径: " + op.Target; return false; }
-                if (!File.Exists(t)) { reason = "目标不在场(幂等)"; return true; }
-                try { File.Move(t, t + ".disabled"); return true; }
+                var d = t + ".disabled";
+                if (!File.Exists(t))
+                {
+                    reason = File.Exists(d) ? "目标不在场(.disabled 在场,幂等)" : "目标不在场(幂等)";
+                    return true;
+                }
+                if (File.Exists(d))
+                {
+                    // T4 带出（任务 10）：dll 与 .disabled 同时在场 = v1 语义幂等成功——裸 dll 是
+                    // 拟禁用件的冗余副本（.disabled 已保全原件），删除裸 dll 即达成"本次不加载"
+                    // 终态；旧实现 File.Move 到已存在目标必抛 → 每 boot 一条 FAIL。
+                    try { File.Delete(t); return true; }
+                    catch (Exception ex) { reason = ".disabled 在场且裸 dll 删除失败: " + ex.Message; return false; }
+                }
+                try { File.Move(t, d); return true; }
                 catch (Exception ex) { reason = "改名失败: " + ex.Message; return false; }
             }
 
@@ -524,6 +541,79 @@ public class CleanerPatcher : BasePatcher
             return new List<KeyValuePair<string, bool>>();
         }
         return list;
+    }
+
+    // ==================== T10：末尾目录清理（ModCenter 自卸载收尾 / staging 残留） ====================
+
+    /// <summary>
+    /// ops 执行完后的收尾：<c>BepInEx\ModCenter</c> 目录在"清单已消化（无 pending.json 或 ops 空，
+    /// 且 order 空——或 ModCenter 自身 dll 已不在场=面板已卸载、顺序覆盖无人维护）且目录内只剩
+    /// staging/pending.json"时整目录清掉（staging 递归删）。这是 ModCenter 自卸载链的收尾段：
+    /// 面板确认后 pending 写 delete(ModCenter.dll)+delete(ModCenter.cfg)，下次启动本执行器删两件，
+    /// 随后此处把 staging 残留与空清单一并清空。<see cref="IsCleanerSlot"/> 守卫不变——清理器自身
+    /// MCCleaner.dll 永不动（Ruling 8 基座级，留给玩家手动或安装器）。目录内有任何其他文件
+    /// （selftest.flag 等）→ 保守放弃。任何异常不阻断启动。
+    /// </summary>
+    private static void RunDirSweep()
+    {
+        try
+        {
+            var dir = Path.Combine(Paths.BepInExRootPath, "ModCenter");
+            if (!Directory.Exists(dir)) return;
+
+            List<McPending.Op> ops;
+            List<string> order;
+            if (File.Exists(McPending.File))
+            {
+                try
+                {
+                    ops = McPending.Load(McPending.File);
+                    order = McPending.LoadOrder(McPending.File);
+                }
+                catch (Exception ex)
+                {
+                    OpsEv("[DIRSWEEP] SKIP pending 解析失败（保守不动）: " + ex.Message);
+                    return;
+                }
+            }
+            else
+            {
+                ops = new List<McPending.Op>();
+                order = new List<string>();
+            }
+
+            if (ops.Count > 0) return; // 清单未消化完（失败保留条目待重试）
+            if (order.Count > 0)
+            {
+                // order 覆盖仍在维护期：面板在场时绝不动（插件侧后续还会回写，且 [ORDER] postfix
+                // 尚未消费）；面板 dll 已删（自卸载完成）→ order 成死数据，允许随目录一并清理
+                var selfDll = Path.Combine(Paths.BepInExRootPath, "plugins", "SurvivalLog.ModCenter.dll");
+                if (File.Exists(selfDll)) return;
+            }
+
+            foreach (var e in Directory.GetFileSystemEntries(dir))
+            {
+                var name = Path.GetFileName(e);
+                if (Directory.Exists(e) && name.Equals("staging", StringComparison.OrdinalIgnoreCase)) continue;
+                if (!Directory.Exists(e) && name.Equals("pending.json", StringComparison.OrdinalIgnoreCase)) continue;
+                return; // 目录内有其他内容（selftest 等）：保守放弃
+            }
+
+            try
+            {
+                Directory.Delete(dir, true); // 白名单已核实：staging 递归 + pending.json + 目录一体
+                OpsEv("[DIRSWEEP] OK ModCenter 目录已清空（ops 已消化" +
+                      (order.Count > 0 ? " · 面板已卸载，order 一并清理" : "") + "）");
+            }
+            catch (Exception ex)
+            {
+                OpsEv("[DIRSWEEP] FAIL 目录清理失败: " + ex.Message);
+            }
+        }
+        catch (Exception ex)
+        {
+            OpsEv("[DIRSWEEP] FAIL " + ex.GetType().Name + ": " + ex.Message);
+        }
     }
 
     // ==================== T3：加载序覆盖（Harmony 改序 + 依赖保护） ====================

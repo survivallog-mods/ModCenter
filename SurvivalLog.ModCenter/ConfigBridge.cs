@@ -37,6 +37,15 @@ namespace SurvivalLog.ModCenter;
 /// （待生效条"加载顺序调整"，order==默认序不进摘要——与"删除 order 字段"等效，裁定 1）→
 /// MC_ORDER_OK。T8 遗留三项顺手修（评审转交）：fetch 后台异常复位检查锁（Kind 5）/解包与
 /// 链中途失败清暂存/面板 ST.dl 复位条件（panel.js 侧）。
+/// v2 生命周期任务 10：彻底卸载——MC_UNINST {guid} 校验（Meta 套件/链上第三方/缺席行
+/// （guid=dll 相对名）/ModCenter 自身四路由）构造真值明细（dll=DllDisabler.DllRelOf；
+/// cfg=PluginInfo.Instance as BasePlugin→Config.ConfigFilePath，v1 §4.1③ 实证写法）回
+/// MC_UNINST_DATA {files[],note,self}；MC_UNINST_DO → PendingWriter.AddDelete(dll+cfg)+
+/// marker 清除（在链上第三方走 DllDisabler.Enable，缺席行走 Forget 只清不改名）+ 排序记录移除 +
+/// FlushDirty（强杀免疫：意图即时原子落盘）+ 快照/摘要/仓库数据刷新。带出：RepoPendingGuids
+/// 扩含 delete（卸载意图吃掉 ↑/↓ 徽标）；HandleOrderSave 体内兜底异常→MC_ORDER_FAIL（防保存钮
+/// 在途卡死）；待生效条 order 覆盖档分"已保存未重启/生效中"（首拍 order 有效序相同或
+/// pending.json mtime 早于本进程启动 = 本靴已应用 → 中性标签不计入计数）。
 /// 线程纪律：全部 cfg 读写与分发都在 Ticker 主线程（Pump）；outbox 回调线程只入队；
 /// 仓库 fetch/下载在后台 Task，结果经 RepoQueue 回主线程收割（PendingWriter 主线程唯一写者）。
 /// </summary>
@@ -58,6 +67,7 @@ internal static class ConfigBridge
     // 变了才重读），BuildSnapshot 前强制重读一次（MC_OPEN/MC_TOGGLE 均走快照）。
     private static List<McPending.Op> _pendOps = new();
     private static List<string> _pendOrder = new(); // v2 任务 9：pending.order（排序面/待生效摘要消费；空=无覆盖）
+    private static List<string> _bootOrder; // T10：本进程首拍读到的 order（=启动清理器本靴实际应用的覆盖；null=尚未捕获）
     private static long _pendStamp = -1;   // pending.json LastWriteTimeUtc.Ticks（不存在=0）；-1=未读过
     private static string _pendSig;        // 摘要签名（变化才推送）；null=首拍未同步（只同步不推，MC_OPEN 会补推）
     private static float _pendAcc;         // Pump 2s 节拍累加器
@@ -687,12 +697,16 @@ internal static class ConfigBridge
         {
             _pendOps = McPending.Load(McPending.File);
             _pendOrder = McPending.LoadOrder(McPending.File); // v2 任务 9：order 与 ops 同文件同拍读
+            // T10（T9 改进项）：首拍 order = 启动清理器本靴实际应用的覆盖（此后任何写入都不改变
+            // "已应用"这一事实；仅用于待生效条中性档判定，不参与排序面校验）。
+            _bootOrder ??= new List<string>(_pendOrder);
         }
         catch (Exception e)
         {
             Log("warn pending.json 解析失败（按空清单展示）: " + e.Message);
             _pendOps = new List<McPending.Op>();
             _pendOrder = new List<string>();
+            _bootOrder ??= new List<string>();
         }
     }
 
@@ -704,6 +718,7 @@ internal static class ConfigBridge
         public string Name;              // 显示名（Meta 中文名 / GUID 尾段 / 文件名）
         public readonly List<string> Verbs = new(); // 动作词（有序去重）
         public string FixedLabel;        // 整档固定标签（v2 任务 9：order 覆盖="加载顺序调整"，绕过动词拼装）
+        public bool Neutral;             // v2 任务 10（T9 改进项）：中性档——本靴已应用（如 order 生效中），不计入待生效计数
     }
 
     private static readonly string[] PendVerbOrder = { "卸载", "安装", "更新", "停用", "启用" };
@@ -739,9 +754,76 @@ internal static class ConfigBridge
         }
         // v2 任务 9：order 覆盖档——RowKey=null（全局非单 mod：行内 ⟳ 永不挂行，底部条承载）；
         // order==默认序（GUID 字母序）不进摘要——"恢复默认存字母序"与删除 order 字段等效（裁定 1/5）。
+        // v2 任务 10（T9 改进项）：覆盖在场但本靴已应用（首拍有效序相同，或 pending.json mtime
+        // 早于本进程启动）→ 挂中性标签"自定义加载序生效中"（不计入待生效计数，面板弱化样式）；
+        // 未重启维持原"加载顺序调整"计入计数。
         if (_pendOrder.Count > 0 && !OrderEqualsDefault(_pendOrder))
-            groups.Add(new PendGroup { RowKey = null, FixedLabel = "加载顺序调整" });
+        {
+            var applied = OrderAppliedThisBoot();
+            groups.Add(new PendGroup
+            {
+                RowKey = null,
+                FixedLabel = applied ? "自定义加载序生效中" : "加载顺序调整",
+                Neutral = applied,
+            });
+        }
         return groups;
+    }
+
+    /// <summary>order 覆盖是否本靴已应用（T9 改进项，任务 10 实装）：
+    /// ①首拍 order 与现值对"本靴仍将生效的 mod 集"产生的有效加载序相同 → 已应用。比原件更准：
+    /// 卸载确认会从 order 移除该 mod（记录清理），其余 mod 的相对序并未变；面板任何 pending
+    /// 写入抬 mtime 也不影响"本靴已应用"事实——避免 T10 主链路的必现误报；②裁定原口径：
+    /// pending.json LastWriteTimeUtc 早于当前进程启动时间（Process.GetCurrentProcess().StartTime）。
+    /// StartTime 读取异常按未应用兜底（保守方向：宁可多提示重启）。</summary>
+    private static bool OrderAppliedThisBoot()
+    {
+        try
+        {
+            if (_bootOrder != null && _pendOrder.Count > 0 && SameEffectiveOrder(_bootOrder, _pendOrder))
+                return true;
+        }
+        catch { }
+        try
+        {
+            if (!System.IO.File.Exists(McPending.File)) return false;
+            var startUtc = System.Diagnostics.Process.GetCurrentProcess().StartTime.ToUniversalTime();
+            return System.IO.File.GetLastWriteTimeUtc(McPending.File) < startUtc;
+        }
+        catch { return false; }
+    }
+
+    /// <summary>两份 order 覆盖对"当前仍会加载的 mod 集"产生的有效加载序是否一致（清理器
+    /// OrderReorder / MC_ORDER_GET 同语义：命中项按覆盖序前置、其余按默认序接后；待删除意图的
+    /// mod 排除——它们下次启动不再存在，其 order 条目被移除不改变其余 mod 的相对序）。</summary>
+    private static bool SameEffectiveOrder(List<string> a, List<string> b)
+    {
+        var del = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var op in _pendOps)
+            if (op.Type == McPending.TypeDelete)
+            {
+                var g = PendRowKeyOf(op.Target);
+                if (!string.IsNullOrEmpty(g)) del.Add(g);
+            }
+        var avail = new List<string>();
+        var availSet = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var g in OrderableGuids()) // 已字母序（默认序）
+            if (!del.Contains(g) && availSet.Add(g)) avail.Add(g);
+        return EffectiveOrder(a, avail, availSet).SequenceEqual(
+            EffectiveOrder(b, avail, availSet), StringComparer.OrdinalIgnoreCase);
+    }
+
+    /// <summary>有效加载序：order 命中且在场项去重前置 + 其余按默认序（与清理器/排序面同口径）。</summary>
+    private static List<string> EffectiveOrder(List<string> order, List<string> avail,
+        HashSet<string> availSet)
+    {
+        var res = new List<string>(avail.Count);
+        var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var g in order)
+            if (!string.IsNullOrEmpty(g) && availSet.Contains(g) && seen.Add(g)) res.Add(g);
+        foreach (var g in avail)
+            if (seen.Add(g)) res.Add(g);
+        return res;
     }
 
     /// <summary>组标签（底部待生效条 + 行内 ⟳ tip 复用）：动词+名（多动词按既定序 "、" 连接）。</summary>
@@ -755,7 +837,8 @@ internal static class ConfigBridge
 
     /// <summary>行归属：Target（BepInEx 根相对）→ guid（小写）。套件 dll（plugins/SurvivalLog.&lt;仓键&gt;.dll，
     /// RepoDecision.DllRelOf 同款布局）与 GUID 命名 cfg（config/&lt;guid&gt;.cfg，T4 实证命名）可归属；
-    /// 第三方 dll 名不映射 GUID——留空只进底部条摘要（T8 后如需行归属再扩）。</summary>
+    /// 第三方 dll 按链上插件的 DllRelOf 反查 GUID（T10：卸载的 dll+cfg 两条 delete 才能合成一档
+    /// "卸载 X"，否则 dll 组与 cfg 组各报一条）；反查不到（已卸载/未加载）留空只进底部条摘要。</summary>
     private static string PendRowKeyOf(string target)
     {
         if (string.IsNullOrEmpty(target)) return null;
@@ -766,9 +849,17 @@ internal static class ConfigBridge
             var f = t.Substring(plugins.Length);
             if (!f.EndsWith(".dll", StringComparison.Ordinal)) return null;
             var stem = f.Substring(0, f.Length - 4);
-            return stem.StartsWith("survivallog.", StringComparison.Ordinal)
-                ? "com.local.survivallog." + stem.Substring("survivallog.".Length)
-                : null;
+            if (stem.StartsWith("survivallog.", StringComparison.Ordinal))
+                return "com.local.survivallog." + stem.Substring("survivallog.".Length);
+            // T10：第三方 dll → 链上插件 GUID（DllRelOf 口径，忽略大小写/分隔符差异）
+            foreach (var p in LoadedPlugins())
+            {
+                var rel = DllDisabler.DllRelOf(p);
+                if (string.IsNullOrEmpty(rel)) continue;
+                if (string.Equals(rel.Replace('/', '\\').ToLowerInvariant(), f, StringComparison.Ordinal))
+                    return p.Metadata?.GUID?.ToLowerInvariant();
+            }
+            return null;
         }
         if (t.StartsWith(config, StringComparison.Ordinal) && t.EndsWith(".cfg", StringComparison.Ordinal))
         {
@@ -778,22 +869,30 @@ internal static class ConfigBridge
         return null;
     }
 
-    /// <summary>guid → 显示名：Meta 九表中文名优先，其次 GUID 尾段（如 modcenter）。</summary>
+    /// <summary>guid → 显示名：Meta 九表中文名优先，其次链上插件自报名，最后 GUID 尾段（如 modcenter）。</summary>
     private static string PendDisplayName(string guidLower)
     {
         foreach (var mm in Meta.Mods)
             if (string.Equals(mm.Guid, guidLower, StringComparison.OrdinalIgnoreCase)) return mm.Name;
+        if (string.Equals(guidLower, ModCenterPlugin.Guid, StringComparison.OrdinalIgnoreCase))
+            return "Mod 管理中心"; // 与 HandleOrderGet 的自身显示名一致
+        foreach (var p in LoadedPlugins())
+            if (string.Equals(p?.Metadata?.GUID, guidLower, StringComparison.OrdinalIgnoreCase)
+                && !string.IsNullOrEmpty(p.Metadata?.Name)) return p.Metadata.Name;
         var ix = guidLower.LastIndexOf('.');
         return ix == -1 ? guidLower : guidLower.Substring(ix + 1);
     }
 
-    /// <summary>目标文件名（去扩展名）——归属不到行时的组名。</summary>
+    /// <summary>目标文件名（去扩展名）——归属不到行时的组名。先剥 .disabled 再剥扩展名
+    /// （T10：缺席行卸载目标是 <c>X.dll.disabled</c>，组名应为 "X" 而非 "X.dll"）。</summary>
     private static string PendFileName(string target)
     {
         if (string.IsNullOrEmpty(target)) return "?";
         var n = target.Replace('/', '\\');
         var ix = n.LastIndexOf('\\');
         if (ix != -1) n = n.Substring(ix + 1);
+        if (n.EndsWith(".disabled", StringComparison.OrdinalIgnoreCase))
+            n = n.Substring(0, n.Length - ".disabled".Length);
         ix = n.LastIndexOf('.');
         return ix > 0 ? n.Substring(0, ix) : n;
     }
@@ -808,7 +907,8 @@ internal static class ConfigBridge
         return map;
     }
 
-    /// <summary>摘要签名（条数+标签串）——变化才推送。</summary>
+    /// <summary>摘要签名（条数+标签串）——变化才推送。含中性档（"生效中"↔"加载顺序调整"切换
+    /// 也是摘要变化，须触发推送）。</summary>
     private static string PendingSig()
     {
         var gs = PendGroups();
@@ -816,31 +916,40 @@ internal static class ConfigBridge
                + string.Join("\u0001", gs.Select(PendLabel));
     }
 
-    /// <summary>推 MC_PENDING_SUMMARY（__mcEvent）：{type,n,labels[]}。条数&gt;0 面板显底部待生效条。</summary>
+    /// <summary>推 MC_PENDING_SUMMARY（__mcEvent）：{type,n,labels[],applied?}。n/labels 只计
+    /// 待生效档（中性档不计入，任务 10 T9 改进项）；applied=中性档标签（有才带，面板弱化呈现）。
+    /// 条数&gt;0 或 applied 在场面板显底部待生效条。</summary>
     private static void PushPendingSummary()
     {
         var gs = PendGroups();
+        var real = gs.Where(g => !g.Neutral).ToList();
+        var applied = gs.FirstOrDefault(g => g.Neutral);
         var sb = new StringBuilder(128);
         sb.Append("{\"type\":\"MC_PENDING_SUMMARY\",\"n\":")
-          .Append(gs.Count.ToString(CultureInfo.InvariantCulture)).Append(",\"labels\":[");
-        for (var i = 0; i < gs.Count; i++)
+          .Append(real.Count.ToString(CultureInfo.InvariantCulture)).Append(",\"labels\":[");
+        for (var i = 0; i < real.Count; i++)
         {
             if (i > 0) sb.Append(',');
-            sb.Append(JsonW.Str(PendLabel(gs[i])));
+            sb.Append(JsonW.Str(PendLabel(real[i])));
         }
-        sb.Append("]}");
+        sb.Append(']');
+        if (applied != null) sb.Append(",\"applied\":").Append(JsonW.Str(applied.FixedLabel));
+        sb.Append('}');
         PushEvent(sb.ToString());
     }
 
     // ============ 套件仓库页（v2 任务 8：拉取/检查节流 + 下载确认链） ============
 
-    /// <summary>guid → 待生效 install/replace 意图集合（小写 guid；仓库行/侧栏徽标与动作闸共用）。</summary>
+    /// <summary>guid → 待生效 install/replace/delete 意图集合（小写 guid；仓库行/侧栏徽标与动作闸共用）。
+    /// v2 任务 10（T8 带出）：delete 类 op（卸载意图）同样进集合——待卸载的行 ⟳ 挂上、↑/↓ 徽标
+    /// 被吃掉（裁定 3 同款语义）、仓库行动作被闸（已要删的 mod 不该再更新）。</summary>
     private static HashSet<string> RepoPendingGuids()
     {
         var set = new HashSet<string>(StringComparer.Ordinal);
         foreach (var op in _pendOps)
         {
-            if (op.Type != McPending.TypeInstall && op.Type != McPending.TypeReplace) continue;
+            if (op.Type != McPending.TypeInstall && op.Type != McPending.TypeReplace
+                && op.Type != McPending.TypeDelete) continue;
             var g = PendRowKeyOf(op.Target);
             if (g != null) set.Add(g);
         }
@@ -1290,8 +1399,20 @@ internal static class ConfigBridge
 
     /// <summary>MC_ORDER_SAVE {guids[]}：校验（白名单=当前 Plugins 键；元素不重不漏=与可排序集
     /// 精确相等——探针族不入排序面故不在期望集）→ PendingWriter.SetOrder 整替（ops 原样保留）→
-    /// 摘要即时推（order==默认序时摘要档自动缺席）→ MC_ORDER_OK；任何不符整单拒绝 MC_ORDER_FAIL。</summary>
+    /// 摘要即时推（order==默认序时摘要档自动缺席）→ MC_ORDER_OK；任何不符整单拒绝 MC_ORDER_FAIL。
+    /// v2 任务 10（T9 带出②）：体内兜底 try/catch——任何异常也回 MC_ORDER_FAIL（否则面板
+    /// ordSaving 在途永不复位，保存钮卡死）。</summary>
     private static void HandleOrderSave(JsonElement el)
+    {
+        try { HandleOrderSaveCore(el); }
+        catch (Exception e)
+        {
+            Log("warn order save 异常: " + e.GetType().Name + ": " + e.Message);
+            PushEvent("{\"type\":\"MC_ORDER_FAIL\",\"err\":" + JsonW.Str("内部异常：" + e.Message) + "}");
+        }
+    }
+
+    private static void HandleOrderSaveCore(JsonElement el)
     {
         var guids = new List<string>();
         if (el.TryGetProperty("guids", out var arr) && arr.ValueKind == JsonValueKind.Array)
@@ -1328,6 +1449,230 @@ internal static class ConfigBridge
         _pendSig = PendingSig();
         PushPendingSummary();
         PushEvent("{\"type\":\"MC_ORDER_OK\"}");
+    }
+
+    // ============ 彻底卸载（v2 任务 10：MC_UNINST / MC_UNINST_DO） ============
+
+    /// <summary>卸载明细（MC_UNINST_DATA / MC_UNINST_DO 共用构造）。</summary>
+    private sealed class UninstInfo
+    {
+        public string Name;         // 显示名（Meta 中文名 / 插件自报名 / dll 名去扩展）
+        public string DllBaseRel;   // plugins 目录相对名（DllDisabler 口径；null=解析失败）
+        public bool DisabledTwin;   // plugins 下同名 .disabled 在场（residue/缺席行——一并列入删除）
+        public string CfgRel;       // cfg 的 BepInEx 根相对路径（'/' 分隔）；null=无/不在场
+        public bool Self;           // ModCenter 自身（面板 __self 行——弹窗特别文案分支）
+        public bool Loaded;         // 在链上（marker 清除走 DllDisabler.Enable）
+        public bool Tp;             // 第三方（有 [DisabledTp] marker 记录；Meta 套件无 marker 不建孤儿键）
+        public bool Absent;         // 缺席行（dll 已是 .disabled 未加载——明细只列 .disabled，不列不存在的裸 dll）
+        public string Note;         // 补充说明（缺席行 cfg 无法定位等）；null=无
+    }
+
+    /// <summary>guid → 卸载明细。四路由：①ModCenter 自身（特别文案分支）②Meta 套件③链上第三方
+    /// （FindTp——探针/MCCleaner 豁免不可达，防呆）④缺席行（guid=dll 相对名，DllDisabler.
+    /// AbsentDisabled——dll 已禁用未加载）。cfg 真值源 = PluginInfo.Instance as BasePlugin →
+    /// Config.ConfigFilePath（v1 §4.1③ 实证写法；T4 实证 cfg 按 GUID 命名，不自拼），不在场不列。</summary>
+    private static UninstInfo BuildUninst(string guid)
+    {
+        if (string.IsNullOrEmpty(guid)) return null;
+
+        // ① ModCenter 自身
+        if (string.Equals(guid, ModCenterPlugin.Guid, StringComparison.OrdinalIgnoreCase))
+        {
+            var self = new UninstInfo { Name = "Mod 管理中心", Self = true, Loaded = true };
+            var info = PluginOfGuid(ModCenterPlugin.Guid);
+            self.DllBaseRel = info != null ? DllDisabler.DllRelOf(info) : "SurvivalLog.ModCenter.dll";
+            try
+            {
+                var p = ModCenterPlugin.Instance?.Config?.ConfigFilePath;
+                if (!string.IsNullOrEmpty(p) && System.IO.File.Exists(p)) self.CfgRel = ToRootRel(p);
+            }
+            catch { }
+            return self;
+        }
+
+        // ②③ Meta 套件 / 链上第三方（FindTp 已豁免探针与第一方；MCCleaner 是 patcher 不在 Plugins，不可达）
+        BepInEx.PluginInfo pi = null;
+        var mm = Resolve(guid);
+        if (mm != null) pi = PluginOfGuid(mm.Guid);
+        if (pi == null) pi = FindTp(guid);
+        if (pi != null)
+        {
+            var u = new UninstInfo
+            {
+                Name = mm != null ? mm.Name : (pi.Metadata?.Name ?? guid),
+                DllBaseRel = DllDisabler.DllRelOf(pi),
+                Loaded = true,
+                Tp = mm == null, // 第三方才有 [DisabledTp] marker；Meta 套件不建孤儿键
+            };
+            if (u.DllBaseRel != null)
+                u.DisabledTwin = System.IO.File.Exists(Path.Combine(Paths.PluginPath, u.DllBaseRel + ".disabled"));
+            try
+            {
+                if (pi.Instance is BasePlugin bp && bp.Config != null
+                    && !string.IsNullOrEmpty(bp.Config.ConfigFilePath)
+                    && System.IO.File.Exists(bp.Config.ConfigFilePath))
+                    u.CfgRel = ToRootRel(bp.Config.ConfigFilePath);
+            }
+            catch { }
+            return u;
+        }
+
+        // ④ 缺席行（dll 已禁用未加载；guid = dll 相对名）
+        foreach (var rel in DllDisabler.AbsentDisabled())
+            if (string.Equals(rel, guid, StringComparison.OrdinalIgnoreCase))
+                return new UninstInfo
+                {
+                    Name = rel.EndsWith(".dll", StringComparison.OrdinalIgnoreCase)
+                        ? rel.Substring(0, rel.Length - 4) : rel,
+                    DllBaseRel = rel,
+                    DisabledTwin = true, // 缺席行本义：dll 现名即 .disabled
+                    CfgRel = null,
+                    Loaded = false,
+                    Tp = true,
+                    Absent = true,
+                    Note = "该 mod 已停用（dll 未加载），其 cfg（如有）无法自动定位——确认后请自行检查 "
+                           + @"BepInEx\config 下对应 <GUID>.cfg。",
+                };
+        return null;
+    }
+
+    /// <summary>MC_UNINST {guid}：构造明细回 MC_UNINST_DATA {guid,name,self,files[],note?}
+    /// （files=BepInEx 根相对'/'路径，面板渲染 BepInEx\ 前缀）。不在链上/解析失败→MC_TOAST 拒绝。</summary>
+    private static void HandleUninst(string guid)
+    {
+        var u = BuildUninst(guid);
+        if (u == null || string.IsNullOrEmpty(u.DllBaseRel))
+        {
+            Log("uninst 拒绝：未知/不在链上 " + (guid ?? "?"));
+            PushEvent("{\"type\":\"MC_TOAST\",\"main\":" + JsonW.Str("无法构造卸载明细")
+                + ",\"small\":" + JsonW.Str("插件不在链上（guid=" + (guid ?? "?") + "），详见 LogOutput") + "}");
+            return;
+        }
+        // 明细只列实际在场的目标：缺席行的裸 dll 已不存在（现名 .disabled），列它等于谎报——
+        // 只列 .disabled；常规行列裸 dll（+ 同在场 .disabled 冗余件，如有）。
+        var files = new List<string>();
+        if (!u.Absent) files.Add(UninstDllOp(u));
+        if (u.DisabledTwin) files.Add(UninstDllOp(u) + ".disabled");
+        if (u.CfgRel != null) files.Add(u.CfgRel);
+        var sb = new StringBuilder(256);
+        sb.Append("{\"type\":\"MC_UNINST_DATA\",\"guid\":").Append(JsonW.Str(guid))
+          .Append(",\"name\":").Append(JsonW.Str(u.Name))
+          .Append(",\"self\":").Append(u.Self ? "true" : "false")
+          .Append(",\"files\":[");
+        for (var i = 0; i < files.Count; i++)
+        {
+            if (i > 0) sb.Append(',');
+            sb.Append(JsonW.Str(files[i]));
+        }
+        sb.Append(']');
+        if (u.Note != null) sb.Append(",\"note\":").Append(JsonW.Str(u.Note));
+        sb.Append('}');
+        PushEvent(sb.ToString());
+        Log("uninst 明细: " + u.Name + " → " + string.Join(", ", files));
+    }
+
+    /// <summary>MC_UNINST_DO {guid}：确认卸载——PendingWriter.AddDelete(dll+cfg)（缺席行只写
+    /// .disabled 一条——裸 dll 不存在）→ marker 清除（第三方在链上走 DllDisabler.Enable：dll 即将被删，反向改名
+    /// 副作用无害、marker 留 false 即可；缺席行走 Forget：只清 marker 不改名，避免 .disabled 复活；
+    /// Meta 套件无 marker 不建孤儿键；Self 跳过）→ order 记录清掉该 guid（弹窗"排序记录"承诺）→
+    /// FlushDirty（意图即时落盘，强杀免疫）→ 快照/摘要/仓库数据刷新（行内 ⟳、仓库 pending 标记）。
+    /// 防重：已有同目标 delete 意图→幂等跳过（toast 提示，不二次写）。</summary>
+    private static void HandleUninstDo(string guid)
+    {
+        var u = BuildUninst(guid);
+        if (u == null || string.IsNullOrEmpty(u.DllBaseRel))
+        {
+            Log("uninst-do 拒绝：未知/不在链上 " + (guid ?? "?"));
+            PushEvent("{\"type\":\"MC_TOAST\",\"main\":" + JsonW.Str("卸载失败")
+                + ",\"small\":" + JsonW.Str("插件不在链上（guid=" + (guid ?? "?") + "），详见 LogOutput") + "}");
+            return;
+        }
+
+        RefreshPending(true);
+        var dllOp = UninstDllOp(u);
+        var targets = new HashSet<string>(StringComparer.OrdinalIgnoreCase) { NormOpRel(dllOp) };
+        if (u.DisabledTwin) targets.Add(NormOpRel(dllOp + ".disabled"));
+        if (u.CfgRel != null) targets.Add(NormOpRel(u.CfgRel));
+        foreach (var op in _pendOps)
+            if (op.Type == McPending.TypeDelete && targets.Contains(NormOpRel(op.Target)))
+            {
+                PushEvent("{\"type\":\"MC_TOAST\",\"main\":" + JsonW.Str(u.Name + " 已有待生效卸载意图")
+                    + ",\"small\":" + JsonW.Str("重启游戏后由启动清理器彻底删除（底部待生效条可查看）") + "}");
+                return;
+            }
+
+        try
+        {
+            // 缺席行只有 .disabled 在场（裸 dll 不存在）——只写这一条，避免空转 op 在底部条
+            // 里多报一项、与弹窗"将删除"清单不一致。
+            if (u.Absent)
+            {
+                PendingWriter.AddDelete(dllOp + ".disabled", null);
+            }
+            else
+            {
+                PendingWriter.AddDelete(dllOp, u.CfgRel); // 主线程唯一写者（原子写）
+                if (u.DisabledTwin) PendingWriter.AddDelete(dllOp + ".disabled", null);
+            }
+            if (u.Tp && u.Loaded) DllDisabler.Enable(u.DllBaseRel); // 在链上第三方：marker 清除（裁定路径）
+            else if (u.Tp) DllDisabler.Forget(u.DllBaseRel);       // 缺席行：只清 marker，不反向改名
+            // 排序记录清理：pending.order 里该 guid 的条目一并移除（否则留幽灵引用；弹窗
+            // "ModCenter 停用 / 排序记录（如有）"承诺的"排序记录"即此。清理器虽会丢幽灵，
+            // 但记录本体不该残留）。
+            if (_pendOrder.Count > 0
+                && _pendOrder.Any(o => string.Equals(o, guid, StringComparison.OrdinalIgnoreCase)))
+            {
+                var kept = _pendOrder
+                    .Where(o => !string.Equals(o, guid, StringComparison.OrdinalIgnoreCase)).ToList();
+                PendingWriter.SetOrder(kept); // ops 原样保留，order 整替
+                Log("uninst 排序记录移除: " + guid + "（order " + _pendOrder.Count + " → " + kept.Count + "）");
+            }
+            FlushDirty(); // marker 等 cfg 写入立即落盘（不留 3s 防抖窗口——确认即持久）
+            Log("uninst " + u.Name + " → delete "
+                + (u.Absent
+                    ? dllOp + ".disabled"
+                    : dllOp + (u.CfgRel != null ? " + " + u.CfgRel : "")
+                      + (u.DisabledTwin ? " + " + dllOp + ".disabled" : "")));
+            PushEvent("{\"type\":\"MC_TOAST\",\"main\":" + JsonW.Str(u.Name + " 已加入待生效")
+                + ",\"small\":" + JsonW.Str("重启游戏后由启动清理器彻底删除（dll + cfg + 停用记录）——强杀亦不丢失") + "}");
+        }
+        catch (Exception e)
+        {
+            Log("warn uninst-do 写入失败(" + u.Name + "): " + e.Message);
+            PushEvent("{\"type\":\"MC_TOAST\",\"main\":" + JsonW.Str(u.Name + " 卸载写入失败")
+                + ",\"small\":" + JsonW.Str(e.Message + "（详见 LogOutput）——未写入待生效清单") + "}");
+        }
+        RefreshPending(true);
+        _pendSig = PendingSig();
+        PushPendingSummary();
+        PushRender(BuildSnapshot().ToJson()); // 行内 ⟳（cfg/dll 意图归属行）
+        PushRepoData();                       // 仓库行 pending 标记（RepoPendingGuids 已含 delete）
+    }
+
+    /// <summary>dll op 目标（BepInEx 根相对 'plugins/…'，与清理器 ResolveRel/待生效清单同口径）。</summary>
+    private static string UninstDllOp(UninstInfo u) => "plugins/" + u.DllBaseRel.Replace('\\', '/');
+
+    /// <summary>op 路径归一（清理器 NormRel 同款：'/'→'\'，OrdinalIgnoreCase 比对用）。</summary>
+    private static string NormOpRel(string rel) => (rel ?? "").Trim().Replace('/', '\\');
+
+    /// <summary>guid → 链上插件（LoadedPlugins 线性找，OrdinalIgnoreCase）。</summary>
+    private static BepInEx.PluginInfo PluginOfGuid(string guid)
+    {
+        foreach (var p in LoadedPlugins())
+            if (string.Equals(p?.Metadata?.GUID, guid, StringComparison.OrdinalIgnoreCase)) return p;
+        return null;
+    }
+
+    /// <summary>绝对路径 → BepInEx 根相对（'/' 分隔；越界/解析失败返回 null）。</summary>
+    private static string ToRootRel(string abs)
+    {
+        try
+        {
+            var rel = Path.GetRelativePath(Paths.BepInExRootPath, abs).Replace('\\', '/');
+            if (rel.Length == 0 || rel.StartsWith("..", StringComparison.Ordinal) || Path.IsPathRooted(rel)) return null;
+            return rel;
+        }
+        catch { return null; }
     }
 
     // ============ 消息泵（主线程，Ticker 每帧调） ============
@@ -1423,6 +1768,13 @@ internal static class ConfigBridge
                             break;
                         case "MC_ORDER_SAVE":
                             HandleOrderSave(el);
+                            break;
+                        // v2 任务 10：彻底卸载（拉卸载明细弹窗 / 确认写 delete 意图——专门节）
+                        case "MC_UNINST":
+                            HandleUninst(GetStr(el, "guid"));
+                            break;
+                        case "MC_UNINST_DO":
+                            HandleUninstDo(GetStr(el, "guid"));
                             break;
                         case "MC_EVIDENCE": // 验证辅助（只读）：写证据文件供装机断言（见 DESIGN §6.4）
                             WriteEvidence(GetStr(el, "tag"));

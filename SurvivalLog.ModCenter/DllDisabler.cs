@@ -21,7 +21,9 @@ namespace SurvivalLog.ModCenter;
 ///   清理器侧独立行级解析）。强杀残留概念随之消失：意图在 cfg，每次启动先于加载执行。
 /// - **本类职责（纯意图写入 + 面板真值源）**：Disable/Enable 写 marker；MarkerOf 供快照取反显示；
 ///   Enable 的即时反向改名保留（dll 未加载不锁，直接 File.Move），失败不再分离进程兜底——
-///   下次启动清理器按 marker 重译自愈。ScanOnLoad 仍做 Load 时对照：marker=true 但 dll 在场
+///   下次启动清理器按 marker 重译自愈。T10 增 Forget：卸载只清 marker 不改名（文件交给 pending
+///   delete；Enable 的反向改名对"即将删除的缺席行"会制造复活窗口）。
+///   ScanOnLoad 仍做 Load 时对照：marker=true 但 dll 在场
 ///   = 清理器异常没跑 → 登记残留供 Tier 2 软停重放（ReapplySoft，插件本会话仍在链上）。
 /// - **快照缺席行**：plugins 里存在 <c>*.dll.disabled</c>（非第一方）→ 面板补一行 enabled=false
 ///   的"仅启停"行（guid=dll 相对名），供玩家重新启用（反向改名）。
@@ -100,6 +102,23 @@ internal static class DllDisabler
             if (mk != null && mk.Value) { MarkDirtySelf(); mk.Value = false; }
         }
         catch (Exception e) { Log("warn enable marker 清除异常: " + e.Message); }
+    }
+
+    /// <summary>
+    /// 卸载（T10）：只清 marker（true→false），**不动文件**——目标 dll/.disabled 由启动清理器的
+    /// pending delete 负责删除。与 <see cref="Enable"/> 的区别：Enable 以"恢复加载"为前提会反向
+    /// 改名 .disabled→dll；对即将删除的缺席行这会制造一瞬"复活"窗口（若删除 op 意外失败则变成
+    /// 真复活）。卸载只需记录消失，故走本路径。Bind 失败仅记日志（pending 删除不依赖 marker）。
+    /// </summary>
+    internal static void Forget(string dllRel)
+    {
+        if (string.IsNullOrEmpty(dllRel)) return;
+        try
+        {
+            var mk = Marker(dllRel);
+            if (mk != null && mk.Value) { MarkDirtySelf(); mk.Value = false; }
+        }
+        catch (Exception e) { Log("warn uninst marker 清除异常: " + e.Message); }
     }
 
     /// <summary>Load 时对照（ModCenterPlugin.Load 末尾调）：cfg [DisabledTp] true 项 × plugins 目录。

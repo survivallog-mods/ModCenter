@@ -22,6 +22,13 @@
  * + 键盘替代（行 tabindex=0 聚焦 ↑↓ 移动，WCAG 2.2 AA）；工具条（说明+恢复默认+保存顺序）；
  * MC_ORDER_GET 拉序（MC_ORDER_DATA{guids[],rows[],def[]}）→ 本地重排 → MC_ORDER_SAVE{guids[]}
  * → MC_ORDER_OK 退出排序模式+toast / MC_ORDER_FAIL 整单拒绝 toast。
+ * v2 生命周期任务 10 = 彻底卸载（原型 delHtml 照抄）：详情页维护动作区"卸载…"按钮 →
+ * MC_UNINST{guid} → MC_UNINST_DATA{guid,name,self,files[],note?} 渲染确认弹窗（⚠ 红+名称；
+ * "将删除".files 三行红字（dll/cfg/记录说明）；"不受影响"；取消/确认卸载 danger 钮）→ 确认
+ * MC_UNINST_DO{guid} → 关弹窗（结果 toast/快照由 C# 回推：行内 ⟳ + 底条"卸载 X"）；ModCenter
+ * 自身（__self 页按钮）走特别文案分支（面板本体消失+清理器保留说明）。带出：T9 三小件
+ * （ORD.src 改存 guid / ordbar 两钮未加载禁用 / HandleOrderSave 兜底在 C# 侧）+ 待生效条
+ * 中性档（MC_PENDING_SUMMARY.applied="自定义加载序生效中"——不计入计数、弱化样式）。
  *
  * 注入落点：Root 文档（C# WebBridge.ExecuteJavaScript 上下文）。__McInstalled 守卫幂等。
  * 全局契约（C# Ticker / MenuEntryInjector 对齐）：__McInstalled / __mcOutbox / __mcDrain /
@@ -77,11 +84,13 @@
    * v2 任务 9：ord=排序模式开着（面板内状态，跨开关保留同 repo）；order=本地工作序
    * （guids[]，进排序模式拉 MC_ORDER_DATA 填充；未保存的本地重排跨开关面板保留）；
    * ordRows=最近 MC_ORDER_DATA（含 rows 显示元数据与 def 默认序）；ordSaving=保存
-   * 回执（MC_ORDER_OK/FAIL）在途防连点。ORD.src=DnD 源行下标（拖拽会话期）。 */
+   * 回执（MC_ORDER_OK/FAIL）在途防连点。ORD.src=DnD 源行 guid（拖拽会话期；T10 带出①）。 */
   var S = { host: null, root: null, side: null, cfg: null, sub: null, toastEl: null, pendEl: null, pendTx: null, mbg: null, mdl: null, mdlRepoKey: null };
-  var ST = { snap: null, sel: null, pend: null, repo: false, repoData: null, dl: null, ord: false, order: null, ordRows: null, ordSaving: false };
-  var ORD = { src: null }; // v2 任务 9：拖拽源下标（null=无拖拽会话）
+  var ST = { snap: null, sel: null, pend: null, repo: false, repoData: null, dl: null, ord: false, order: null, ordRows: null, ordSaving: false, uninstGuid: null };
+  var ORD = { src: null }; // v2 任务 9：拖拽源 guid（null=无拖拽会话；T10 带出①：改存 guid 防拖拽中键盘重排错位）
   var TH = Object.create(null); // 滑条 100ms 节流句柄表
+  var uninstTimer = null;       // v2 任务 10：MC_UNINST_DATA 等待超时句柄
+  var SELF_GUID = 'com.local.survivallog.modcenter'; // __self 页卸载按钮的目标 guid（C# ModCenterPlugin.Guid 同源）
 
   var CSS = ''
     + '#__mc_overlay{position:fixed;inset:0;z-index:2147483647;display:flex;align-items:center;justify-content:center;background:rgba(5,6,10,.8);}'
@@ -235,6 +244,12 @@
     + '#__mc_overlay .__mc-btn.__mc-btn-org:hover{background:rgba(251,191,36,.1);}'
     + '#__mc_overlay .__mc-modal .__mc-files{font-family:Consolas,monospace;font-size:11.5px;color:#9aa0ad;line-height:1.9;}' /* T7 遗留：原型 .mc-modal .files（T10 卸载明细复用） */
     + '#__mc_overlay .__mc-modal .__mc-files .__mc-del{color:#f87171;}'
+    + '#__mc_overlay .__mc-kv .__mc-kk{color:#9aa0ad;width:88px;flex-shrink:0;}' /* T10 维护动作行标签（原型 .mc-kv .k 同值） */
+    + '#__mc_overlay .__mc-maint{margin-top:20px;}' /* T10 维护动作区（视觉同 .__mc-grp 段；类名隔离保夹具 .__mc-grp=config 组语义） */
+    + '#__mc_overlay .__mc-maint>h3{font-size:12.5px;color:#e8a33d;letter-spacing:2px;padding-bottom:7px;border-bottom:1px solid #2a2f3d;margin-bottom:4px;font-weight:500;}'
+    + '#__mc_overlay .__mc-btn.__mc-btn-danger{border-color:rgba(248,113,113,.4);color:#f87171;}' /* T10 卸载确认主钮（原型 .btn.danger） */
+    + '#__mc_overlay .__mc-btn.__mc-btn-danger:hover{background:rgba(248,113,113,.1);}'
+    + '#__mc_overlay .__mc-pending.__mc-weak{border-top-color:rgba(107,113,128,.4);}' /* T10：仅中性档（生效中）时的弱化样式 */
     + '#__mc_overlay .__mc-kv{display:flex;align-items:center;gap:10px;font-size:13px;flex-wrap:wrap;}' /* 弹窗版本对比行（原型 .mc-kv/.v） */
     + '#__mc_overlay .__mc-kv .__mc-kvv{font-family:Consolas,monospace;font-size:12.5px;}'
     + '#__mc_overlay .__mc-dlbar{height:6px;border-radius:3px;background:#0f1219;border:1px solid #2a2f3d;overflow:hidden;margin-top:8px;}'
@@ -507,11 +522,14 @@
   }
 
   function renderSideOrder() {
+    /* T10 带出③（T9）：MC_ORDER_DATA 未到（ST.order 空）时两钮禁用——防"恢复默认/保存顺序"
+     * 在无数据态空转；数据到达（MC_ORDER_DATA 分支重渲染）自动解禁。 */
+    var dis = ST.order ? '' : ' disabled';
     var h = '<div class="__mc-ordbar">'
       + '<b style="color:#e8a33d;font-weight:500">\u6392\u5e8f\u6a21\u5f0f</b> \u2014 \u62d6\u62fd\u884c\u8c03\u6574\u987a\u5e8f\uff1b\u9009\u4e2d\u884c\u540e\u4e5f\u53ef\u7528 \u2191 \u2193 \u952e\u79fb\u52a8\uff08\u65e0\u969c\u788d\u66ff\u4ee3\uff09\u3002\u786c\u4f9d\u8d56\u94fe\u6761\u76ee\u81ea\u52a8\u4fdd\u6301\u4f9d\u8d56\u5e8f\u3002'
       + '<div class="__mc-ord-acts">'
-      + '<button type="button" class="__mc-btn __mc-btn-mini" data-act="ordreset">\u6062\u590d\u9ed8\u8ba4</button>'
-      + '<button type="button" class="__mc-btn __mc-btn-pri __mc-btn-mini" data-act="ordsave">\u4fdd\u5b58\u987a\u5e8f</button>'
+      + '<button type="button" class="__mc-btn __mc-btn-mini" data-act="ordreset"' + dis + '>\u6062\u590d\u9ed8\u8ba4</button>'
+      + '<button type="button" class="__mc-btn __mc-btn-pri __mc-btn-mini" data-act="ordsave"' + dis + '>\u4fdd\u5b58\u987a\u5e8f</button>'
       + '</div></div>';
     h += '<div class="__mc-cat">\u52a0\u8f7d\u987a\u5e8f\uff08\u9ed8\u8ba4 = \u6a21\u7ec4 ID \u5b57\u6bcd\u5e8f\uff09</div>';
     if (!ST.order) {
@@ -645,7 +663,7 @@
       if (!ST.ord || !ST.order) return;
       var row = e.target.closest ? e.target.closest('.__mc-ord-row') : null;
       if (!row) return;
-      ORD.src = ordIndexOf(row.getAttribute('data-guid'));
+      ORD.src = row.getAttribute('data-guid'); // T10 带出①（T9）：存 guid 非 下标——拖拽会话中键盘重排会使下标错位
       if (e.dataTransfer) {
         try { e.dataTransfer.setData('text/plain', String(ORD.src)); } catch (_) {}
         e.dataTransfer.effectAllowed = 'move';
@@ -677,9 +695,11 @@
       e.preventDefault();
       ordClearDrops();
       var row = e.target.closest ? e.target.closest('.__mc-ord-row') : null;
-      var src = ORD.src;
+      var srcGuid = ORD.src;
       ORD.src = null;
-      if (!row || src < 0) return;
+      if (!row || srcGuid == null) return;
+      var src = ordIndexOf(srcGuid); // T10 带出①：drop 时按 guid 现算下标（会话中键盘重排已反映）
+      if (src < 0) return;
       var r = row.getBoundingClientRect();
       var below = e.clientY >= r.top + r.height / 2;
       var to = ordIndexOf(row.getAttribute('data-guid')) + (below ? 1 : 0);
@@ -823,6 +843,92 @@
     return h + '</div>';
   }
 
+  /* ================= v2 任务 10：卸载动作区 + 确认弹窗（原型 delHtml 照抄） ================= */
+
+  /* 维护动作区（原型 detailHtml 的"维护动作"行，视觉同 .mc-grp 段）：kv 布局 + danger"卸载…"钮。
+   * 停用/启用=左列开关（v1 已在），此处只承载卸载入口。**独立 __mc-maint 类不挂 __mc-grp**：
+   * .__mc-grp 在回归夹具里语义="Meta 配置组（+ovr/bagOvr 扩展块）"，动作区不是配置组——
+   * 类名隔离使夹具组数断言零改动（先例：ovr/bagOvr 需夹具 +1 同步，本区不走该路）。 */
+  function uninstActHtml(guid, hint) {
+    return '<div class="__mc-maint"><h3>\u7ef4\u62a4\u52a8\u4f5c</h3>'
+      + '<div class="__mc-kv"><span class="__mc-kk">\u5378\u8f7d</span>'
+      + '<button type="button" class="__mc-btn __mc-btn-danger __mc-btn-mini" data-act="uninst" data-guid="' + esc(guid) + '">\u5378\u8f7d\u2026</button>'
+      + '<span style="font-size:11px;color:#6b7180">' + esc(hint) + '</span></div></div>';
+  }
+
+  /* 确认弹窗（原型 delHtml 逐段照抄）：⚠ 红片+名称 / 说明 / "将删除".files（真值明细红字
+   * （BepInEx\ 前缀反斜杠呈现）+ 固定行"ModCenter 停用 / 排序记录（如有）"）/ note 补充
+   * （缺席行 cfg 定位说明）/ self 特别文案（红字块：面板本体消失+清理器保留）/ "不受影响"
+   * / 取消 + danger"确认卸载"。 */
+  function uninstModalHtml(d) {
+    var h = '<h3>' + chipHtml('red', '\u26a0') + '\u5378\u8f7d \u00b7 ' + esc(d.name) + '</h3>'
+      + '<div class="__mc-m-sub">\u5f7b\u5e95\u5220\u9664\uff0c\u91cd\u542f\u6e38\u620f\u540e\u7531\u542f\u52a8\u6e05\u7406\u5668\u6267\u884c\uff08\u63d2\u4ef6\u52a0\u8f7d\u524d\uff0c\u6587\u4ef6\u65e0\u9501\uff09\u3002</div>'
+      + '<div class="__mc-m-sec"><div class="__mc-m-h">\u5c06\u5220\u9664</div><div class="__mc-files">';
+    var fs = d.files || [];
+    for (var i = 0; i < fs.length; i++)
+      h += '<div class="__mc-del">BepInEx\\' + esc(String(fs[i]).replace(/\//g, '\\')) + '</div>';
+    h += '<div class="__mc-del">ModCenter \u505c\u7528 / \u6392\u5e8f\u8bb0\u5f55\uff08\u5982\u6709\uff09</div></div></div>';
+    if (d.note) h += '<div class="__mc-m-sec"><div class="__mc-m-txt" style="font-size:11.5px;color:#8a90a0">\u24d8 ' + esc(d.note) + '</div></div>';
+    if (d.self) h += '<div class="__mc-risk">\u26a0 \u5378\u8f7d\u5bf9\u8c61\u662f\u672c\u9762\u677f\u81ea\u8eab\uff1a\u786e\u8ba4\u5e76\u91cd\u542f\u540e\uff0c\u7ba1\u7406\u9762\u677f\u4e0e\u5176\u914d\u7f6e\u4e00\u5e76\u6d88\u5931\uff08\u672c\u9762\u677f\u4e0d\u518d\u52a0\u8f7d\uff09\u3002\u542f\u52a8\u6e05\u7406\u5668\uff08MCCleaner\uff09\u4e3a\u57fa\u5ea7\u7ea7\u7ec4\u4ef6\u5c06\u4fdd\u7559\uff0c\u53ef\u7528\u5b89\u88c5\u5668\u5378\u8f7d\u6216\u624b\u52a8\u5220\u9664 BepInEx\\patchers\\MCCleaner.dll\u3002</div>';
+    h += '<div class="__mc-m-sec"><div class="__mc-m-h">\u4e0d\u53d7\u5f71\u54cd</div>'
+      + '<div class="__mc-m-txt">\u6e38\u620f\u5b58\u6863\u3001\u5176\u4ed6 mod\u3001BepInEx \u57fa\u5ea7\u3002</div></div>'
+      + '<div class="__mc-m-acts"><button type="button" class="__mc-btn __mc-btn-mini" data-mact="close">\u53d6\u6d88</button>'
+      + '<button type="button" class="__mc-btn __mc-btn-danger" data-mact="douninst" data-guid="' + esc(d.guid) + '">\u786e\u8ba4\u5378\u8f7d</button></div>';
+    return h;
+  }
+
+  /* 明细等待壳（MC_UNINST → MC_UNINST_DATA 一拍 drain 周期内的占位） */
+  function uninstLoadingHtml(name) {
+    return '<h3>' + chipHtml('red', '\u26a0') + '\u5378\u8f7d \u00b7 ' + esc(name || '') + '</h3>'
+      + '<div class="__mc-m-sub">\u6b63\u5728\u8bfb\u53d6\u5378\u8f7d\u660e\u7ec6\u2026</div>'
+      + '<div class="__mc-m-acts"><button type="button" class="__mc-btn __mc-btn-mini" data-mact="close">\u53d6\u6d88</button></div>';
+  }
+
+  function uninstNameOf(guid) {
+    if (guid === SELF_GUID) return SELF_NAME;
+    var m = findMod(guid);
+    return m ? m.name : (guid || '');
+  }
+
+  function clearUninstTimer() {
+    if (uninstTimer != null) { clearTimeout(uninstTimer); uninstTimer = null; }
+  }
+
+  /* "卸载…"点击：占位弹窗 + MC_UNINST 入信箱 + 5s 超时兜底（C# 拒绝路径回 MC_TOAST，超时
+   * 只处理消息丢失场景）。结果一律等 C# 回推（MC_UNINST_DATA 渲染真明细 / MC_TOAST 报错），
+   * 面板不做乐观 toast。 */
+  function openUninstModal(guid) {
+    ST.uninstGuid = guid;
+    openModal(uninstLoadingHtml(uninstNameOf(guid)));
+    window.__mcOutbox.push({ type: 'MC_UNINST', guid: guid });
+    clearUninstTimer();
+    uninstTimer = setTimeout(function () {
+      uninstTimer = null;
+      if (ST.uninstGuid !== guid) return;
+      ST.uninstGuid = null;
+      if (modalOpen() && S.mdl) setModal('<h3>' + chipHtml('red', '\u26a0') + '\u5378\u8f7d \u00b7 ' + esc(uninstNameOf(guid)) + '</h3>'
+        + '<div class="__mc-m-sub">\u660e\u7ec6\u8bfb\u53d6\u8d85\u65f6\uff08C# \u672a\u56de\u5305\uff0c\u8be6\u89c1 LogOutput\uff09\u3002</div>'
+        + '<div class="__mc-m-acts"><button type="button" class="__mc-btn __mc-btn-mini" data-mact="close">\u5173\u95ed</button></div>');
+    }, 5000);
+  }
+
+  /* MC_UNINST_DATA 到达：占位壳换真明细 + 挂"确认卸载"钮（关弹窗并发 MC_UNINST_DO——
+   * 结果 toast/快照由 C# 回推，行内 ⟳ 与底条"卸载 X"随快照出现）。 */
+  function onUninstData(ev) {
+    if (ST.uninstGuid == null || ev.guid !== ST.uninstGuid) return; // 非当前请求（陈旧包）
+    ST.uninstGuid = null;
+    clearUninstTimer();
+    if (!modalOpen() || !S.mdl) return; // 用户已关弹窗：只清状态
+    setModal(uninstModalHtml(ev));
+    var go = S.mdl.querySelector('[data-mact="douninst"]');
+    if (!go) return;
+    go.addEventListener('click', function (e) {
+      e.stopPropagation();
+      window.__mcOutbox.push({ type: 'MC_UNINST_DO', guid: ev.guid });
+      closeModal();
+    });
+  }
+
   /* ================= v2 任务 8：主区仓库视图 ================= */
 
   function repoRowOf(key) {
@@ -916,7 +1022,8 @@
       S.cfg.innerHTML = '<div class="__mc-mod-title"><h2>' + esc(SELF_NAME) + '</h2>'
         + '<span class="__mc-en">' + esc(SELF_EN) + '</span></div>'
         + '<div class="__mc-mod-desc">\u7ba1\u7406\u9762\u677f\u81ea\u8eab\u63d2\u4ef6\u3002\u63d0\u4f9b\u672c\u754c\u9762\u3001\u914d\u7f6e\u6865\uff08\u8bfb\u5199\u5404 mod cfg\uff09\u4e0e\u5143\u6570\u636e\u8868\u3002<br>'
-        + '\u9632\u5446\u8bbe\u8ba1\uff1a\u9762\u677f\u5185\u4e0d\u53ef\u505c\u7528\u81ea\u8eab\u2014\u2014\u505c\u7528\u540e\u4f60\u5c06\u6ca1\u6709\u5165\u53e3\u6062\u590d\uff0c\u9700\u624b\u7f16 cfg \u6587\u4ef6\uff1b\u5982\u9700\u5f7b\u5e95\u79fb\u9664\u8bf7\u8d70\u5b89\u88c5\u5668\u5378\u8f7d\u7ec4\u4ef6\u3002</div>';
+        + '\u9632\u5446\u8bbe\u8ba1\uff1a\u9762\u677f\u5185\u4e0d\u53ef\u505c\u7528\u81ea\u8eab\u2014\u2014\u505c\u7528\u540e\u4f60\u5c06\u6ca1\u6709\u5165\u53e3\u6062\u590d\uff0c\u9700\u624b\u7f16 cfg \u6587\u4ef6\uff1b\u5982\u9700\u5f7b\u5e95\u79fb\u9664\u53ef\u7528\u4e0b\u65b9\u201c\u5378\u8f7d\u2026\u201d\uff08\u786e\u8ba4\u5f39\u7a97\u6709\u7279\u522b\u8bf4\u660e\uff09\u3002</div>'
+        + uninstActHtml(SELF_GUID, '\u5378\u8f7d\u9762\u677f\u672c\u4f53\uff08\u786e\u8ba4\u5f39\u7a97\u6709\u7279\u522b\u8bf4\u660e\uff09');
       return;
     }
     var m = curMod();
@@ -946,6 +1053,9 @@
     }
     if (m.ovr) h += ovrHtml(m);
     if (m.bagOvr) h += bagOvrHtml(m);
+    /* v2 任务 10：详情页维护动作区（原型 detailHtml"维护动作"行）——停用/启用走左列开关
+     * （v1 已在，不重做），此处只承载"卸载…"入口。 */
+    h += uninstActHtml(m.guid, '\u5f7b\u5e95\u5220\u9664 dll / cfg / \u7ba1\u7406\u8bb0\u5f55\uff0c\u91cd\u542f\u540e\u751f\u6548');
     S.cfg.innerHTML = h;
   }
 
@@ -1116,17 +1226,26 @@
     return !!(S.mbg && S.mbg.className.indexOf('__mc-show') !== -1);
   }
 
-  /* 底部待生效条（MC_PENDING_SUMMARY{n,labels}；n>0 显示——原型 renderPending 同款文案） */
+  /* 底部待生效条（MC_PENDING_SUMMARY{n,labels,applied?}；n>0 或 applied 在场显示——原型
+   * renderPending 同款文案。T10（T9 改进项）：applied=中性档（"自定义加载序生效中"=本靴已
+   * 应用）——不计入待生效计数、弱化样式（__mc-weak 灰上缘）、不缀"重启后应用"）。 */
   function renderPending() {
     if (!S.pendEl || !S.pendEl.isConnected) return;
     var p = ST.pend;
-    if (!p || !p.n || !(p.labels && p.labels.length)) {
+    var labels = p && p.labels ? p.labels : [];
+    var applied = p && p.applied ? p.applied : null;
+    if (!labels.length && !applied) {
       S.pendEl.className = '__mc-pending';
       return;
     }
-    S.pendEl.className = '__mc-pending __mc-show';
-    if (S.pendTx) S.pendTx.textContent =
-      '\u5f85\u751f\u6548 ' + p.labels.length + ' \u9879\uff08' + p.labels.join(' \u00b7 ') + '\uff09\u00b7 \u91cd\u542f\u6e38\u620f\u540e\u5e94\u7528';
+    S.pendEl.className = '__mc-pending __mc-show' + (labels.length ? '' : ' __mc-weak');
+    if (!S.pendTx) return;
+    var h = '';
+    if (labels.length)
+      h += esc('\u5f85\u751f\u6548 ' + labels.length + ' \u9879\uff08' + labels.join(' \u00b7 ') + '\uff09\u00b7 \u91cd\u542f\u6e38\u620f\u540e\u5e94\u7528');
+    if (applied)
+      h += (h ? ' \u00b7 ' : '') + '<span style="color:#8a90a0">' + esc(applied) + '</span>';
+    S.pendTx.innerHTML = h;
   }
 
   /* ================= 消息发送 ================= */
@@ -1231,6 +1350,10 @@
         }
         return;
       }
+      /* v2 任务 10：卸载…按钮 → 拉明细确认弹窗（__self 页 curMod 为 null——须在 curMod
+       * 判空之前；停用/启用动作不在此区，仍走左列开关）。 */
+      var un = t.closest('[data-act="uninst"]');
+      if (un) { e.stopPropagation(); openUninstModal(un.getAttribute('data-guid')); return; }
       var m = curMod();
       if (!m) return;
       /* bool 开关 */
@@ -1454,6 +1577,12 @@
     /* 任务 16：C# 推送的原文 toast（强杀残留提示一轮；MC_OPEN 后紧跟到达） */
     if (event && event.type === 'MC_TOAST') {
       toastRaw(event.main || '', event.small || '');
+      /* v2 任务 10：卸载明细等待期间到达的 toast = C# 拒绝路径（如"不在链上"）——撤掉
+       * 等待壳，避免 5s 后显示误导性的"明细读取超时"。 */
+      if (ST.uninstGuid != null) {
+        ST.uninstGuid = null; clearUninstTimer();
+        if (modalOpen()) closeModal();
+      }
     }
     /* v2 任务 7：待生效清单摘要（pending.json 泵 2s 巡检推送；面板关着时只存 ST.pend，
      * 重开面板 renderAll 恢复底部条） */
@@ -1474,6 +1603,8 @@
     }
     /* v2 任务 8：下载链进度/结果（MC_DL：down|check|unzip|write|ok|err） */
     if (event && event.type === 'MC_DL') onDlEvent(event);
+    /* v2 任务 10：卸载明细（MC_UNINST_DATA）→ 占位壳换真值确认弹窗 */
+    if (event && event.type === 'MC_UNINST_DATA') onUninstData(event);
     /* v2 任务 9：排序数据（MC_ORDER_DATA：guids=生效序 / rows=显示元数据 / def=默认序）。
      * 面板开着且在排序模式才重绘；数据本体存 ST.ordRows（重进排序模式前可参照）。 */
     if (event && event.type === 'MC_ORDER_DATA') {
@@ -1515,6 +1646,7 @@
     var el = S.root;
     S.root = null; S.side = S.cfg = S.sub = S.toastEl = null;
     S.pendEl = null; S.pendTx = null; S.mbg = null; S.mdl = null; S.mdlRepoKey = null; // v2 任务 7/8：弹窗/待生效条随面板拆
+    ST.uninstGuid = null; clearUninstTimer(); // v2 任务 10：卸载明细等待随面板拆终止
     ORD.src = null; // v2 任务 9：面板拆=拖拽会话终止（重开面板需重新 dragstart）
     if (el.isConnected && el.parentNode) el.parentNode.removeChild(el);
     /* 关闭即清节流句柄（评审备忘 3）：撤销未触发的 trailing 补发，面板关闭后不再发消息 */
@@ -1553,6 +1685,7 @@
     if (alive) return;
     S.root = null; S.side = S.cfg = S.sub = S.toastEl = null;
     S.pendEl = null; S.pendTx = null; S.mbg = null; S.mdl = null; S.mdlRepoKey = null; // v2 任务 7/8
+    ST.uninstGuid = null; clearUninstTimer(); // v2 任务 10
     ORD.src = null; // v2 任务 9
     for (var id in TH) if (TH[id] && TH[id].timer != null) clearTimeout(TH[id].timer);
     TH = Object.create(null);
