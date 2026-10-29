@@ -29,6 +29,11 @@
  * 自身（__self 页按钮）走特别文案分支（面板本体消失+清理器保留说明）。带出：T9 三小件
  * （ORD.src 改存 guid / ordbar 两钮未加载禁用 / HandleOrderSave 兜底在 C# 侧）+ 待生效条
  * 中性档（MC_PENDING_SUMMARY.applied="自定义加载序生效中"——不计入计数、弱化样式）。
+ * v2 生命周期任务 11 = 冲突详情弹窗（原型 cfHtml 照抄）：行内 ics 的 click:"cf"（⚠红冲突 /
+ * ⇄橙碰撞 / ◎灰同域）点击 → 占位壳 + MC_CF{guid} → MC_CF_DATA{guid,cards:[{lv,tag,title,
+ * who[],reason,tips[]}]} → 每条冲突一卡片（h3 图标+"mod名 · 标签" / 副标题 / 冲突对象·原因·
+ * 处置建议三 sec；多卡片间分隔线）+ 固定风险文案 + 关闭/停用此 mod/卸载此 mod… 三钮
+ * （停用走 MC_TOGGLE_MOD 既有启停链、卸载…转 T10 卸载确认弹窗）；C# 未回包 5s 超时兜底。
  *
  * 注入落点：Root 文档（C# WebBridge.ExecuteJavaScript 上下文）。__McInstalled 守卫幂等。
  * 全局契约（C# Ticker / MenuEntryInjector 对齐）：__McInstalled / __mcOutbox / __mcDrain /
@@ -86,10 +91,11 @@
    * ordRows=最近 MC_ORDER_DATA（含 rows 显示元数据与 def 默认序）；ordSaving=保存
    * 回执（MC_ORDER_OK/FAIL）在途防连点。ORD.src=DnD 源行 guid（拖拽会话期；T10 带出①）。 */
   var S = { host: null, root: null, side: null, cfg: null, sub: null, toastEl: null, pendEl: null, pendTx: null, mbg: null, mdl: null, mdlRepoKey: null };
-  var ST = { snap: null, sel: null, pend: null, repo: false, repoData: null, dl: null, ord: false, order: null, ordRows: null, ordSaving: false, uninstGuid: null };
+  var ST = { snap: null, sel: null, pend: null, repo: false, repoData: null, dl: null, ord: false, order: null, ordRows: null, ordSaving: false, uninstGuid: null, cfGuid: null };
   var ORD = { src: null }; // v2 任务 9：拖拽源 guid（null=无拖拽会话；T10 带出①：改存 guid 防拖拽中键盘重排错位）
   var TH = Object.create(null); // 滑条 100ms 节流句柄表
   var uninstTimer = null;       // v2 任务 10：MC_UNINST_DATA 等待超时句柄
+  var cfTimer = null;           // v2 任务 11：MC_CF_DATA 等待超时句柄
   var SELF_GUID = 'com.local.survivallog.modcenter'; // __self 页卸载按钮的目标 guid（C# ModCenterPlugin.Guid 同源）
 
   var CSS = ''
@@ -642,7 +648,7 @@
         if (!click) return;
         var m = findMod(ic.getAttribute('data-guid'));
         if (!m) return;
-        if (click === 'cf') openModal(cfModalHtml(m));
+        if (click === 'cf') openCfModal(m);
         else if (click === 'upd') openUpdModal(m);
         return;
       }
@@ -1092,13 +1098,102 @@
     return '<span class="__mc-ic __mc-' + k + '" style="cursor:default" aria-hidden="true">' + glyph + '</span>';
   }
 
-  /* 冲突详情弹窗（click:"cf"）——T11 体检接入前的兜底文案（数据空时占位） */
-  function cfModalHtml(m) {
-    return '<h3>' + chipHtml('red', '\u26a0') + '\u51b2\u7a81 \u00b7 ' + esc(m.name) + '</h3>'
-      + '<div class="__mc-m-sub">\u4f53\u68c0\u8be6\u60c5\uff08L1 \u5df2\u77e5\u51b2\u7a81\u5e93 / L2 \u8865\u4e01\u78b0\u649e / L3 \u529f\u80fd\u57df\uff09</div>'
-      + '<div class="__mc-m-sec"><div class="__mc-m-h">\u8be6\u60c5</div>'
-      + '<div class="__mc-m-txt">T11 \u63a5\u5165\u540e\u5c55\u793a\u8be6\u60c5\uff08\u51b2\u7a81\u5bf9\u8c61\u3001\u539f\u56e0\u3001\u5904\u7f6e\u5efa\u8bae\u4e0e\u98ce\u9669\u6587\u6848\uff09\u3002</div></div>'
+  /* ---- v2 任务 11：冲突详情弹窗（原型 cfHtml 照抄）----
+   * 每条冲突一卡片：h3=图标+"mod名 · 标签"（tag 冲突/碰撞/同域）；.sub=数据侧 title；
+   * 三 sec：冲突对象（who 加粗）/ 原因（reason）/ 处置建议（tips 编号列表）；
+   * 多卡片间 border-top 分隔线；底部固定风险文案（原型原文）+ 三动作钮。 */
+  function cfCardHtml(m, c, i) {
+    var lv = c.lv || 'gray';
+    var h = '';
+    if (i > 0) h += '<div style="border-top:1px solid #2a2f3d;margin-top:14px"></div>';
+    h += '<h3>' + chipHtml(lv, icGlyph({ k: lv, click: 'cf' })) + esc(m.name) + ' \u00b7 ' + esc(c.tag || '')
+      + '</h3><div class="__mc-m-sub">' + esc(c.title || '') + '</div>'
+      + '<div class="__mc-m-sec"><div class="__mc-m-h">\u51b2\u7a81\u5bf9\u8c61</div>'
+      + '<div class="__mc-m-txt"><b style="color:#e8e6e0">' + esc((c.who || []).join('\u3001')) + '</b></div></div>'
+      + '<div class="__mc-m-sec"><div class="__mc-m-h">\u539f\u56e0</div>'
+      + '<div class="__mc-m-txt">' + esc(c.reason || '') + '</div></div>'
+      + '<div class="__mc-m-sec"><div class="__mc-m-h">\u5904\u7f6e\u5efa\u8bae\uff08\u81ea\u62c5\u9009\u62e9\uff09</div>'
+      + '<div class="__mc-m-txt">';
+    var tips = c.tips || [];
+    for (var j = 0; j < tips.length; j++) h += (j > 0 ? '<br>' : '') + (j + 1) + '. ' + esc(tips[j]);
+    return h + '</div></div>';
+  }
+
+  function cfModalHtml(m, cards) {
+    var h = '';
+    for (var i = 0; i < cards.length; i++) h += cfCardHtml(m, cards[i], i);
+    h += '<div class="__mc-risk">\u8c03\u6574\u52a0\u8f7d\u987a\u5e8f\u53ea\u80fd\u89c4\u907f\u90e8\u5206\u51b2\u7a81\uff08\u5199\u5e8f\u7c7b\uff09\uff0c\u4e0d\u80fd\u89e3\u51b3\u6570\u503c\u53e0\u52a0\u7c7b\u51b2\u7a81\u3002</div>'
+      + '<div class="__mc-m-acts"><button type="button" class="__mc-btn __mc-btn-mini" data-mact="close">\u5173\u95ed</button>'
+      + '<button type="button" class="__mc-btn __mc-btn-mini" data-mact="cfoff" data-guid="' + esc(m.guid) + '">\u505c\u7528\u6b64 mod</button>'
+      + '<button type="button" class="__mc-btn __mc-btn-danger __mc-btn-mini" data-mact="cfdel" data-guid="' + esc(m.guid) + '">\u5378\u8f7d\u6b64 mod\u2026</button></div>';
+    return h;
+  }
+
+  /* 等待壳（MC_CF → MC_CF_DATA 一拍 drain 周期内的占位） */
+  function cfLoadingHtml(name) {
+    return '<h3>' + chipHtml('gray', '\u25ce') + '\u51b2\u7a81\u8be6\u60c5 \u00b7 ' + esc(name) + '</h3>'
+      + '<div class="__mc-m-sub">\u6b63\u5728\u8bfb\u53d6\u51b2\u7a81\u8be6\u60c5\u2026</div>'
       + '<div class="__mc-m-acts"><button type="button" class="__mc-btn __mc-btn-mini" data-mact="close">\u5173\u95ed</button></div>';
+  }
+
+  /* 空态壳（C# 回 cards:[] —— 一般不会到达：ics 由同一数据源产出） */
+  function cfEmptyHtml(name) {
+    return '<h3>' + chipHtml('gray', '\u25ce') + '\u51b2\u7a81\u8be6\u60c5 \u00b7 ' + esc(name) + '</h3>'
+      + '<div class="__mc-m-sub">\u672a\u53d1\u73b0\u51b2\u7a81\u8be6\u60c5\u3002</div>'
+      + '<div class="__mc-m-acts"><button type="button" class="__mc-btn __mc-btn-mini" data-mact="close">\u5173\u95ed</button></div>';
+  }
+
+  function clearCfTimer() {
+    if (cfTimer != null) { clearTimeout(cfTimer); cfTimer = null; }
+  }
+
+  /* cf 图标点击：占位弹窗 + MC_CF 入 outbox + 5s 超时兜底（结果一律等 MC_CF_DATA 真数据）。 */
+  function openCfModal(m) {
+    ST.cfGuid = m.guid;
+    openModal(cfLoadingHtml(m.name));
+    window.__mcOutbox.push({ type: 'MC_CF', guid: m.guid });
+    clearCfTimer();
+    cfTimer = setTimeout(function () {
+      cfTimer = null;
+      if (ST.cfGuid !== m.guid) return;
+      ST.cfGuid = null;
+      if (!modalOpen() || !S.mdl) return;
+      setModal('<h3>' + chipHtml('red', '\u26a0') + '\u51b2\u7a81\u8be6\u60c5 \u00b7 ' + esc(m.name) + '</h3>'
+        + '<div class="__mc-m-sub">\u8be6\u60c5\u8bfb\u53d6\u8d85\u65f6\uff08C# \u672a\u56de\u5305\uff0c\u8be6\u89c1 LogOutput\uff09\u3002</div>'
+        + '<div class="__mc-m-acts"><button type="button" class="__mc-btn __mc-btn-mini" data-mact="close">\u5173\u95ed</button></div>');
+    }, 5000);
+  }
+
+  /* "停用此 mod"（弹窗内）：复用既有启停链 MC_TOGGLE_MOD（SetModEnabled 同一条路；
+   * MC_SET 只写 Meta 登记配置项，General.Enabled 不在 Meta 表内）。 */
+  function cfDisable(guid) {
+    var m = findMod(guid);
+    if (m && m.enabled) { m.enabled = false; renderSide(); renderCfg(); }
+    window.__mcOutbox.push({ type: 'MC_TOGGLE_MOD', guid: guid, enabled: false });
+    closeModal();
+    var name = m ? m.name : guid;
+    if (m && isTpMod(m))
+      toastRaw(name + ' \u5df2\u6807\u8bb0\u505c\u7528\uff08\u91cd\u542f\u7ea7\uff09',
+        '\u672c\u6b21\u4f1a\u8bdd\u4ecd\u5728\u8fd0\u884c \u00b7 \u4e0b\u6b21\u542f\u52a8\u540e\u4e0d\u518d\u52a0\u8f7d');
+    else
+      toast(name + ' \u5df2\u505c\u7528\uff1a\u884c\u4e3a\u7acb\u5373\u8fd8\u539f\uff0c\u4e0b\u6b21\u542f\u52a8\u4e0d\u518d\u52a0\u8f7d', 'now');
+  }
+
+  /* MC_CF_DATA 到达：占位壳换真卡片 + 挂停用/卸载动作（陈旧包/已关弹窗只清状态）。 */
+  function onCfData(ev) {
+    if (ST.cfGuid == null || ev.guid !== ST.cfGuid) return;
+    ST.cfGuid = null;
+    clearCfTimer();
+    if (!modalOpen() || !S.mdl) return;
+    var m = findMod(ev.guid);
+    var name = m ? m.name : ev.guid;
+    var cards = ev.cards || [];
+    if (!cards.length) { setModal(cfEmptyHtml(name)); return; }
+    setModal(cfModalHtml({ guid: ev.guid, name: name }, cards));
+    var off = S.mdl.querySelector('[data-mact="cfoff"]');
+    if (off) off.addEventListener('click', function (e) { e.stopPropagation(); cfDisable(ev.guid); });
+    var del = S.mdl.querySelector('[data-mact="cfdel"]');
+    if (del) del.addEventListener('click', function (e) { e.stopPropagation(); openUninstModal(ev.guid); });
   }
 
   /* 更新确认弹窗壳（click:"upd" 且无仓库数据时的兜底——T8 真数据版见 updModalRealHtml） */
@@ -1220,6 +1315,7 @@
 
   function closeModal() {
     if (S.mbg) S.mbg.className = '__mc-modal-bg';
+    ST.cfGuid = null; clearCfTimer(); // v2 任务 11：关弹窗=放弃未到的冲突详情（防陈旧回包误渲染）
   }
 
   function modalOpen() {
@@ -1605,6 +1701,8 @@
     if (event && event.type === 'MC_DL') onDlEvent(event);
     /* v2 任务 10：卸载明细（MC_UNINST_DATA）→ 占位壳换真值确认弹窗 */
     if (event && event.type === 'MC_UNINST_DATA') onUninstData(event);
+    /* v2 任务 11：冲突详情（MC_CF_DATA）→ 占位壳换真卡片（L1 卡片 + L3 同域卡） */
+    if (event && event.type === 'MC_CF_DATA') onCfData(event);
     /* v2 任务 9：排序数据（MC_ORDER_DATA：guids=生效序 / rows=显示元数据 / def=默认序）。
      * 面板开着且在排序模式才重绘；数据本体存 ST.ordRows（重进排序模式前可参照）。 */
     if (event && event.type === 'MC_ORDER_DATA') {
@@ -1647,6 +1745,7 @@
     S.root = null; S.side = S.cfg = S.sub = S.toastEl = null;
     S.pendEl = null; S.pendTx = null; S.mbg = null; S.mdl = null; S.mdlRepoKey = null; // v2 任务 7/8：弹窗/待生效条随面板拆
     ST.uninstGuid = null; clearUninstTimer(); // v2 任务 10：卸载明细等待随面板拆终止
+    ST.cfGuid = null; clearCfTimer();         // v2 任务 11：冲突详情等待随面板拆终止
     ORD.src = null; // v2 任务 9：面板拆=拖拽会话终止（重开面板需重新 dragstart）
     if (el.isConnected && el.parentNode) el.parentNode.removeChild(el);
     /* 关闭即清节流句柄（评审备忘 3）：撤销未触发的 trailing 补发，面板关闭后不再发消息 */
@@ -1686,6 +1785,7 @@
     S.root = null; S.side = S.cfg = S.sub = S.toastEl = null;
     S.pendEl = null; S.pendTx = null; S.mbg = null; S.mdl = null; S.mdlRepoKey = null; // v2 任务 7/8
     ST.uninstGuid = null; clearUninstTimer(); // v2 任务 10
+    ST.cfGuid = null; clearCfTimer();         // v2 任务 11
     ORD.src = null; // v2 任务 9
     for (var id in TH) if (TH[id] && TH[id].timer != null) clearTimeout(TH[id].timer);
     TH = Object.create(null);

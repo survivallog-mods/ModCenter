@@ -46,6 +46,11 @@ namespace SurvivalLog.ModCenter;
 /// 扩含 delete（卸载意图吃掉 ↑/↓ 徽标）；HandleOrderSave 体内兜底异常→MC_ORDER_FAIL（防保存钮
 /// 在途卡死）；待生效条 order 覆盖档分"已保存未重启/生效中"（首拍 order 有效序相同或
 /// pending.json mtime 早于本进程启动 = 本靴已应用 → 中性标签不计入计数）。
+/// v2 生命周期任务 11：冲突体检 L1/L3——BuildSnapshot 时把 Chainloader 插件投影为 CfRow
+/// （GUID/显示名/dll 文件名/L1 命中/功能域），按 Meta.KnownConflicts（GUID 优先、dll 文件名兜底）
+/// 与 Meta.Domains（同域 ≥2 登记 mod）给每行挂 ics（red/gray，click=cf）；MC_CF {guid} →
+/// MC_CF_DATA {guid,cards[]}（L1 cards + L3 同域卡，面板照原型 cfHtml 渲染）。快照 ics 与
+/// 弹窗卡片共用 EntriesFor/DomainMates，杜绝两处口径漂移。
 /// 线程纪律：全部 cfg 读写与分发都在 Ticker 主线程（Pump）；outbox 回调线程只入队；
 /// 仓库 fetch/下载在后台 Task，结果经 RepoQueue 回主线程收割（PendingWriter 主线程唯一写者）。
 /// </summary>
@@ -113,6 +118,7 @@ internal static class ConfigBridge
         RefreshPending(true);
         var pendByRow = PendingTipsByRow(); // guid（小写）→ 行内 ⟳ tip
         var repoPend = RepoPendingGuids();  // v2 任务 8：有待生效 install/replace 意图的 guid（仓库行/侧栏徽标判定）
+        var cfRows = InstalledCfRows();     // v2 任务 11：冲突体检投影（一次枚举 Plugins，全行复用）
         var snap = new Snapshot { Self = new SelfInfo { Ver = ModCenterPlugin.Version } };
         foreach (var mm in Meta.Mods)
         {
@@ -132,18 +138,18 @@ internal static class ConfigBridge
             }
             if (mm.OvrHost != null) mi.Ovr = ReadOvr(cfg, mm.OvrHost);
             if (mm.BagOvrHost != null) mi.BagOvr = ReadBagOvr(cfg, mm.BagOvrHost);
-            // v2 任务 8：侧栏行内徽标 = 仓库态（↑蓝可更新/↓橙可降级/↑+⊘版本告警，点击 upd 弹确认窗）
+            // v2 任务 11：冲突徽标置最前（L1 红/灰 + L3 同域灰；点击 cf 拉详情弹窗）
+            // v2 任务 8：随后仓库态（↑蓝可更新/↓橙可降级/↑+⊘版本告警，点击 upd 弹确认窗）
             // + 待生效 ⟳（T7）。已有待生效意图的行不再给可动作徽标（裁定 3：⟳ 出现、↑/↓ 消失）。
-            var ics = RepoIcsOf(mm.Guid, repoPend);
+            var ics = CfIcsFor(cfRows, mm.Guid);
+            var repoIcs = RepoIcsOf(mm.Guid, repoPend);
+            if (repoIcs != null) ics.AddRange(repoIcs);
             if (pendByRow.TryGetValue(mm.Guid, out var pendTip))
-            {
-                ics ??= new List<IcInfo>();
                 ics.Add(new IcInfo { K = "amber", Tip = pendTip }); // ⟳ 纯状态（无 click）
-            }
-            if (ics != null && ics.Count > 0) mi.Ics = ics;
+            if (ics.Count > 0) mi.Ics = ics;
             snap.Mods.Add(mi);
         }
-        BuildTp(snap, pendByRow); // 任务 14：Tier 0 第三方通用页
+        BuildTp(snap, pendByRow, cfRows); // 任务 14：Tier 0 第三方通用页
         return snap;
     }
 
@@ -356,7 +362,7 @@ internal static class ConfigBridge
     /// （section 分组沿用对方 cfg 节名；徽标一律 cfg；Description→note）；无 entry →
     /// 仅启停形态（空 groups + desc 说明，同灾前加速页）。按 Name 排序稳定输出。
     /// </summary>
-    private static void BuildTp(Snapshot snap, Dictionary<string, string> pendByRow)
+    private static void BuildTp(Snapshot snap, Dictionary<string, string> pendByRow, List<CfRow> cfRows)
     {
         Dictionary<string, PluginInfo> plugins = null;
         try { plugins = IL2CPPChainloader.Instance?.Plugins; } catch { }
@@ -371,7 +377,7 @@ internal static class ConfigBridge
                 var md = info?.Metadata;
                 if (md == null || string.IsNullOrEmpty(md.GUID) || info.Instance == null) continue;
                 if (TpExempt(md.GUID, md.Name)) continue;
-                snap.Tp.Add(BuildTpMod(info, pendByRow));
+                snap.Tp.Add(BuildTpMod(info, pendByRow, cfRows));
             }
             catch (Exception e) { Log("warn tp 构建跳过 " + (info?.Metadata?.GUID ?? "?") + ": " + e.Message); }
         }
@@ -419,7 +425,7 @@ internal static class ConfigBridge
     /// 任务 16：启停真值源=DllDisabler [DisabledTp] marker 取反（下次启动由启动清理器改名不加载，T4）；
     /// Tier 2 软停能力标记（约定类型在场或清单 softDisable）与 QueryStates 状态回报随后合入。
     /// </summary>
-    private static ModInfo BuildTpMod(BepInEx.PluginInfo info, Dictionary<string, string> pendByRow)
+    private static ModInfo BuildTpMod(BepInEx.PluginInfo info, Dictionary<string, string> pendByRow, List<CfRow> cfRows)
     {
         var md = info.Metadata;
         var dllRel = DllDisabler.DllRelOf(info);
@@ -431,8 +437,14 @@ internal static class ConfigBridge
             Enabled = dllRel == null || !DllDisabler.MarkerOf(dllRel), // 任务 16：[DisabledTp] marker 取反
             Desc = "第三方 mod（Tier 0 自动识别）：通用页由其 cfg 自动生成；写入即触发其 SettingChanged，生效视该 mod。",
         };
+        // v2 任务 11：冲突徽标（L1 命中=红/灰；L3 同域=灰）——GUID 优先、dll 名兜底在 CfRows 内解析
+        var cfIcs = CfIcsFor(cfRows, md.GUID);
+        if (cfIcs.Count > 0) mi.Ics = cfIcs;
         if (pendByRow.TryGetValue(md.GUID, out var pendTip)) // v2 任务 7：GUID 命名 cfg 意图归属到 tp 行
-            mi.Ics = new List<IcInfo> { new() { K = "amber", Tip = pendTip } };
+        {
+            mi.Ics ??= new List<IcInfo>();
+            mi.Ics.Add(new IcInfo { K = "amber", Tip = pendTip });
+        }
         ConfigFile cfg = null;
         try { if (info.Instance is BasePlugin bp) cfg = bp.Config; } catch { }
 
@@ -1675,6 +1687,188 @@ internal static class ConfigBridge
         catch { return null; }
     }
 
+    // ============ 冲突体检（v2 任务 11：L1 已知冲突库 / L3 功能域标注） ============
+
+    /// <summary>已装插件的一轮体检投影：GUID/显示名/dll 文件名/L1 命中（GUID 优先→dll 兜底）/功能域。
+    /// 数据源=IL2CPPChainloader.Instance.Plugins（与 BuildSnapshot 同源）+ Meta 两张静态表。
+    /// 快照 ics 与 MC_CF 卡片共用本投影，保证行内图标与弹窗内容永远同源。</summary>
+    private sealed class CfRow
+    {
+        public string Guid;
+        public string Name;
+        public ConflictEntry Entry; // L1 命中（null=未收录）
+        public string Domain;       // L3 功能域（null=未登记）
+    }
+
+    private static List<CfRow> InstalledCfRows()
+    {
+        var list = new List<CfRow>();
+        foreach (var p in LoadedPlugins())
+        {
+            var md = p?.Metadata;
+            if (md == null || string.IsNullOrEmpty(md.GUID)) continue;
+            var dllRel = DllDisabler.DllRelOf(p);
+            var dllName = string.IsNullOrEmpty(dllRel) ? null : Path.GetFileName(dllRel);
+            var mm = MetaOfGuid(md.GUID);
+            list.Add(new CfRow
+            {
+                Guid = md.GUID,
+                Name = mm != null ? mm.Name : (string.IsNullOrEmpty(md.Name) ? md.GUID : md.Name),
+                Entry = Meta.MatchL1(md.GUID, dllName),
+                Domain = Meta.DomainOf(md.GUID),
+            });
+        }
+        return list;
+    }
+
+    /// <summary>Meta 套件精确 GUID 查找（不用 Resolve 的 En/尾段宽松匹配——第三方 GUID 尾段
+    /// 撞名（如某 mod 尾段恰为 BackpackExpand）时不得被误当套件行做冲突扩散）。</summary>
+    private static MetaMod MetaOfGuid(string guid)
+    {
+        if (string.IsNullOrEmpty(guid)) return null;
+        foreach (var mm in Meta.Mods)
+            if (string.Equals(mm.Guid, guid, StringComparison.OrdinalIgnoreCase)) return mm;
+        return null;
+    }
+
+    /// <summary>该行应展示的 L1 条目：①本行自身命中（GUID→dll 兜底，见 Meta.MatchL1）；
+    /// ②套件行被已装冲突源波及（条目的 Who 含本行 En，且该冲突源确在链上）。按色级
+    /// red→orange→gray 稳定排序（OrderBy 稳定，同色级保持表序）。</summary>
+    private static List<ConflictEntry> EntriesFor(CfRow row, List<CfRow> all)
+    {
+        var list = new List<ConflictEntry>();
+        if (row.Entry != null) list.Add(row.Entry);
+        var mm = MetaOfGuid(row.Guid);
+        if (mm != null)
+        {
+            foreach (var e in Meta.KnownConflicts)
+            {
+                if (ReferenceEquals(e, row.Entry)) continue;
+                var affected = false;
+                foreach (var w in e.Who)
+                    if (string.Equals(w, mm.En, StringComparison.OrdinalIgnoreCase)) { affected = true; break; }
+                if (!affected) continue;
+                var sourceInstalled = all.Any(x => ReferenceEquals(x.Entry, e));
+                if (sourceInstalled) list.Add(e); // 冲突源未装 = 无冲突（不跨行误报）
+            }
+        }
+        return list.OrderBy(e => e.Level == "red" ? 0 : (e.Level == "orange" ? 1 : 2)).ToList();
+    }
+
+    /// <summary>同域已装集合（按显示名稳定排序）；未登记域=空表。</summary>
+    private static List<CfRow> DomainMates(CfRow row, List<CfRow> all)
+    {
+        var mates = new List<CfRow>();
+        if (row.Domain == null) return mates;
+        foreach (var x in all)
+            if (x.Domain != null && string.Equals(x.Domain, row.Domain, StringComparison.Ordinal))
+                mates.Add(x);
+        return mates.OrderBy(x => x.Name, StringComparer.OrdinalIgnoreCase).ToList();
+    }
+
+    /// <summary>行内冲突 ics（BuildSnapshot/BuildTp 共用）：L1 每条一图标（red/gray，click=cf），
+    /// 末尾 L3 同域灰（域内已装 ≥2 且均为域表登记项——第三方未登记不计数，防盲目误报）。
+    /// 未加载行（套件 dll 缺失/缺席行）不产冲突标。无命中=空表。</summary>
+    private static List<IcInfo> CfIcsFor(List<CfRow> all, string guid)
+    {
+        var list = new List<IcInfo>();
+        if (string.IsNullOrEmpty(guid)) return list;
+        CfRow row = null;
+        foreach (var r in all)
+            if (string.Equals(r.Guid, guid, StringComparison.OrdinalIgnoreCase)) { row = r; break; }
+        if (row == null) return list;
+        foreach (var e in EntriesFor(row, all)) list.Add(EntryIc(e));
+        if (row.Domain != null)
+        {
+            var mates = DomainMates(row, all);
+            if (mates.Count >= 2) list.Add(DomainIc(row, mates));
+        }
+        return list;
+    }
+
+    /// <summary>行内 L1 图标：tip=原因摘要（Title）+ 对象 + 建议数（控制器裁定 2；完整原因在弹窗）。</summary>
+    private static IcInfo EntryIc(ConflictEntry e)
+    {
+        var who = new List<string>();
+        foreach (var w in e.Who) who.Add(Meta.DisplayNameOf(w));
+        var kind = e.Level == "red" ? "冲突" : (e.Level == "orange" ? "碰撞" : "同域");
+        return new IcInfo
+        {
+            K = e.Level,
+            Click = "cf",
+            Tip = kind + " · " + e.Title + " · 对象 " + string.Join("、", who) + " · 处置建议 " + e.Tips.Length + " 条",
+        };
+    }
+
+    /// <summary>行内 L3 同域图标：tip 列出同域其他已装 mod（不含本行）。</summary>
+    private static IcInfo DomainIc(CfRow row, List<CfRow> mates)
+    {
+        var others = new List<string>();
+        foreach (var x in mates)
+            if (!string.Equals(x.Guid, row.Guid, StringComparison.OrdinalIgnoreCase)) others.Add(x.Name);
+        return new IcInfo
+        {
+            K = "gray",
+            Click = "cf",
+            Tip = "同域共存（" + row.Domain + " 功能域）· 与 " + string.Join("、", others) + " · 仅标注不判定 · 点击查看",
+        };
+    }
+
+    /// <summary>MC_CF {guid} → MC_CF_DATA {guid,cards[]}：卡片顺序与行内 ics 同源（L1 色级序 + L3 同域）。
+    /// 未在链上/缺席行 → 空 cards（面板给空态壳，不误报）。</summary>
+    private static void HandleCf(string guid)
+    {
+        var rows = InstalledCfRows();
+        CfRow row = null;
+        if (!string.IsNullOrEmpty(guid))
+            foreach (var r in rows)
+                if (string.Equals(r.Guid, guid, StringComparison.OrdinalIgnoreCase)) { row = r; break; }
+        var data = new CfData { Guid = guid };
+        if (row != null)
+        {
+            foreach (var e in EntriesFor(row, rows)) data.Cards.Add(EntryCard(e));
+            if (row.Domain != null)
+            {
+                var mates = DomainMates(row, rows);
+                if (mates.Count >= 2) data.Cards.Add(DomainCard(row, mates));
+            }
+        }
+        PushEvent(data.ToJson());
+        Log("cf " + guid + " → " + data.Cards.Count + " 卡片" + (row == null ? "（不在链上/缺席行）" : ""));
+    }
+
+    private static CfCardInfo EntryCard(ConflictEntry e)
+    {
+        var c = new CfCardInfo
+        {
+            Lv = e.Level,
+            Tag = Meta.TagOf(e.Level),
+            Title = e.Title,
+            Reason = e.Reason,
+        };
+        foreach (var w in e.Who) c.Who.Add(Meta.DisplayNameOf(w));
+        c.Tips.AddRange(e.Tips);
+        return c;
+    }
+
+    /// <summary>L3 同域卡（原型 cfHtml 的灰卡同构；who=域内全部已装登记 mod）。文案为通用标注，
+    /// 不含判定结论——spec §4.4"只标注不判定"。tips 照原型同域卡两句。</summary>
+    private static CfCardInfo DomainCard(CfRow row, List<CfRow> mates)
+    {
+        var c = new CfCardInfo
+        {
+            Lv = "gray",
+            Tag = Meta.TagOf("gray"),
+            Title = "同域共存（功能域标注）",
+            Reason = "同属「" + row.Domain + "」功能域：多个 mod 可能改写同一类游戏数据，"
+                   + "机制可正交互补、也可能数值叠加超出预期。功能域标注只用于提示同域共存，不做冲突判定，自行取舍。",
+        };
+        foreach (var x in mates) c.Who.Add(x.Name);
+        c.Tips.Add("保留一方");
+        c.Tips.Add("维持现状（接受叠加结果）");
+        return c;
+    }
+
     // ============ 消息泵（主线程，Ticker 每帧调） ============
 
     internal static void EnqueueOutboxJson(string json) => Inbox.Enqueue(json);
@@ -1775,6 +1969,10 @@ internal static class ConfigBridge
                             break;
                         case "MC_UNINST_DO":
                             HandleUninstDo(GetStr(el, "guid"));
+                            break;
+                        // v2 任务 11：冲突详情（行内红/灰图标点击 → 回 MC_CF_DATA{guid,cards[]}）
+                        case "MC_CF":
+                            HandleCf(GetStr(el, "guid"));
                             break;
                         case "MC_EVIDENCE": // 验证辅助（只读）：写证据文件供装机断言（见 DESIGN §6.4）
                             WriteEvidence(GetStr(el, "tag"));

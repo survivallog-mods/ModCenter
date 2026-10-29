@@ -297,6 +297,66 @@ public sealed class RepoData
     }
 }
 
+/// <summary>
+/// 冲突详情卡片（v2 任务 11，MC_CF_DATA.cards 元素；面板照原型 cfHtml 渲染）：
+/// lv=色级（red|orange|gray，决定图标色/字形）、tag=标签（冲突|碰撞|同域）、title=卡片副标题、
+/// who=冲突对象（显示名，面板以"、"连接加粗）、reason=原因全文、tips=处置建议（面板编号列表）。
+/// </summary>
+public sealed class CfCardInfo
+{
+    public string Lv;
+    public string Tag;
+    public string Title;
+    public List<string> Who = new();
+    public string Reason;
+    public List<string> Tips = new();
+
+    internal void Write(StringBuilder sb)
+    {
+        sb.Append("{\"lv\":").Append(JsonW.Str(Lv))
+          .Append(",\"tag\":").Append(JsonW.Str(Tag))
+          .Append(",\"title\":").Append(JsonW.Str(Title))
+          .Append(",\"who\":[");
+        for (var i = 0; i < Who.Count; i++)
+        {
+            if (i > 0) sb.Append(',');
+            sb.Append(JsonW.Str(Who[i]));
+        }
+        sb.Append("],\"reason\":").Append(JsonW.Str(Reason))
+          .Append(",\"tips\":[");
+        for (var i = 0; i < Tips.Count; i++)
+        {
+            if (i > 0) sb.Append(',');
+            sb.Append(JsonW.Str(Tips[i]));
+        }
+        sb.Append("]}");
+    }
+}
+
+/// <summary>
+/// 冲突详情回包（v2 任务 11，MC_CF {guid} → MC_CF_DATA {guid,cards[]}）：cards 顺序=面板卡片顺序
+/// （L1 命中按色级 red→orange→gray 稳定排序；L3 同域卡最后）。空表=无冲突（面板给空态壳）。
+/// </summary>
+public sealed class CfData
+{
+    public string Guid;
+    public List<CfCardInfo> Cards = new();
+
+    public string ToJson()
+    {
+        var sb = new StringBuilder(1024);
+        sb.Append("{\"type\":\"MC_CF_DATA\",\"guid\":").Append(JsonW.Str(Guid))
+          .Append(",\"cards\":[");
+        for (var i = 0; i < Cards.Count; i++)
+        {
+            if (i > 0) sb.Append(',');
+            Cards[i].Write(sb);
+        }
+        sb.Append("]}");
+        return sb.ToString();
+    }
+}
+
 /// <summary>手写 JSON 片段工具（转义 + 不变文化数字）。</summary>
 internal static class JsonW
 {
