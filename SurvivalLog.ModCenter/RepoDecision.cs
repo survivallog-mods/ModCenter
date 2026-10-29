@@ -31,6 +31,7 @@ public sealed class RepoRow
     public string VerNote; // gamekb 未校验注记（D8："未校验游戏版本：…"）；基线可用 = 空
     public bool Kbw;       // 终审必修 6：Ok/Downgrade 行 gamekb 不符（不改 State，行内 ⊘ + 行级原因）
     public string KbWhy;   // 上述告警原因全文；空 = 无
+    public int? HttpStatus; // T16/D：本轮 fetch 的 HTTP 状态（403=GitHub 限流；面板专门提示）
 
     /// <summary>面板态字符串（控制器裁定 2 固定口径，小写）。</summary>
     public string Status => State.ToString().ToLowerInvariant();
@@ -226,7 +227,9 @@ public static class PendingWriter
         {
             var targetAbs = Path.Combine(Paths.BepInExRootPath,
                 RepoDecision.DllRelOf(row.RepoKey).Replace('/', '\\'));
-            CleanupRunner.WriteSelfUpdateFlag(stagedAbsPath, RepoClient.Md5Of(stagedAbsPath), targetAbs);
+            // 写预置失败不抛：pending op 已落盘，下次启动 CleanupRunner 会重试补写（代价=多一次重启）。
+            if (!CleanupRunner.WriteSelfUpdateFlag(stagedAbsPath, RepoClient.Md5Of(stagedAbsPath), targetAbs))
+                ModCenterPlugin.Log("warn 自更新预置写入失败（pending op 已落盘，下次启动重试）");
         }
     }
 

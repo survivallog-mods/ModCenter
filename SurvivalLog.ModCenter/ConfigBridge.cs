@@ -24,7 +24,7 @@ namespace SurvivalLog.ModCenter;
 /// 3s 节流 + MC_CLOSE 立即落盘后恢复原值）。
 /// v2 生命周期任务 7：待生效清单汇总——BuildSnapshot 前主线程读 pending.json（mtime 节流），
 /// 归属到的 mod 行挂 ics ⟳ 徽标；Pump 每 2s 巡检，摘要变化推 MC_PENDING_SUMMARY（底部待生效条）。
-/// v2 生命周期任务 8：套件仓库页——MC_REPO_GET{force}（打开自动查：10 分钟会话缓存）/ MC_CHK
+/// v2 生命周期任务 8：套件仓库页——MC_REPO_GET{force}（打开自动查：15 分钟会话缓存）/ MC_CHK
 /// （手动刷新：60 秒冷却）→ 后台 12 仓 fetch + RepoDecision.Build（主线程收割推 MC_REPO_DATA +
 /// 快照侧栏 ↑/↓/⊘ 徽标）；MC_UPD/MC_INST/MC_UPDALL 确认后走**串行**下载链（后台：下载（进度
 /// 250ms 节流推 MC_DL）→ zip MD5 对 update.json → 解包 BepInEx/plugins/*.dll 暂存 → 主线程
@@ -97,6 +97,8 @@ internal static class ConfigBridge
         public RepoRow Row;                       // 3 ok（主线程 AddUpdate 用）
         public RepoClient.UpdateInfo Info;        // 3 ok
         public string Staged;                     // 3 ok（staging 内 dll 绝对路径）
+        public int RateLimited;                   // 1：本轮 HTTP 403 仓数（T16/D 限流提示）
+        public int OkCount;                       // 1：本轮成功拿到 update.json 的仓数
     }
 
     private static readonly ConcurrentQueue<RepoUi> RepoQueue = new();
@@ -107,10 +109,11 @@ internal static class ConfigBridge
     private static bool _repoChain;              // 下载链串行闸（全部更新=循环单链，绝不并发）
     private static readonly HashSet<string> _chainGuids = new(StringComparer.OrdinalIgnoreCase); // 当前链覆盖的 guid（卸载竞态闸，必修 1）
     private static string _repoFetchError;       // 上一轮 fetch 异常（Kind5）；Kind1 清（入口卡失败态，必修 8）
+    private static bool _repoRateLimited;        // 上一轮含 HTTP 403（T16/D：入口卡/行内专门提示）
     private static string _dlKey;                // 当前下载链仓键；null=空闲（推送体 dl 字段）
     private static int _dlPct;
     private static string _dlStage;
-    private const long RepoCacheMs = 10 * 60 * 1000;   // 打开自动查：10 分钟会话级缓存（控制器裁定 2）
+    private const long RepoCacheMs = 15 * 60 * 1000;   // 打开自动查：15 分钟会话级缓存（D6/Ruling 22 加固：12×4=48 < 60 匿名限额）
     private const long RepoCooldownMs = 60 * 1000;     // 手动刷新：60 秒冷却
     private static long NowMs => DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
 
@@ -127,7 +130,14 @@ internal static class ConfigBridge
         var pendByRow = PendingTipsByRow(); // guid（小写）→ 行内 ⟳ tip
         var repoPend = RepoPendingGuids();  // v2 任务 8：有待生效 install/replace 意图的 guid（仓库行/侧栏徽标判定）
         var cfRows = InstalledCfRows();     // v2 任务 11：冲突体检投影（一次枚举 Plugins，全行复用）
-        var snap = new Snapshot { Self = new SelfInfo { Ver = ModCenterPlugin.Version } };
+        var snap = new Snapshot
+        {
+            Self = new SelfInfo { Ver = ModCenterPlugin.Version },
+            // T16 I-2：缺壳 → 面板顶部告警（更新/卸载/排序/停用全部不会执行）
+            ShellWarn = ModCenterPlugin.ShellMissing
+                ? "启动清理组件缺失（patchers\\MCShell.dll）：更新/安装/卸载/停用/排序不会生效。请用安装器或完整包补装。"
+                : null,
+        };
         foreach (var mm in Meta.Mods)
         {
             var cfg = CfgOf(mm.Guid);
@@ -983,6 +993,9 @@ internal static class ConfigBridge
             // 原子写中断的 .tmp 孤儿同清（不是意图介质，留着只会误导排障）
             var tmp = McPending.File + ".tmp";
             if (System.IO.File.Exists(tmp)) System.IO.File.Delete(tmp);
+            // T16 M-6：两阶段 flag 的 .tmp 孤儿同清（残留会让 RunDirSweep 判"其他内容"永久 SKIP）
+            foreach (var orphan in new[] { CleanupRunner.SelfUpdateFlagPath + ".tmp", CleanupRunner.UninstalledFlagPath + ".tmp" })
+                if (System.IO.File.Exists(orphan)) System.IO.File.Delete(orphan);
             CleanupRunner.DeleteSelfUpdateFlag(); // T16：撤销全部待生效 = 自更新预置一并撤销
         }
         catch (Exception e)
@@ -1094,7 +1107,7 @@ internal static class ConfigBridge
     };
 
     /// <summary>MC_REPO_GET{force}（仓库视图打开拉取）/ MC_CHK（手动"检查更新"）共用入口。
-    /// 节流（裁定 2）：fetch 在跑→只推现状；打开（force=false）10 分钟缓存内推缓存；手动 60 秒
+    /// 节流（裁定 2/D6）：fetch 在跑→只推现状；打开（force=false）15 分钟缓存内推缓存；手动 60 秒
     /// 冷却内推数据+toast"刚检查过"；否则起一轮后台 fetch（12 仓顺序，匿名限额预算内）。</summary>
     private static void HandleRepoGet(bool force)
     {
@@ -1143,14 +1156,22 @@ internal static class ConfigBridge
             try
             {
                 var infos = new Dictionary<string, RepoClient.UpdateInfo>(StringComparer.Ordinal);
+                var rateLimited = 0;
                 foreach (var r in rows) // 顺序温和（一轮 12 次 API 请求，不连环多轮）
                 {
-                    var info = await RepoClient.FetchLatest(r.RepoKey);
+                    var res = await RepoClient.FetchLatestEx(r.RepoKey); // T16/D：带 HTTP 状态（403 限流）
+                    r.HttpStatus = res.Status;
+                    if (res.Status == 403) rateLimited++;
+                    var info = res.Info;
                     if (info == null) { r.Remote = null; r.Gamekb = null; } // 失败留痕已在 RepoClient warn
                     else { r.Remote = info.Version; r.Gamekb = info.Gamekb; infos[r.RepoKey] = info; }
                 }
                 RepoDecision.Build(rows, local); // 纯函数，后台可调
-                RepoQueue.Enqueue(new RepoUi { Kind = 1, Rows = rows, Infos = infos });
+                RepoQueue.Enqueue(new RepoUi
+                {
+                    Kind = 1, Rows = rows, Infos = infos,
+                    RateLimited = rateLimited, OkCount = infos.Count,
+                });
             }
             catch (Exception e) // T8 遗留修①：异常也收尾——Kind 5 回主线程复位 _repoFetching（防永久"检查中"）
             {
@@ -1324,6 +1345,17 @@ internal static class ConfigBridge
                 _repoLastCheck = NowMs;
                 _repoFetching = false;
                 _repoFetchError = null; // 本轮 fetch 正常收尾（入口卡失败态复位）
+                _repoRateLimited = ui.RateLimited > 0;
+                if (_repoRateLimited)
+                {
+                    // T16/D：403 不显示成普通"检查失败"——入口卡/行内专门文案 + 一次 toast。
+                    if (ui.OkCount == 0) _repoFetchError = "GitHub 限流（HTTP 403），请稍后再试";
+                    var small = ui.OkCount == 0
+                        ? "本轮 12 仓全部被限流（匿名 API 60 次/小时已用尽），请稍后再试"
+                        : "本轮 " + ui.RateLimited + " 个仓被限流，结果可能不完整，请稍后再试";
+                    PushEvent("{\"type\":\"MC_TOAST\",\"main\":" + JsonW.Str("GitHub 限流")
+                        + ",\"small\":" + JsonW.Str(small) + "}");
+                }
                 PushRender(BuildSnapshot().ToJson()); // 侧栏 ↑/↓/⊘ 徽标（快照协议承载）
                 PushRepoData();
                 break;
@@ -1412,6 +1444,7 @@ internal static class ConfigBridge
         {
             LastCheck = _repoLastCheck,
             Checking = _repoFetching,
+            RateLimited = _repoRateLimited,
             Mirror = string.IsNullOrEmpty(ModCenterPlugin.NetworkMirrorPrefix?.Value) ? "直连" : "镜像",
         };
         if (_repoRows != null)
@@ -1425,6 +1458,7 @@ internal static class ConfigBridge
                     Why = r.Why, RepoKey = r.RepoKey, Guid = r.Guid, Gamekb = r.Gamekb,
                     VerNote = r.VerNote, Kbw = r.Kbw, KbWhy = r.KbWhy,
                     Pending = pend.Contains(r.Guid.ToLowerInvariant()),
+                    HttpStatus = r.HttpStatus, // T16/D：403 限流行内专门提示
                 });
             // 终审必修 8：全失败（12 行 Remote 皆 null）或 fetch 异常 → 入口卡"检查失败（点击重试）"；
             // 行级"检查失败"由 Remote=null 渲染，不受影响。
@@ -1678,7 +1712,7 @@ internal static class ConfigBridge
     }
 
     /// <summary>guid → 卸载明细。四路由：①ModCenter 自身（特别文案分支）②Meta 套件③链上第三方
-    /// （FindTp——探针/MCCleaner 豁免不可达，防呆）④缺席行（guid=dll 相对名，DllDisabler.
+    /// （FindTp——探针/引导壳 MCShell 豁免不可达，防呆）④缺席行（guid=dll 相对名，DllDisabler.
     /// AbsentDisabled——dll 已禁用未加载）。cfg 真值源 = PluginInfo.Instance as BasePlugin →
     /// Config.ConfigFilePath（v1 §4.1③ 实证写法；T4 实证 cfg 按 GUID 命名，不自拼），不在场不列。</summary>
     private static UninstInfo BuildUninst(string guid)
@@ -1700,7 +1734,7 @@ internal static class ConfigBridge
             return self;
         }
 
-        // ②③ Meta 套件 / 链上第三方（FindTp 已豁免探针与第一方；MCCleaner 是 patcher 不在 Plugins，不可达）
+        // ②③ Meta 套件 / 链上第三方（FindTp 已豁免探针与第一方；引导壳 MCShell 是 patcher 不在 Plugins，不可达）
         BepInEx.PluginInfo pi = null;
         var mm = Resolve(guid);
         if (mm != null) pi = PluginOfGuid(mm.Guid);
@@ -2214,7 +2248,7 @@ internal static class ConfigBridge
                             // v2 任务 7：开门即推待生效摘要（面板底部条初始态；BuildSnapshot 内已刷新 _pendOps）
                             _pendSig = PendingSig();
                             PushPendingSummary();
-                            // T16/D6（Ruling 22）：面板打开即查一次仓库更新（10 分钟会话缓存 +
+                            // T16/D6（Ruling 22）：面板打开即查一次仓库更新（15 分钟会话缓存 +
                             // 手动刷新 60 秒冷却保留，均在 HandleRepoGet 内判定）——缓存内只推
                             // 已有数据不重复 fetch；首次打开/缓存过期才起一轮后台 12 仓 fetch。
                             HandleRepoGet(false);

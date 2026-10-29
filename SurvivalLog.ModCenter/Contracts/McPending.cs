@@ -8,9 +8,9 @@ using BepInEx;
 namespace SurvivalLog.ModCenter;
 
 /// <summary>
-/// pending 契约（ModCenter v2 生命周期任务 2 定稿，两端共用：插件本体同项目直编，
-/// MCCleaner 经其 csproj link 编译同一文件）：<c>BepInEx\ModCenter\pending.json</c> 是
-/// 插件（写意图）与启动清理器（读执行、成功后原子重写）之间的唯一介质，spec §3。
+/// pending 契约（ModCenter v2 生命周期任务 2 定稿；T16 起只在插件项目直编——单份，
+/// 无 MCCleaner link 编译）：<c>BepInEx\ModCenter\pending.json</c> 是
+/// 插件（写意图）与启动清理（CleanupRunner，由引导壳 MCShell 唤起）之间的唯一介质，spec §3。
 /// JSON 手写纪律（Payload.cs 同款，AOT/补丁器阶段零外部依赖）：仅对象/数组/字符串/
 /// 数字/布尔；字符串转义 \" \\ \n（另支持 \r \t 与 &lt;0x20 控制字符的 \uXXXX）；
 /// 读写均 UTF-8 无 BOM（new UTF8Encoding(false)）。

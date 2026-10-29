@@ -39,6 +39,10 @@ public sealed class ModCenterPlugin : BasePlugin
     // （字段不能与 Log(string) 方法同名，故命名 Logger；new 显式遮蔽 BasePlugin.Log 实例属性）
     internal static ManualLogSource Logger;
 
+    /// <summary>T16（I-2）：patchers\MCShell.dll 缺失——启动清理链（更新/卸载/排序/停用）失效。
+    /// Load 时探测；快照带 shellWarn 供面板顶部告警；证据 ModCenter_shell_missing.txt。</summary>
+    internal static bool ShellMissing;
+
     // 任务 4：反射桥诊断探针开关（默认关）。true 时启动 30s 后由 Ticker 主线程跑一轮，
     // 证据落 BepInEx/ModCenter_probe.txt；结论（确切 API/类型/坑）见 DESIGN.md。
     internal static ConfigEntry<bool> DebugProbe;
@@ -70,6 +74,7 @@ public sealed class ModCenterPlugin : BasePlugin
     {
         Instance = this;
         Logger = base.Log;
+        CheckShellPresence(); // T16 I-2：缺壳 → 更新/卸载/排序/停用失效，面板顶部告警
 
         DebugProbe = Config.Bind("Debug", "Probe", false,
             "反射桥 API 诊断探针（默认关，仅供开发验证）。true 时启动 30 秒后对 RobotSpeed『机器人提速/移速倍率』\n" +
@@ -123,8 +128,34 @@ public sealed class ModCenterPlugin : BasePlugin
         go.AddComponent<ModCenterTicker>();
 
         Log("loaded");
-        Trace($"loaded v{Version}（配置桥：Meta 九表+快照/写/消息协议/Save 防抖；面板 UI 待任务 7）");
+        Trace($"loaded v{Version}（配置桥：Meta 九表+快照/写/消息协议/Save 防抖；面板 UI 待任务 7）"
+              + (ShellMissing ? " | WARN 启动清理组件缺失 MCShell.dll" : ""));
         SurvivalLog.ModShared.WelcomeTip.Install(Logger);
+    }
+
+    /// <summary>
+    /// T16（I-2）：检查 `BepInEx\patchers\MCShell.dll` 是否在场。缺失时启动清理链完全不执行
+    /// （旧 MCCleaner 时代用游戏内更新升级的玩家会保留旧清理器、永远拿不到新壳）：
+    /// 写证据 `ModCenter_shell_missing.txt` + LogOutput warn；快照 `shellWarn` 驱动面板顶部
+    /// 告警。壳在场时清掉该证据（自愈）。
+    /// </summary>
+    private static void CheckShellPresence()
+    {
+        try
+        {
+            var shell = System.IO.Path.Combine(Paths.BepInExRootPath, "patchers", "MCShell.dll");
+            ShellMissing = !System.IO.File.Exists(shell);
+            var ev = System.IO.Path.Combine(Paths.BepInExRootPath, "ModCenter_shell_missing.txt");
+            if (ShellMissing)
+            {
+                Log("warn 启动清理组件缺失（" + shell + "）：更新/安装/卸载/停用/排序不会生效；请用安装器或完整包补装 MCShell.dll");
+                System.IO.File.WriteAllText(ev,
+                    "[" + DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss") + "] 缺少 " + shell + "\n" +
+                    "启动清理组件缺失：更新/安装/卸载/停用/排序不会生效。请用安装器/完整包补装 BepInEx\\patchers\\MCShell.dll。\n");
+            }
+            else if (System.IO.File.Exists(ev)) System.IO.File.Delete(ev);
+        }
+        catch (Exception e) { Log("warn 启动清理组件检查异常: " + e.Message); }
     }
 
     /// <summary>静态日志门：全部面板/桥接代码的统一输出口。</summary>
@@ -161,7 +192,7 @@ internal sealed class ModCenterTicker : MonoBehaviour
     private float _kbAcc; // 任务 8：键盘门巡检节拍（0.3s，unscaled——暂停菜单打开也要照走）
     private bool _residueSoftDone; // 任务 16：残留软停重放只跑一次（首帧=Chainloader 全插件就绪后）
 
-    // 任务 4：退出钩子只剩落盘——停用 dll 改名已迁启动清理器（MCCleaner；v1 退出分离进程机械退役）。
+    // 任务 4：退出钩子只剩落盘——停用 dll 改名已迁启动清理（引导壳 MCShell 唤起 CleanupRunner；v1 退出分离进程机械退役）。
     // 落盘仍关键：[DisabledTp] 意图必须上盘，下次启动清理器才能读到（MC_CLOSE 已即时 Flush，
     // 此处兜底防抖残留）。强杀（taskkill/断电）漏过本钩也一样成立——只要意图已落盘
     // （面板关闭即 Flush），下次启动清理器先于加载执行改名。

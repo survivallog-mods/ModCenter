@@ -359,7 +359,13 @@ public static class CleanupRunner
                 if (IsSelfDllPath(t))
                 {
                     // T16 两阶段墓碑：本靴不删已被壳加载的本体；写 flag，下一靴壳在加载前删除。
-                    WriteUninstalledFlag();
+                    if (!WriteUninstalledFlag())
+                    {
+                        OpsEv("[SELFUNINST] boot-N 接管失败: " + op.Target
+                              + " 墓碑写入失败（保留 op 下次重试）");
+                        reason = "墓碑写入失败（保留 op 下次重试）";
+                        return false;
+                    }
                     OpsEv("[SELFUNINST] boot-N 接管: " + op.Target
                           + " 不本靴删除（壳已加载锁定）→ 墓碑 " + UninstalledFlagPath
                           + "；下一靴壳删本体+cfg+目录后不加载");
@@ -406,7 +412,13 @@ public static class CleanupRunner
                     catch (Exception ex) { reason = "md5 计算失败: " + ex.Message; return false; }
                     if (!string.Equals(actual2, op.Md5, StringComparison.OrdinalIgnoreCase))
                     { reason = "md5 不匹配: 期望 " + op.Md5 + " 实得 " + actual2; return false; }
-                    WriteSelfUpdateFlag(s2, actual2, t);
+                    if (!WriteSelfUpdateFlag(s2, actual2, t))
+                    {
+                        OpsEv("[SELFUPDATE] boot-N 接管失败: " + op.Target
+                              + " 预置写入失败（保留 op 下次重试）");
+                        reason = "自更新预置写入失败（保留 op 下次重试）";
+                        return false;
+                    }
                     OpsEv("[SELFUPDATE] boot-N 接管: " + op.Target
                           + " 不本靴落盘（壳已加载锁定）→ 预置 " + SelfUpdateFlagPath
                           + "；下一靴壳在 LoadFrom 前替换后加载新程序集");
@@ -477,40 +489,51 @@ public static class CleanupRunner
 
     // ==================== T16：自卸载墓碑 / 自更新预置（壳的接口） ====================
 
-    /// <summary>写自卸载墓碑（幂等：已在场不重写）。内容=时间戳 + 自身 cfg 绝对路径。</summary>
-    private static void WriteUninstalledFlag()
+    /// <summary>写自卸载墓碑（幂等：已在场=成功）。内容=时间戳 + 自身 cfg 绝对路径。
+    /// 返回 false = 写入失败（调用方必须保留 op 下次重试，不得静默吞掉用户卸载意图）。</summary>
+    private static bool WriteUninstalledFlag()
     {
         try
         {
             var dir = Path.Combine(Paths.BepInExRootPath, "ModCenter");
             Directory.CreateDirectory(dir);
-            if (File.Exists(UninstalledFlagPath)) return;
+            if (File.Exists(UninstalledFlagPath)) return true;
             File.WriteAllText(UninstalledFlagPath,
                 DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss") + "\n" + McCfgPath() + "\n", Utf8NoBom);
+            return true;
         }
-        catch (Exception ex) { OpsEv("[SELFUNINST] 墓碑写入 FAIL: " + ex.Message); }
+        catch (Exception ex)
+        {
+            OpsEv("[SELFUNINST] 墓碑写入 FAIL: " + ex.Message);
+            return false;
+        }
     }
 
     /// <summary>
     /// 写自更新预置（面板写；壳在下一靴 LoadFrom 前读取并替换本体）。原子写：tmp → move。
     /// 内容三行：staged 绝对路径 / staged md5 / target 绝对路径。多行写入必须一次落盘
     /// （壳对格式不合法只留证据并继续加载旧 dll，不会损坏本体）。
+    /// 返回 false = 写入失败（调用方不得把接管 op 从清单移除；面板侧调用可忽略返回值，
+    /// pending op 仍在，下次启动 CleanupRunner 会重试补写）。
     /// </summary>
-    public static void WriteSelfUpdateFlag(string stagedAbsPath, string md5, string targetAbsPath)
+    public static bool WriteSelfUpdateFlag(string stagedAbsPath, string md5, string targetAbsPath)
     {
+        var tmp = SelfUpdateFlagPath + ".tmp";
         try
         {
             var dir = Path.Combine(Paths.BepInExRootPath, "ModCenter");
             Directory.CreateDirectory(dir);
-            var tmp = SelfUpdateFlagPath + ".tmp";
             File.WriteAllText(tmp,
                 stagedAbsPath + "\n" + md5 + "\n" + targetAbsPath + "\n", Utf8NoBom);
             if (File.Exists(SelfUpdateFlagPath)) File.Delete(SelfUpdateFlagPath);
             File.Move(tmp, SelfUpdateFlagPath);
+            return true;
         }
         catch (Exception ex)
         {
+            try { if (File.Exists(tmp)) File.Delete(tmp); } catch { }
             try { OpsEv("[SELFUPDATE] 预置写入 FAIL: " + ex.Message); } catch { }
+            return false;
         }
     }
 

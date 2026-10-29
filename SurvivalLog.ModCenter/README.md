@@ -33,7 +33,7 @@
 
 **前置**：Steam 正版《生存日志》（AppID 4164790）+ BepInEx 6（IL2CPP）注入链。
 - **Full 完整包（推荐新玩家）**：解压到游戏根目录（Steam 库 `steamapps\common\Survival Log`），自带 BepInEx 6（IL2CPP）基座，装完即用；
-- **PluginOnly 纯插件包 / 单个 zip**：已装 BepInEx 6 的玩家，把 `SurvivalLog.ModCenter.dll` 放进 `<游戏目录>\BepInEx\plugins\`，并把 `MCShell.dll` 放进 `<游戏目录>\BepInEx\patchers\`（两个都要放；引导壳在下次启动时唤起本体内的清理逻辑，执行更新/卸载/排序）。旧版的 `MCCleaner.dll` 请删除，别与新逻辑并存。
+- **PluginOnly 纯插件包 / 单个 zip**：已装 BepInEx 6 的玩家，把 `SurvivalLog.ModCenter.dll` 放进 `<游戏目录>\BepInEx\plugins\`，并把 `MCShell.dll` 放进 `<游戏目录>\BepInEx\patchers\`（**两个都要放**；引导壳在下次启动时唤起本体内的清理逻辑，执行更新/卸载/排序）。从旧版升级请**用安装器/完整包**或手动放置 `MCShell.dll` 并删除旧 `MCCleaner.dll`——只删旧件不放新壳会让清理链失效（面板会显示"启动清理组件缺失"）。
 
 **卸载** = 删掉 `BepInEx\plugins\SurvivalLog.ModCenter.dll` 与 `BepInEx\patchers\MCShell.dll`，再删 `BepInEx\ModCenter\`（待办清单/暂存目录，存在才删；Full 包玩家要彻底清基座：再删 `BepInEx\` 目录、`winhttp.dll`、`dotnet\` 目录；存档不受影响），入口按钮消失；各 mod 配置保持面板所改值，被禁用的第三方 dll 需手动去掉 `.disabled` 后缀恢复。面板内"卸载本面板"走两阶段：确认后第一次重启只写卸载标记（本面板仍在本靴运行），第二次重启由引导壳删除本体、配置与 `BepInEx\ModCenter\` 记录后不再加载——DLL 被加载时无法自删，这是物理限制。游戏更新后失效属正常，等套件适配新版即可；本 mod 不改任何游戏文件。
 

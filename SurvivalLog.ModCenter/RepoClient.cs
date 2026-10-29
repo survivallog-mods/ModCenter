@@ -78,11 +78,20 @@ public static class RepoClient
         public string AssetUrl; // zip 的 browser_download_url（github.com 原始 URL）
     }
 
+    /// <summary>fetch 结果（T16/D）：Info=null 时 Status 区分失败原因——403=GitHub 限流，
+    /// 面板据此给专门提示（不显示成普通"检查失败"）；200=HTTP 成功但契约/资产不完整；0=网络/解析失败。</summary>
+    public sealed class FetchResult
+    {
+        public UpdateInfo Info;
+        public int Status;
+        public string Error;
+    }
+
     /// <summary>
-    /// 拉取某仓最新 Release 的更新信息：latest → update.json 资产 → 五字段 + zip 资产 URL。
-    /// 任何失败（网络/非 2xx/JSON 坏/资产缺失/字段缺失）返回 null，不抛出、不重试（调用方降级）。
+    /// 拉取某仓最新 Release 的更新信息（T16/D 带状态版）：成功返回 Info；HTTP 403 时
+    /// Status=403（GitHub 匿名限额）；其他失败 Status=0 或 200（契约不完整）。不抛出、不重试。
     /// </summary>
-    public static async Task<UpdateInfo> FetchLatest(string repoName)
+    public static async Task<FetchResult> FetchLatestEx(string repoName)
     {
         try
         {
@@ -92,7 +101,7 @@ public static class RepoClient
             var root = doc.RootElement;
             if (root.ValueKind != JsonValueKind.Object ||
                 !root.TryGetProperty("assets", out var assets) || assets.ValueKind != JsonValueKind.Array)
-                return null;
+                return new FetchResult { Status = 200 };
 
             // assets 里找 update.json（browser_download_url）与 zip（名 = update.json.asset 字段值）
             string updUrl = null;
@@ -105,13 +114,13 @@ public static class RepoClient
                 byName[name] = url;
                 if (name == UpdateJsonName) updUrl = url;
             }
-            if (updUrl == null) return null; // 资产缺失：无 update.json（仓未发版/发版缺资产）
+            if (updUrl == null) return new FetchResult { Status = 200 }; // 资产缺失：无 update.json（仓未发版/发版缺资产）
 
             // 第二跳：下载并解析 update.json（同样受 CheckTimeout 约束——几 KB 契约文件）
             var updJson = await GetString(MapUrl(updUrl), CheckTimeoutMs, api: false);
             using var udoc = JsonDocument.Parse(updJson);
             var u = udoc.RootElement;
-            if (u.ValueKind != JsonValueKind.Object) return null;
+            if (u.ValueKind != JsonValueKind.Object) return new FetchResult { Status = 200 };
             var info = new UpdateInfo
             {
                 Mod = GetStr(u, "mod"),
@@ -123,11 +132,18 @@ public static class RepoClient
             if (string.IsNullOrEmpty(info.Mod) || string.IsNullOrEmpty(info.Version) ||
                 string.IsNullOrEmpty(info.Asset) || string.IsNullOrEmpty(info.Md5) ||
                 string.IsNullOrEmpty(info.Gamekb))
-                return null; // 五字段任一缺失 = 契约不完整，按失败降级
+                return new FetchResult { Status = 200 }; // 五字段任一缺失 = 契约不完整，按失败降级
             if (!byName.TryGetValue(info.Asset, out var zipUrl) || string.IsNullOrEmpty(zipUrl))
-                return null; // zip 资产不在场
+                return new FetchResult { Status = 200 }; // zip 资产不在场
             info.AssetUrl = zipUrl;
-            return info;
+            return new FetchResult { Info = info, Status = 200 };
+        }
+        catch (HttpRequestException e)
+        {
+            // T16/D：403 = GitHub 匿名限额（60 次/h）；其余 HTTP 状态也留痕。类内零重试。
+            var status = e.StatusCode.HasValue ? (int)e.StatusCode.Value : 0;
+            ModCenterPlugin.Log($"warn fetch {repoName} 失败: HTTP {status} {e.Message}");
+            return new FetchResult { Status = status, Error = e.Message };
         }
         catch (Exception e)
         {
@@ -135,9 +151,17 @@ public static class RepoClient
             // 评审 I-1：留痕失败原因（超时/403 限流/404/JSON 坏等）——玩家"更新不可用"排障
             // 与 README 换镜像前缀指引依赖此行；走既有 Log 静态门（NetProbe.P 同款用法）。
             ModCenterPlugin.Log($"warn fetch {repoName} 失败: {e.GetType().Name} {e.Message}");
-            return null;
+            return new FetchResult { Status = 0, Error = e.Message };
         }
     }
+
+    /// <summary>
+    /// 拉取某仓最新 Release 的更新信息：latest → update.json 资产 → 五字段 + zip 资产 URL。
+    /// 任何失败（网络/非 2xx/JSON 坏/资产缺失/字段缺失）返回 null，不抛出、不重试（调用方降级）。
+    /// 兼容包装（原冻结签名）：需要 HTTP 状态（403 限流提示）时用 <see cref="FetchLatestEx"/>。
+    /// </summary>
+    public static async Task<UpdateInfo> FetchLatest(string repoName)
+        => (await FetchLatestEx(repoName)).Info;
 
     /// <summary>
     /// 下载 zip 资产到 StagingDir（BepInEx\ModCenter\staging\，T2 契约目录）：先落

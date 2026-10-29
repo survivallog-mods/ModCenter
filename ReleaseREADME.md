@@ -20,7 +20,9 @@
 - `BepInEx\plugins\SurvivalLog.ModCenter.dll`（面板本体；更新/卸载/排序/停用的执行逻辑也在其中）
 - `BepInEx\patchers\MCShell.dll`（引导壳：每次启动把本体的清理逻辑叫起来，本身不含业务逻辑）
 
-重启游戏——主菜单左下和游戏内 ESC 菜单会出现「MOD 管理」入口。引导壳是**永久冻结**的基座级组件（版本固定 1.0.0 只是属性占位）：只有它的接口签名变更才需要随安装器更新；清理逻辑随 ModCenter.dll 本体发版，游戏内更新本体即更新清理逻辑。若从旧版升级，请删除旧的 `BepInEx\patchers\MCCleaner.dll`（安装器会自动清理）。
+重启游戏——主菜单左下和游戏内 ESC 菜单会出现「MOD 管理」入口。引导壳是**永久冻结**的基座级组件（版本固定 1.0.0 只是属性占位）：只有它的接口签名变更才需要随安装器更新；清理逻辑随 ModCenter.dll 本体发版，游戏内更新本体即更新清理逻辑。
+
+**从旧版升级（重要）**：本版起 `patchers` 组件**换名 `MCShell.dll`**。请用安装器/完整包升级，或手动把 `MCShell.dll` 放进 `BepInEx\patchers\`（并删除旧的 `MCCleaner.dll`）。**只删旧 `MCCleaner.dll` 而不放 `MCShell.dll` 会让启动清理链失效**——更新/安装/卸载/停用/排序都不会执行，面板会显示"启动清理组件缺失"告警。
 
 ## 配置
 首次启动游戏时按默认值自动生成 `BepInEx\config\com.local.survivallog.modcenter.cfg`（全中文注释）。

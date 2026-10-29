@@ -16,9 +16,9 @@ namespace SurvivalLog.ModCenter;
 ///   value=true 表示停用意图；懒 Bind 幂等，BepInEx Save 只写现役 Bind 项。
 /// - **执行点=启动清理器（T4）**：v1 的"退出时分离进程改名"机械整体退役（OnQuit/
 ///   SpawnDisableBatch/SpawnReverse/强杀残留补拉/残留 toast 全删；通用分离进程启动器迁
-///   <see cref="RestartHelper"/> 供 T10/T13 复用）。MCCleaner 在 patcher 阶段（先于插件加载，
-///   dll 无锁）读 cfg marker 翻译为 disable/enable op 当场改名（CleanerPatcher.TranslateMarkers，
-///   清理器侧独立行级解析）。强杀残留概念随之消失：意图在 cfg，每次启动先于加载执行。
+///   <see cref="RestartHelper"/> 供 T10/T13 复用）。引导壳 MCShell 在 patcher 阶段（先于插件加载，
+///   dll 无锁）LoadFrom 本体并反射调用 CleanupRunner：读 cfg marker 翻译为 disable/enable op
+///   当场改名（CleanupRunner.TranslateMarkers，清理器侧独立行级解析）。强杀残留概念随之消失：意图在 cfg，每次启动先于加载执行。
 /// - **本类职责（纯意图写入 + 面板真值源）**：Disable/Enable 写 marker；MarkerOf 供快照取反显示；
 ///   Enable 的即时反向改名保留（dll 未加载不锁，直接 File.Move），失败不再分离进程兜底——
 ///   下次启动清理器按 marker 重译自愈。
@@ -70,7 +70,7 @@ internal static class DllDisabler
         catch { return false; }
     }
 
-    /// <summary>停用：写 marker=true（DisabledTp）——下次启动由 MCCleaner 翻译执行改名（T4）。
+    /// <summary>停用：写 marker=true（DisabledTp）——下次启动由启动清理（CleanupRunner）翻译执行改名（T4）。
     /// 终审必修 4：写后立即落盘（FlushDirty）——3s 防抖窗口内强杀会丢停用意图。</summary>
     internal static void Disable(string dllRel)
     {
@@ -83,7 +83,7 @@ internal static class DllDisabler
 
     /// <summary>
     /// 启用：若 dll 已被改名则即时反向改名（未加载不锁，直接 Move；失败不兜底——下次启动
-    /// 由 MCCleaner 按 marker=false 重译自愈，T4）→ marker=false（写后立即落盘，必修 4）。
+    /// 由启动清理（CleanupRunner）按 marker=false 重译自愈，T4）→ marker=false（写后立即落盘，必修 4）。
     /// </summary>
     internal static void Enable(string dllRel)
     {
@@ -98,7 +98,7 @@ internal static class DllDisabler
         }
         catch (Exception e)
         {
-            Log($"warn enable 直接改名失败（下次启动由 MCCleaner 按 marker 重译自愈）: {e.Message}");
+            Log($"warn enable 直接改名失败（下次启动由 CleanupRunner 按 marker 重译自愈）: {e.Message}");
         }
         try
         {

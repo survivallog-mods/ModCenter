@@ -245,6 +245,8 @@
     + '#__mc_overlay .__mc-repo-entry:hover{background:rgba(96,165,250,.12);}'
     + '#__mc_overlay .__mc-repo-entry .__mc-re-tt{font-size:12.5px;color:#60a5fa;}'
     + '#__mc_overlay .__mc-repo-entry .__mc-re-dd{font-size:11px;color:#6b7180;margin-top:3px;display:flex;align-items:center;gap:5px;}'
+    /* ---- T16：启动清理组件缺失告警（壳 MCShell.dll 不在 patchers；更新/卸载/排序/停用失效） ---- */
+    + '#__mc_overlay .__mc-shellwarn{margin:4px 6px 8px;padding:9px 12px;border-radius:9px;border:1px solid rgba(248,113,113,.45);background:rgba(248,113,113,.1);color:#f87171;font-size:11.5px;line-height:1.55;}'
     /* ---- v2 任务 12：L2 补丁碰撞汇总行（仓库入口卡下方；点击弹汇总窗） ---- */
     + '#__mc_overlay .__mc-patch-entry{margin:0 6px 8px;padding:8px 12px;border-radius:10px;border:1px solid rgba(251,191,36,.28);background:rgba(251,191,36,.05);cursor:pointer;display:flex;align-items:center;gap:8px;}'
     + '#__mc_overlay .__mc-patch-entry:hover{background:rgba(251,191,36,.1);}'
@@ -471,11 +473,20 @@
     return c;
   }
 
+  /* T16（I-2）：启动清理组件缺失横幅——快照 shellWarn 驱动；侧栏/详情页/仓库视图顶部共用。 */
+  function shellWarnHtml() {
+    var w = ST.snap && ST.snap.shellWarn;
+    if (!w) return '';
+    return '<div class="__mc-shellwarn" data-interactive="1">\u26a0 ' + esc(w) + '</div>';
+  }
+
   function repoEntryHtml() {
     var d = ST.repoData, c = repoCounts(), dd;
     if (!d) dd = '\u6253\u5f00\u540e\u81ea\u52a8\u68c0\u67e5\u66f4\u65b0\uff08GitHub \u00b7 12 \u4ed3\uff09';
     else if (d.checking) dd = '\u6b63\u5728\u68c0\u67e5\u66f4\u65b0\u2026';
-    /* 必修 8：全失败/fetch 异常 → "检查失败（点击重试）"（行级"检查失败"仍保留） */
+    /* 必修 8：全失败/fetch 异常 → "检查失败（点击重试）"（行级"检查失败"仍保留）；
+     * T16/D：403 限流走专门文案，不显示成普通检查失败。 */
+    else if (d.rateLimited) dd = 'GitHub \u9650\u6d41\uff0c\u8bf7\u7a0d\u540e\u518d\u8bd5';
     else if (d.failAll) dd = '\u68c0\u67e5\u5931\u8d25\uff08\u70b9\u51fb\u91cd\u8bd5\uff09';
     else dd = c.upd + ' \u4e2a\u53ef\u66f4\u65b0 \u00b7 ' + c.inst + ' \u4e2a\u53ef\u5b89\u88c5 \u00b7 ' + c.warn + ' \u4e2a\u7248\u672c\u544a\u8b66';
     return '<div class="__mc-repo-entry" data-interactive data-act="repo-open" role="button" tabindex="0">'
@@ -488,7 +499,7 @@
   function openRepoView() {
     ST.repo = true;
     renderCfg();
-    // 每次打开都拉（force=false）：C# 侧 10 分钟会话缓存/fetch 在跑只推现状（裁定 2）。
+    // 每次打开都拉（force=false）：C# 侧 15 分钟会话缓存/fetch 在跑只推现状（裁定 2/D6）。
     // 必修 8：上一轮全失败时入口卡承诺"点击重试"——改用 force=true 真重拉（C# 60 秒冷却兜底）。
     var force = !!(ST.repoData && ST.repoData.failAll);
     window.__mcOutbox.push({ type: 'MC_REPO_GET', force: force });
@@ -524,7 +535,8 @@
     if (!S.side) return;
     if (ST.ord) { renderSideOrder(); return; } // v2 任务 9：排序模式=侧栏完整变体分支
     var ms = mods(), ts = tps();
-    var h = repoEntryHtml(); // v2 任务 8：仓库入口卡（置顶，计数随 MC_REPO_DATA 刷新）
+    var h = shellWarnHtml(); // T16 I-2：缺壳告警置顶
+    h += repoEntryHtml(); // v2 任务 8：仓库入口卡（置顶，计数随 MC_REPO_DATA 刷新）
     h += patchEntryHtml();   // v2 任务 12：L2 补丁碰撞汇总行（计数随 MC_SCAN_DATA 刷新）
     h += '<div class="__mc-cat">\u5957\u4ef6 MOD\uff08' + ms.length + '\uff09</div>';
     for (var i = 0; i < ms.length; i++) {
@@ -625,7 +637,7 @@
           + ' \u9879\uff1a' + esc(parts.join('\u3001')) + '</div>';
       }
     }
-    var h = '<div class="__mc-ordbar">'
+    var h = shellWarnHtml() + '<div class="__mc-ordbar">'
       + '<b style="color:#e8a33d;font-weight:500">\u6392\u5e8f\u6a21\u5f0f</b> \u2014 \u62d6\u62fd\u884c\u8c03\u6574\u987a\u5e8f\uff1b\u9009\u4e2d\u884c\u540e\u4e5f\u53ef\u7528 \u2191 \u2193 \u952e\u79fb\u52a8\uff08\u65e0\u969c\u788d\u66ff\u4ee3\uff09\u3002\u786c\u4f9d\u8d56\u94fe\u6761\u76ee\u81ea\u52a8\u4fdd\u6301\u4f9d\u8d56\u5e8f\u3002'
       + protHtml
       + '<div class="__mc-ord-acts">'
@@ -1077,7 +1089,7 @@
   function repoViewHtml() {
     var d = ST.repoData, ups = 0, i, r;
     if (d && d.rows) for (i = 0; i < d.rows.length; i++) { r = d.rows[i]; if (!r.pending && r.status === 'update') ups++; }
-    var h = '<div class="__mc-mod-title"><h2>\u5957\u4ef6\u4ed3\u5e93</h2>'
+    var h = shellWarnHtml() + '<div class="__mc-mod-title"><h2>\u5957\u4ef6\u4ed3\u5e93</h2>'
       + '<span class="__mc-en">survivallog-mods</span></div>'
       + '<div class="__mc-mod-desc">\u6765\u81ea GitHub \u7ec4\u7ec7 survivallog-mods\uff0812 \u4e2a\u72ec\u7acb\u4ed3\u5e93\uff09\uff0c\u4e0b\u8f7d\u7ecf MD5 \u6821\u9a8c\uff0c\u5b89\u88c5 / \u66f4\u65b0\u5728\u4e0b\u6b21\u542f\u52a8\u65f6\u7531\u542f\u52a8\u6e05\u7406\u5668\u843d\u4f4d\u3002\u70b9\u51fb\u5de6\u4fa7\u4efb\u610f mod \u8fd4\u56de\u7ba1\u7406\u89c6\u56fe\u3002</div>'
       + '<div class="__mc-repo-top">'
@@ -1099,7 +1111,10 @@
     var cols;
     if (r.status === 'install') cols = '<i>\u672a\u5b89\u88c5</i> \u2192 <b>' + esc(r.remote) + '</b>';
     else if (r.remote == null) cols = esc(r.local || '\u672a\u5b89\u88c5') + ' \u2192 <i class="__mc-failtx">'
-      + (d && d.checking ? '\u68c0\u67e5\u4e2d\u2026' : '\u68c0\u67e5\u5931\u8d25') + '</i>';
+      + (d && d.checking ? '\u68c0\u67e5\u4e2d\u2026'
+        : (r.httpStatus === 403 || (d && d.rateLimited))
+          ? 'GitHub \u9650\u6d41\uff0c\u8bf7\u7a0d\u540e\u518d\u8bd5'
+          : '\u68c0\u67e5\u5931\u8d25') + '</i>';
     else if (r.status === 'downgrade') cols = esc(r.local) + ' \u2192 <i style="color:#fbbf24">' + esc(r.remote) + '\uff08\u4f4e\u4e8e\u672c\u5730\uff09</i>';
     else cols = esc(r.local) + (r.remote !== r.local ? ' \u2192 <b>' + esc(r.remote) + '</b>' : '');
     h += '<span class="__mc-cols">' + cols + '</span><span class="__mc-sp"></span>';
@@ -1130,7 +1145,7 @@
       return;
     }
     if (ST.sel === '__self' || !mods().length) {
-      S.cfg.innerHTML = '<div class="__mc-mod-title"><h2>' + esc(SELF_NAME) + '</h2>'
+      S.cfg.innerHTML = shellWarnHtml() + '<div class="__mc-mod-title"><h2>' + esc(SELF_NAME) + '</h2>'
         + '<span class="__mc-en">' + esc(SELF_EN) + '</span></div>'
         + '<div class="__mc-mod-desc">\u7ba1\u7406\u9762\u677f\u81ea\u8eab\u63d2\u4ef6\u3002\u63d0\u4f9b\u672c\u754c\u9762\u3001\u914d\u7f6e\u6865\uff08\u8bfb\u5199\u5404 mod cfg\uff09\u4e0e\u5143\u6570\u636e\u8868\u3002<br>'
         + '\u9632\u5446\u8bbe\u8ba1\uff1a\u9762\u677f\u5185\u4e0d\u53ef\u505c\u7528\u81ea\u8eab\u2014\u2014\u505c\u7528\u540e\u4f60\u5c06\u6ca1\u6709\u5165\u53e3\u6062\u590d\uff0c\u9700\u624b\u7f16 cfg \u6587\u4ef6\uff1b\u5982\u9700\u5f7b\u5e95\u79fb\u9664\u53ef\u7528\u4e0b\u65b9\u201c\u5378\u8f7d\u2026\u201d\uff08\u786e\u8ba4\u5f39\u7a97\u6709\u7279\u522b\u8bf4\u660e\uff09\u3002</div>'
@@ -1152,7 +1167,7 @@
         /* 必修 7：cfg==null（dll 不在场）≠ 已停用——没有可写配置，不能写"修改仍会写入 cfg" */
         ? '\u26d4 \u672a\u5b89\u88c5\uff1a\u8be5 mod \u7684 dll \u4e0d\u5728 plugins \u4e2d\uff08\u53ef\u80fd\u5df2\u5378\u8f7d\u6216\u672a\u5b89\u88c5\uff09\u3002\u672c\u9875\u914d\u7f6e\u4e0d\u53ef\u7f16\u8f91\uff1b\u8bf7\u7528\u4e0b\u65b9\u5165\u53e3\u53bb\u5957\u4ef6\u4ed3\u5e93\u91cd\u65b0\u5b89\u88c5\u3002'
         : '\u26d4 \u8be5 mod \u5f53\u524d\u5df2\u505c\u7528\u3002\u6b64\u5904\u4fee\u6539\u4ecd\u4f1a\u5199\u5165 cfg \u4fdd\u5b58\uff0c\u4f46\u9700<b>\u91cd\u65b0\u542f\u7528\u540e</b>\u624d\u4f1a\u751f\u6548\uff08\u5de6\u5217\u5f00\u5173\uff09\u3002');
-    var h = '<div class="__mc-mod-title"><h2>' + esc(m.name) + '</h2><span class="__mc-en">' + esc(m.en) + '</span></div>'
+    var h = shellWarnHtml() + '<div class="__mc-mod-title"><h2>' + esc(m.name) + '</h2><span class="__mc-en">' + esc(m.en) + '</span></div>'
       + '<div class="__mc-mod-desc">' + esc(m.desc) + '</div>'
       + '<div class="__mc-stop-banner' + (m.enabled ? '' : ' __mc-show') + '">' + banner
       + (m.missing

@@ -19,6 +19,7 @@ public sealed class Snapshot
     public SelfInfo Self;
     public List<ModInfo> Mods = new();
     public List<ModInfo> Tp = new(); // 第三方 Tier 0/1（任务 14）
+    public string ShellWarn; // T16：启动清理组件（patchers\MCShell.dll）缺失告警；空不输出
 
     public string ToJson()
     {
@@ -35,7 +36,9 @@ public sealed class Snapshot
             if (i > 0) sb.Append(',');
             Tp[i].Write(sb);
         }
-        sb.Append("]}");
+        sb.Append(']');
+        if (!string.IsNullOrEmpty(ShellWarn)) sb.Append(",\"shellWarn\":").Append(JsonW.Str(ShellWarn));
+        sb.Append('}');
         return sb.ToString();
     }
 }
@@ -249,6 +252,7 @@ public sealed class RepoRowInfo
     public bool Kbw;       // D8 终审必修 6：Ok/Downgrade 行 gamekb 不符（行内 ⊘ + 行级原因）
     public string KbWhy;   // 上述告警原因全文；空不输出
     public bool Pending;   // 已有待生效 install/replace 意图
+    public int? HttpStatus; // T16/D：仅 403（GitHub 限流）输出，供行内专门文案
 
     internal void Write(StringBuilder sb)
     {
@@ -266,6 +270,7 @@ public sealed class RepoRowInfo
         if (Kbw) sb.Append(",\"kbw\":true");
         if (!string.IsNullOrEmpty(KbWhy)) sb.Append(",\"kbwhy\":").Append(JsonW.Str(KbWhy));
         if (Pending) sb.Append(",\"pending\":true");
+        if (HttpStatus == 403) sb.Append(",\"httpStatus\":403"); // T16/D：GitHub 限流专门提示
         sb.Append('}');
     }
 }
@@ -280,6 +285,7 @@ public sealed class RepoData
     public long LastCheck;  // 上次完成一轮检查的 Unix 毫秒；0 = 从未
     public bool Checking;   // 后台 fetch 在跑
     public bool FailAll;    // 终审必修 8：本轮检查全失败/fetch 异常（入口卡"检查失败（点击重试）"）
+    public bool RateLimited; // T16/D：上一轮含 HTTP 403（入口卡/行内"GitHub 限流，请稍后再试"）
     public string Mirror;   // "直连" / "镜像"（Network.MirrorPrefix 非空）
     public List<RepoRowInfo> Rows = new();
     public string DlKey;    // 当前下载链仓键；null = 空闲
@@ -292,6 +298,7 @@ public sealed class RepoData
         sb.Append("{\"type\":\"MC_REPO_DATA\",\"lastCheck\":").Append(LastCheck.ToString(CultureInfo.InvariantCulture))
           .Append(",\"checking\":").Append(Checking ? "true" : "false");
         if (FailAll) sb.Append(",\"failAll\":true");
+        if (RateLimited) sb.Append(",\"rateLimited\":true");
         sb.Append(",\"mirror\":").Append(JsonW.Str(Mirror))
           .Append(",\"dl\":");
         if (DlKey == null) sb.Append("null");

@@ -44,7 +44,7 @@ v2 在此之上补齐**生命周期闭环**（作者 2026-10-28 拍板，spec §
 | D3 | 排序机制 | A1：启动清理（CleanupRunner）Harmony 改序（Cecil 改写第三方 dll 依赖属性被否——改玩家文件，对方发新版即失效） |
 | D4 | 冲突体检 | 三层全上；行内警示标 + 点击详情 + 玩家自决 |
 | D5 | 安装范围 | 套件 12 组织仓；第三方仍=玩家手丢 dll 面板纳管；不做第三方商店（转载红线）；基座修复走网盘 |
-| D6 | 更新触发 | **面板打开时自动查一次**（10 分钟会话缓存；Ruling 22）+ 手动刷新 60 秒冷却；**无后台轮询** |
+| D6 | 更新触发 | **面板打开时自动查一次**（15 分钟会话缓存；Ruling 22 + T16/D 加固）+ 手动刷新 60 秒冷却；**无后台轮询** |
 | D7 | 本地 ≥ 远端 | **只告警不拦截**；确认窗红字"版本回退风险"，是否降级由玩家决定；保留"重装当前版本"入口 |
 | D8 | gamekb 不符 | **只告警不拦截**；行内 ⊘ 橙 + 确认窗红字，按钮保持可用；本地版本读不到 → "未校验游戏版本"照常放行 |
 | D9 | 面板形态 | 融合式（仓库入口卡 + 排序模式融入侧栏）；徽标全图标化；排序用拖拽 + 键盘 ↑↓ 替代（WCAG 2.2 AA），不用按钮堆 |
@@ -60,7 +60,8 @@ v2 在此之上补齐**生命周期闭环**（作者 2026-10-28 拍板，spec §
 
 四个约束拼出的形状：体检要活在运行态（插件侧）、UI/网络要活在游戏内（插件侧）、
 文件操作要活在插件加载前（补丁器侧）、纯退出路径已被 D2 否决。T16 把这些拼成
-**单 dll + 一个 40-60 行的冻结引导壳**（方案 A，Ruling 21）：
+**单 dll + 一个永久冻结的引导壳**（方案 A，Ruling 21）：壳实际约 320 行（含墓碑/自更新
+两分支、路径校验与证据写入；核心流程约 120 行），不承载任何业务清理逻辑。
 
 ```
 ┌─ ModCenter 插件本体（BepInEx\plugins\SurvivalLog.ModCenter.dll）──────────┐
@@ -182,7 +183,7 @@ v2 在此之上补齐**生命周期闭环**（作者 2026-10-28 拍板，spec §
 | `Payload.cs` | 全部 DTO（Snapshot/ModInfo/ModItem/ItemInfo/IcInfo/RepoRowInfo/RepoData/PatchScanData/UninstInfo/CfData…）+ 手写 JSON（AOT 零反射） |
 | `panel.js` | 面板 UI 全部（EmbeddedResource，`SurvivalLog.ModCenter.panel.js`）：侧栏/配置页/仓库页/排序模式/冲突与更新与卸载弹窗/待生效条/toast/outbox 契约 |
 | `RepoClient.cs` | GitHub release 客户端：两跳 fetch `update.json` 五字段、资产下载（`.part` → 原子落位）、镜像映射、MD5 工具 |
-| `RepoDecision.cs` | 12 仓五态决策（Install/Update/Downgrade/Ok + Warn 覆盖）+ `PendingWriter`（pending 主线程唯一写者三口：AddUpdate/AddDelete/SetOrder）+ 10 分钟缓存/60 秒冷却口径常量 |
+| `RepoDecision.cs` | 12 仓五态决策（Install/Update/Downgrade/Ok + Warn 覆盖）+ `PendingWriter`（pending 主线程唯一写者三口：AddUpdate/AddDelete/SetOrder）+ 15 分钟缓存/60 秒冷却口径常量 |
 | `GameVersion.cs` | 本地游戏版本通道：Steam appmanifest `buildid` 主通道 ↔ gamekb 快照名 `_N` 直接相等；`Version.txt` 复合版本后备展示；失败降级"未校验游戏版本" |
 | `PatchScan.cs` | L2 运行时补丁碰撞：`Harmony.GetAllPatchedMethods()` → owner 归组 → 游戏侧过滤 → GUID 精确/前缀归属 → 行内橙标/MC_CF 橙卡/MC_SCAN_DATA；`Debug.PatchScan` 探针 |
 | `RestartHelper.cs` | 通用分离进程启动器（`StartDetachedPS`，EncodedCommand）+ 一键重启（PID 精确等待 → 9s Steam 延迟补偿 → `steam://` 重拉）+ `QuitGame()` |
@@ -221,7 +222,10 @@ v2 在此之上补齐**生命周期闭环**（作者 2026-10-28 拍板，spec §
    整个目录回收（ModCenter 自卸载收尾；引导壳在 patchers，与本目录无关）。存在
    `uninstalled.flag` / `selfupdate.flag` 时属"其他内容"→ 保守 SKIP。
 7. **插件加载**：链式加载器按生效序加载各插件 → ModCenter `Load()`（自证、cfg、
-   探针、Quit 双钩子）→ 面板可用。
+   探针、Quit 双钩子）→ 面板可用。Load 时检查 `patchers\MCShell.dll` 是否在场；
+   缺失 → 证据 `ModCenter_shell_missing.txt` + LogOutput warn + 快照 `shellWarn` 面板
+   顶部告警（"启动清理组件缺失：更新/安装/卸载/停用/排序不会生效，请用安装器或完整包补装"）。
+   壳在场时该证据自动清除。
 
 补丁器阶段环境陷阱（实证，写新代码必读）：
 
@@ -255,12 +259,12 @@ v2 在此之上补齐**生命周期闭环**（作者 2026-10-28 拍板，spec §
 
 | type | 字段 | 行为 |
 |---|---|---|
-| `MC_OPEN` | `host` | 键盘门开（FocusTick）+ L2 立即扫描 + 推全量快照 + `MC_SCAN_DATA` + `MC_REPO_DATA`（10 分钟缓存；过期则起一轮后台 fetch——D6/Ruling 22）+ `MC_PENDING_SUMMARY` |
+| `MC_OPEN` | `host` | 键盘门开（FocusTick）+ L2 立即扫描 + 推全量快照 + `MC_SCAN_DATA` + `MC_REPO_DATA`（15 分钟缓存；过期则起一轮后台 fetch——D6/Ruling 22）+ `MC_PENDING_SUMMARY` |
 | `MC_CLOSE` | `why?` | 键盘门双还原 + 立即落盘全部脏 cfg；`why='host-doc-gone'` 为孤儿看门狗补发 |
 | `MC_SET` | `guid, section, key, value` | 写值（Meta 键或第三方真实键）→ 回 `MC_SET_OK{k,badge}` / `MC_SET_FAIL{k,err}`；未登记键拒绝 |
 | `MC_TOGGLE_MOD` | `guid, enabled` | 套件=直写该 mod `General.Enabled`（热还原）；第三方=marker/软停三层语义；回推新快照 |
 | `MC_EVIDENCE` | `tag` | 验证辅助（只读）：写多表断言快照到 `ModCenter_evidence.txt`；正常玩家不触发 |
-| `MC_REPO_GET` | `force` | 仓库视图打开：10 分钟会话缓存内推缓存；`force=false`；fetch 在跑只推现状 |
+| `MC_REPO_GET` | `force` | 仓库视图打开：15 分钟会话缓存内推缓存；`force=false`；fetch 在跑只推现状 |
 | `MC_CHK` | — | 手动"检查更新"：60 秒冷却（GitHub 匿名 60 次/h），冷却内 only toast |
 | `MC_UPD` | `repoKey` | 确认更新 → 串行下载链（下载→zip MD5→解包 dll→暂存→写 pending） |
 | `MC_INST` | `repoKey` | 安装（与更新同链；前端按 local==null 分流） |
@@ -508,9 +512,11 @@ PendingWriter 合并语义对临时文件 `selftest-pending.json` 自证（旧�
   点击进仓库视图：12 行五态（`ok/update/downgrade/warn/install`）+ "检查更新" + "全部更新（N）" +
   上次检查时间与网络状态（直连/镜像）。
 - **查询节流**：**面板打开即自动查一次**（D6/Ruling 22：`MC_OPEN` 分支调用
-  `HandleRepoGet(force=false)`，10 分钟会话缓存内只推缓存不重复 fetch），手动检查 60 秒
-  冷却（冷却内只 toast"刚检查过（GitHub 匿名限额 60 次/小时）"）；**绝不后台轮询**。
-  一轮 fetch = 12 次 API 请求。
+  `HandleRepoGet(force=false)`，15 分钟会话缓存内只推缓存不重复 fetch——12×4=48 < 60
+  匿名限额；T16/D 加固），手动检查 60 秒冷却（冷却内只 toast"刚检查过（GitHub 匿名限额
+  60 次/小时）"）；**绝不后台轮询**。一轮 fetch = 12 次 API 请求。
+  **403 专门提示（T16/D）**：fetch 命中 HTTP 403 时入口卡/行内显示"GitHub 限流，请稍后再试"
+  + 一次 toast，不显示成普通"检查失败"（`RepoRow.HttpStatus` / `RepoData.rateLimited`）。
 - **fetch**：主线程取本地态（`SnapshotLocal` + `GameVersion.ReadCached() ?? ReadLocal()`）→
   后台 `Task.Run` 12 仓顺序 `FetchLatest`（失败=null）→ `RepoDecision.Build` 纯函数 →
   主线程整体替换行数据（fetch 期间旧值保持，零跨线程行读写）→ 推 `MC_REPO_DATA` +
@@ -936,6 +942,9 @@ v1 的第三方重启级禁用流程 = 面板写 `[DisabledTp]` marker → 游�
    `[InstallDelete]` 必须保留旧 `MCCleaner.dll`（v1 升级清理）并预删旧 `MCShell.dll` 与
    `BepInEx\ModCenter\` 的 selfupdate/uninstalled flag。发版号由作者定（硬规则 1），
    CHANGELOG 必须有 `## v<版本>` 节，否则 `release.ps1` 发版模式拒绝。
+   **升级文案硬要求（T16 I-2）**：CHANGELOG/ReleaseREADME 必须写明"本版起 patchers 组件
+   换名 `MCShell.dll`，必须用安装器/完整包或手动放置；只删旧 `MCCleaner.dll` 会让启动清理链
+   失效（更新/卸载/排序/停用不再执行）"。
 6. **安装器与 pending 队列的交互（待作者裁定的开放点）**：安装器只替换 dll，不清理
    `BepInEx\ModCenter\pending.json`/`staging`。若玩家在旧版面板里排了待生效 op 后直接跑
    安装器升级，下次启动 CleanupRunner 仍会执行旧 op（例如把刚装的新版 replace 回旧暂存 dll）。
@@ -950,17 +959,20 @@ v1 的第三方重启级禁用流程 = 面板写 `[DisabledTp]` marker → 游�
 9. **证据文件清单**（BepInEx 根，硬规则 9）：`ModCenter_loaded.txt`、`ModCenter_kb.txt`、
    `MCShell_loaded.txt`（壳生命周期/墓碑/自更新）、`MCCleaner_loaded.txt` / `MCCleaner_ops.txt`
    （CleanupRunner 执行证据，文件名沿用 T1/T2 格式，loaded 行含程序集版本）、
-   `ModCenter_patchscan.txt`、`ModCenter_gamever.txt`、`ModCenter_reposelftest.txt`、
-   `ModCenter_netspeed.txt`、`ModCenter_probe.txt`（按需）；另有派生披露文件
+   `ModCenter_shell_missing.txt`（T16 I-2：缺壳告警，壳在场自动删）、`ModCenter_patchscan.txt`、
+   `ModCenter_gamever.txt`、`ModCenter_reposelftest.txt`、`ModCenter_netspeed.txt`、
+   `ModCenter_probe.txt`（按需）；另有派生披露文件
    `BepInEx\ModCenter\order_protected.txt`（加载序依赖保护，每靴由 CleanupRunner 覆盖，见 §5.4）
    与接口 flag `BepInEx\ModCenter\uninstalled.flag` / `selfupdate.flag`（两阶段自操作，见 §2.1）。
    自动化验证后清理游戏侧部署与临时文件，证据副本存 suite 仓 sdd 目录。
 10. **壳接口变更才需安装器（T16 取代终审必修 10）**：pending 契约（`McPending.Op`/`order`/
-    `order_protected` 等）与清理逻辑同住 ModCenter.dll，**随本体发版即可**，不再需要同步
+   `order_protected` 等）与清理逻辑同住 ModCenter.dll，**随本体发版即可**，不再需要同步
    分发独立清理器。但引导壳是永久冻结件：**改动以下接口任一 → 必须同步更新安装器里的
    MCShell.dll**：①`uninstalled.flag` 的存在性/内容格式与删除范围；②`selfupdate.flag`
    的三行格式与替换语义；③`SurvivalLog.ModCenter.CleanupRunner.Run()` 的签名/类型名/程序集名。
-   壳对未知/损坏 flag 一律留证据后按旧路径继续（绝不阻断启动）。
+   壳对未知/损坏 flag 一律留证据后按旧路径继续（绝不阻断启动）。**缺壳保护（I-2）**：插件
+   Load 检查 `patchers\MCShell.dll` 存在性；缺失 → `ModCenter_shell_missing.txt` 证据 +
+   LogOutput warn + 快照 `shellWarn` 面板顶部告警（不阻断本体加载，但明确告知生命周期链失效）。
 11. **框架侧过滤是启发式（终审必修 10）**：`PatchScan` 的框架/引擎方法过滤按程序集与命名
    空间启发式判定，不是硬编码全表；未来游戏大版本拆程序集或引入新命名空间时，真实游戏
    方法可能被误归"框架侧"（只披露、不计入碰撞组），须在游戏更新后复核过滤规则与

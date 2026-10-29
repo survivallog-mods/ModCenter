@@ -30,9 +30,11 @@
 
 - 打包布局变化：zip 现含 `BepInEx\plugins\SurvivalLog.ModCenter.dll` +
   `BepInEx\patchers\MCShell.dll` + `README.md`；手动安装需两个 dll 都放到对应目录。
-- 从旧版升级：请删除 `BepInEx\patchers\MCCleaner.dll`（安装器 `[InstallDelete]` 自动清理；
-  旧清理器与新逻辑并存会重复执行改名/排序）。游戏内更新只替换 ModCenter.dll（含清理逻辑），
-  引导壳 MCShell.dll 只有接口签名变更才随安装器更新。
+- 从旧版升级（重要）：本版起 `patchers` 组件**换名 `MCShell.dll`**，必须用安装器/完整包
+  或手动放置；**只删旧 `MCCleaner.dll` 而不放 `MCShell.dll` 会让启动清理链失效**（更新/
+  安装/卸载/停用/排序都不再执行，面板顶部会显示"启动清理组件缺失"告警）。安装器
+  `[InstallDelete]` 已自动清理旧件；旧清理器与新逻辑并存会重复执行改名/排序。
+  游戏内更新只替换 ModCenter.dll（含清理逻辑），引导壳 MCShell.dll 只有接口签名变更才随安装器更新。
 - 旧版 `[Disabled]` 名单退役（无读取方）；第三方停用状态沿用 `[DisabledTp]` marker，
   停用/启用为重启级。
 
