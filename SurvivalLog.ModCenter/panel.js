@@ -243,14 +243,14 @@
     + '#__mc_overlay .__mc-btn.__mc-btn-org{border-color:rgba(251,191,36,.5);color:#fbbf24;}'
     + '#__mc_overlay .__mc-btn.__mc-btn-org:hover{background:rgba(251,191,36,.1);}'
     + '#__mc_overlay .__mc-modal .__mc-files{font-family:Consolas,monospace;font-size:11.5px;color:#9aa0ad;line-height:1.9;}' /* T7 遗留：原型 .mc-modal .files（T10 卸载明细复用） */
-    + '#__mc_overlay .__mc-modal .__mc-files .__mc-del{color:#f87171;}'
+    + '#__mc_overlay .__mc-modal .__mc-files .__mc-file-del{color:#f87171;}' /* T10 fix I-1：文件行独立类名，避开 .__mc-del 的 26px 按钮盒样式 */
     + '#__mc_overlay .__mc-kv .__mc-kk{color:#9aa0ad;width:88px;flex-shrink:0;}' /* T10 维护动作行标签（原型 .mc-kv .k 同值） */
     + '#__mc_overlay .__mc-maint{margin-top:20px;}' /* T10 维护动作区（视觉同 .__mc-grp 段；类名隔离保夹具 .__mc-grp=config 组语义） */
     + '#__mc_overlay .__mc-maint>h3{font-size:12.5px;color:#e8a33d;letter-spacing:2px;padding-bottom:7px;border-bottom:1px solid #2a2f3d;margin-bottom:4px;font-weight:500;}'
     + '#__mc_overlay .__mc-btn.__mc-btn-danger{border-color:rgba(248,113,113,.4);color:#f87171;}' /* T10 卸载确认主钮（原型 .btn.danger） */
     + '#__mc_overlay .__mc-btn.__mc-btn-danger:hover{background:rgba(248,113,113,.1);}'
     + '#__mc_overlay .__mc-pending.__mc-weak{border-top-color:rgba(107,113,128,.4);}' /* T10：仅中性档（生效中）时的弱化样式 */
-    + '#__mc_overlay .__mc-kv{display:flex;align-items:center;gap:10px;font-size:13px;flex-wrap:wrap;}' /* 弹窗版本对比行（原型 .mc-kv/.v） */
+    + '#__mc_overlay .__mc-kv{display:flex;align-items:center;gap:10px;padding:7px 0;font-size:13px;flex-wrap:wrap;}' /* 弹窗版本对比行（原型 .mc-kv/.v；padding 同原型） */
     + '#__mc_overlay .__mc-kv .__mc-kvv{font-family:Consolas,monospace;font-size:12.5px;}'
     + '#__mc_overlay .__mc-dlbar{height:6px;border-radius:3px;background:#0f1219;border:1px solid #2a2f3d;overflow:hidden;margin-top:8px;}'
     + '#__mc_overlay .__mc-dlbar i{display:block;height:100%;background:#e8a33d;width:0;transition:width .2s;}'
@@ -866,8 +866,8 @@
       + '<div class="__mc-m-sec"><div class="__mc-m-h">\u5c06\u5220\u9664</div><div class="__mc-files">';
     var fs = d.files || [];
     for (var i = 0; i < fs.length; i++)
-      h += '<div class="__mc-del">BepInEx\\' + esc(String(fs[i]).replace(/\//g, '\\')) + '</div>';
-    h += '<div class="__mc-del">ModCenter \u505c\u7528 / \u6392\u5e8f\u8bb0\u5f55\uff08\u5982\u6709\uff09</div></div></div>';
+      h += '<div class="__mc-file-del">BepInEx\\' + esc(String(fs[i]).replace(/\//g, '\\')) + '</div>';
+    h += '<div class="__mc-file-del">ModCenter \u505c\u7528 / \u6392\u5e8f\u8bb0\u5f55\uff08\u5982\u6709\uff09</div></div></div>';
     if (d.note) h += '<div class="__mc-m-sec"><div class="__mc-m-txt" style="font-size:11.5px;color:#8a90a0">\u24d8 ' + esc(d.note) + '</div></div>';
     if (d.self) h += '<div class="__mc-risk">\u26a0 \u5378\u8f7d\u5bf9\u8c61\u662f\u672c\u9762\u677f\u81ea\u8eab\uff1a\u786e\u8ba4\u5e76\u91cd\u542f\u540e\uff0c\u7ba1\u7406\u9762\u677f\u4e0e\u5176\u914d\u7f6e\u4e00\u5e76\u6d88\u5931\uff08\u672c\u9762\u677f\u4e0d\u518d\u52a0\u8f7d\uff09\u3002\u542f\u52a8\u6e05\u7406\u5668\uff08MCCleaner\uff09\u4e3a\u57fa\u5ea7\u7ea7\u7ec4\u4ef6\u5c06\u4fdd\u7559\uff0c\u53ef\u7528\u5b89\u88c5\u5668\u5378\u8f7d\u6216\u624b\u52a8\u5220\u9664 BepInEx\\patchers\\MCCleaner.dll\u3002</div>';
     h += '<div class="__mc-m-sec"><div class="__mc-m-h">\u4e0d\u53d7\u5f71\u54cd</div>'

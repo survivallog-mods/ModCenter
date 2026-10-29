@@ -84,9 +84,9 @@ public class CleanerPatcher : BasePatcher
         Ev("Initialize reached, dll=" + typeof(CleanerPatcher).Assembly.Location);
 
         RunSelfTestIfFlagged(); // T2 Step1：McPending 序列化自证；T3：加载序重排自证（同标记触发）
-        RunPendingOps();        // T2 Step2：pending 执行器；T4：内置 marker 翻译段（先翻译后执行，Ruling 1）
+        var selfUninst = RunPendingOps(); // T2 Step2：pending 执行器；T4：内置 marker 翻译段（先翻译后执行，Ruling 1）；T10：返回本靴是否执行过 ModCenter 自卸载删除
         InstallOrderOverride(); // T3：挂 ModifyLoadOrder postfix（order 读取在 postfix 内，晚于全部 op 落地）
-        RunDirSweep();          // T10：末尾目录清理（ops 消化完且目录只剩 staging/pending.json → 整目录清掉）
+        RunDirSweep(selfUninst); // T10：末尾目录清理（Ruling 12：卸载收尾=目录 sweep，MCCleaner.dll 不动）
 
         // ---- 后续任务在此之后追加执行段（重启等）----
     }
@@ -228,10 +228,13 @@ public class CleanerPatcher : BasePatcher
     /// T4（Ruling 1）：执行前先做 marker 翻译——cfg [DisabledTp] 意图 → 派生 disable/enable op
     /// （同 target 持久 op 优先跳过翻译）；派生 op 与持久 op 走同一 ExecuteOp，但执行完即弃
     /// （成功不写清单、失败只留证据——源是 cfg marker，下次启动按现值重译重试）。
+    /// T10：返回本靴是否成功执行过 ModCenter 自卸载删除（dll 或自身 cfg 的 delete 且成功）——
+    /// RunDirSweep 用它区分"真自卸载"与"面板被手工停用/移入子目录"，防止误删用户 custom order。
     /// 任何异常不阻断游戏启动。
     /// </summary>
-    private static void RunPendingOps()
+    private static bool RunPendingOps()
     {
+        var selfUninst = false;
         try
         {
             List<McPending.Op> ops;
@@ -247,7 +250,7 @@ public class CleanerPatcher : BasePatcher
                 {
                     // 解析失败保留清单待修复；翻译一并放弃（无法对持久 op 可靠去重，避免双重执行）
                     OpsEv("pending 解析 FAIL 清单保留待修复: " + ex.Message);
-                    return;
+                    return false;
                 }
             }
             else
@@ -265,6 +268,7 @@ public class CleanerPatcher : BasePatcher
                 if (ExecuteOp(op, out var reason))
                 {
                     done++;
+                    if (IsSelfUninstallDelete(op)) selfUninst = true; // T10：自卸载签名（成功后置位）
                     OpsEv(Summarize(op) + " OK" + (reason.Length > 0 ? " " + reason : ""));
                 }
                 else
@@ -292,6 +296,19 @@ public class CleanerPatcher : BasePatcher
         {
             OpsEv("pending 执行器异常: " + ex.Message);
         }
+        return selfUninst;
+    }
+
+    /// <summary>T10：该 op 是否为 ModCenter 自卸载删除（dll 文件名或自身 cfg 文件名；路径归一后
+    /// 取基名，兼容子目录形态）。仅用于 RunDirSweep 的"order 有主"守卫。</summary>
+    private static bool IsSelfUninstallDelete(McPending.Op op)
+    {
+        if (op == null || !string.Equals(op.Type, McPending.TypeDelete, StringComparison.OrdinalIgnoreCase))
+            return false;
+        var n = (op.Target ?? "").Replace('/', '\\');
+        var baseName = n.Substring(n.LastIndexOf('\\') + 1);
+        return baseName.Equals("SurvivalLog.ModCenter.dll", StringComparison.OrdinalIgnoreCase)
+               || baseName.Equals("com.local.survivallog.modcenter.cfg", StringComparison.OrdinalIgnoreCase);
     }
 
     private static string Summarize(McPending.Op op) =>
@@ -546,15 +563,17 @@ public class CleanerPatcher : BasePatcher
     // ==================== T10：末尾目录清理（ModCenter 自卸载收尾 / staging 残留） ====================
 
     /// <summary>
-    /// ops 执行完后的收尾：<c>BepInEx\ModCenter</c> 目录在"清单已消化（无 pending.json 或 ops 空，
-    /// 且 order 空——或 ModCenter 自身 dll 已不在场=面板已卸载、顺序覆盖无人维护）且目录内只剩
-    /// staging/pending.json"时整目录清掉（staging 递归删）。这是 ModCenter 自卸载链的收尾段：
-    /// 面板确认后 pending 写 delete(ModCenter.dll)+delete(ModCenter.cfg)，下次启动本执行器删两件，
-    /// 随后此处把 staging 残留与空清单一并清空。<see cref="IsCleanerSlot"/> 守卫不变——清理器自身
-    /// MCCleaner.dll 永不动（Ruling 8 基座级，留给玩家手动或安装器）。目录内有任何其他文件
-    /// （selftest.flag 等）→ 保守放弃。任何异常不阻断启动。
+    /// ops 执行完后的收尾：<c>BepInEx\ModCenter</c> 目录在"清单已消化（无 pending.json 或 ops 空）
+    /// 且目录内只剩 staging/pending.json"时整目录清掉（staging 递归删）。Ruling 12：卸载收尾=本段
+    /// 目录 sweep，<c>MCCleaner.dll</c> 不动（Ruling 8 基座级）；"分离进程自删清理器运行槽"的旧口径作废。
+    /// **order 有主（非空）时的强守卫（T10 fix I-2）**：仅当本靴确实成功执行过 ModCenter 自卸载
+    /// delete（dll 或自身 cfg，见 <see cref="IsSelfUninstallDelete"/>）且面板全形态不在场
+    /// （<see cref="SelfDllPresent"/>：plugins 递归下的 dll / .disabled；<see cref="SelfCfgPresent"/>：
+    /// 自身 cfg）才允许连 pending.json/order 一起清；否则保留——手工把 dll 改名 .disabled、移入
+    /// 子目录、或只是清空了目录都不能静默删除用户 custom order（清理器每靴仍会应用它，与面板
+    /// 在场与否无关）。目录内有任何其他文件（selftest.flag 等）→ 保守放弃；任何异常不阻断启动。
     /// </summary>
-    private static void RunDirSweep()
+    private static void RunDirSweep(bool selfUninstThisBoot)
     {
         try
         {
@@ -582,13 +601,24 @@ public class CleanerPatcher : BasePatcher
                 order = new List<string>();
             }
 
-            if (ops.Count > 0) return; // 清单未消化完（失败保留条目待重试）
+            if (ops.Count > 0)
+            {
+                OpsEv("[DIRSWEEP] SKIP ops 未消化（" + ops.Count + " 条待重试）");
+                return; // 清单未消化完（失败保留条目待重试）
+            }
             if (order.Count > 0)
             {
-                // order 覆盖仍在维护期：面板在场时绝不动（插件侧后续还会回写，且 [ORDER] postfix
-                // 尚未消费）；面板 dll 已删（自卸载完成）→ order 成死数据，允许随目录一并清理
-                var selfDll = Path.Combine(Paths.BepInExRootPath, "plugins", "SurvivalLog.ModCenter.dll");
-                if (File.Exists(selfDll)) return;
+                // 判据（fix I-2）：order 有主 → 只有"本靴自卸载删除已执行"且"面板全形态不在场"
+                // 才允许连 pending.json 一起清；否则手工停用/子目录/误删 dll 都会静默丢掉 custom order。
+                var dllPresent = SelfDllPresent();
+                var cfgPresent = SelfCfgPresent();
+                if (!selfUninstThisBoot || dllPresent || cfgPresent)
+                {
+                    OpsEv("[DIRSWEEP] SKIP order 非空：保留 pending.json/order（selfUninst=" + selfUninstThisBoot
+                          + " · panelDll=" + dllPresent + " · panelCfg=" + cfgPresent
+                          + "；判据=无自卸载签名 或 面板任一形态在场）");
+                    return;
+                }
             }
 
             foreach (var e in Directory.GetFileSystemEntries(dir))
@@ -596,14 +626,18 @@ public class CleanerPatcher : BasePatcher
                 var name = Path.GetFileName(e);
                 if (Directory.Exists(e) && name.Equals("staging", StringComparison.OrdinalIgnoreCase)) continue;
                 if (!Directory.Exists(e) && name.Equals("pending.json", StringComparison.OrdinalIgnoreCase)) continue;
+                OpsEv("[DIRSWEEP] SKIP 目录内有非 staging/pending.json 内容: " + name + "（保守不动）");
                 return; // 目录内有其他内容（selftest 等）：保守放弃
             }
 
             try
             {
                 Directory.Delete(dir, true); // 白名单已核实：staging 递归 + pending.json + 目录一体
-                OpsEv("[DIRSWEEP] OK ModCenter 目录已清空（ops 已消化" +
-                      (order.Count > 0 ? " · 面板已卸载，order 一并清理" : "") + "）");
+                OpsEv("[DIRSWEEP] OK ModCenter 目录已清空（ops=0 · order=" + order.Count
+                      + (order.Count > 0
+                          ? " · selfUninst=true 且 panelDll=false/panelCfg=false → order 一并清理"
+                          : " · 无排序记录")
+                      + "）");
             }
             catch (Exception ex)
             {
@@ -614,6 +648,37 @@ public class CleanerPatcher : BasePatcher
         {
             OpsEv("[DIRSWEEP] FAIL " + ex.GetType().Name + ": " + ex.Message);
         }
+    }
+
+    /// <summary>
+    /// 面板 dll "仍在场"（fix I-2）：plugins <b>递归</b>下存在 <c>SurvivalLog.ModCenter.dll</c> 或其
+    /// <c>.disabled</c>（手工停用/子目录安装都算在场）。扫描异常按"在场"兜底（保守不删）。
+    /// </summary>
+    private static bool SelfDllPresent()
+    {
+        try
+        {
+            // T4 教训：patcher 阶段 Paths 未必全赋值（ConfigPath 实测为空）——PluginPath 空时从根推导。
+            var root = string.IsNullOrEmpty(Paths.PluginPath)
+                ? Path.Combine(Paths.BepInExRootPath, "plugins") : Paths.PluginPath;
+            if (!Directory.Exists(root)) return false;
+            foreach (var f in Directory.GetFiles(root, "SurvivalLog.ModCenter.dll*", SearchOption.AllDirectories))
+            {
+                var n = Path.GetFileName(f);
+                if (n.Equals("SurvivalLog.ModCenter.dll", StringComparison.OrdinalIgnoreCase)
+                    || n.Equals("SurvivalLog.ModCenter.dll.disabled", StringComparison.OrdinalIgnoreCase))
+                    return true;
+            }
+            return false;
+        }
+        catch { return true; }
+    }
+
+    /// <summary>面板 cfg 仍在场（fix I-2 第二形态；读盘异常按在场兜底）。</summary>
+    private static bool SelfCfgPresent()
+    {
+        try { return File.Exists(McCfgPath()); }
+        catch { return true; }
     }
 
     // ==================== T3：加载序覆盖（Harmony 改序 + 依赖保护） ====================
