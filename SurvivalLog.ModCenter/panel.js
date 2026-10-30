@@ -83,10 +83,10 @@
     cfg:    { t: '\u2699 \u5df2\u5199\u5165 cfg',  cls: '__mc-b-cfg' },       // ⚙ 已写入 cfg
   };
   var TOAST_SMALL = {
-    now:    '\u5df2\u5199\u5165 cfg \u00b7 \u26a1 \u7acb\u5373\u751f\u6548\uff08\u7ea65\u79d2\u5185\uff09',
-    reload: '\u5df2\u5199\u5165 cfg \u00b7 \u8868\u503c\u5373\u65f6\u6539 \u00b7 \ud83d\udcc1 \u8bfb\u6863\u540e\u5bf9\u65e2\u6709\u5bb9\u5668\u4f53\u73b0',
-    cfg:    '\u5df2\u5199\u5165\u8be5 mod cfg \u00b7 \u751f\u6548\u65f6\u673a\u53d6\u51b3\u4e8e\u8be5 mod \u662f\u5426\u76d1\u542c\u914d\u7f6e\u53d8\u66f4',
-    reboot: '\u5df2\u5199\u5165 \u00b7 \ud83d\udd04 \u91cd\u542f\u540e\u751f\u6548',
+    now:    '\u7acb\u5373\u751f\u6548',
+    reload: '\u8bfb\u6863\u540e\u751f\u6548',
+    cfg:    '\u5df2\u4fdd\u5b58\uff0c\u751f\u6548\u65f6\u673a\u770b\u8be5 mod',
+    reboot: '\u91cd\u542f\u540e\u751f\u6548',
   };
   var SELF_NAME = 'Mod \u7ba1\u7406\u4e2d\u5fc3'; // Mod 管理中心
   var SELF_EN = 'ModCenter\uff08\u672c\u9762\u677f\uff09';
@@ -101,7 +101,7 @@
    * （guids[]，进排序模式拉 MC_ORDER_DATA 填充；未保存的本地重排跨开关面板保留）；
    * ordRows=最近 MC_ORDER_DATA（含 rows 显示元数据与 def 默认序）；ordSaving=保存
    * 回执（MC_ORDER_OK/FAIL）在途防连点。ORD.src=DnD 源行 guid（拖拽会话期；T10 带出①）。 */
-  var S = { host: null, root: null, side: null, cfg: null, sub: null, toastEl: null, pendEl: null, pendTx: null, mbg: null, mdl: null, mdlRepoKey: null };
+  var S = { host: null, root: null, side: null, cfg: null, sub: null, toastEl: null, patchBtn: null, pendEl: null, pendTx: null, mbg: null, mdl: null, mdlRepoKey: null };
   var ST = { snap: null, sel: null, pend: null, repoData: null, dl: null, chkWaiting: false, ord: false, order: null, ordRows: null, ordSaving: false, uninstGuid: null, cfGuid: null, scan: null, patchOpen: false, scanWait: false };
   var ORD = { src: null }; // v2 任务 9：拖拽源 guid（null=无拖拽会话；T10 带出①：改存 guid 防拖拽中键盘重排错位）
   var TH = Object.create(null); // 滑条 100ms 节流句柄表
@@ -359,14 +359,20 @@
 
     var foot = doc.createElement('div'); foot.className = '__mc-foot';
     foot.innerHTML = '<span class="__mc-lg">'
-      + '<span class="__mc-b-now">\u26a1 \u7acb\u5373\u751f\u6548\uff08\u22645\u79d2\uff09</span>'
-      + '<span class="__mc-b-reload">\ud83d\udcc1 \u8bfb\u6863\u540e\u751f\u6548</span>'
-      + '<span class="__mc-b-reboot">\ud83d\udd04 \u91cd\u542f\u540e\u751f\u6548</span>'
-      + '<span class="__mc-b-cfg">\u2699 \u5df2\u5199\u5165 cfg\uff08\u751f\u6548\u89c6\u8be5 mod\uff09</span>'
-      + '</span><span class="__mc-foot-note">\u5957\u4ef6\u505c\u7528 = \u7acb\u5373\u8f6f\u505c + \u4e0b\u6b21\u542f\u52a8\u4e0d\u52a0\u8f7d\uff1b\u7b2c\u4e09\u65b9\u505c\u7528 = \u91cd\u542f\u7ea7</span>';
+      + '<span class="__mc-b-now">\u26a1 \u7acb\u5373\u751f\u6548</span>'
+      + '<span class="__mc-b-reload">\ud83d\udcc1 \u8bfb\u6863\u540e</span>'
+      + '<span class="__mc-b-reboot">\ud83d\udd04 \u91cd\u542f\u540e</span>'
+      + '<span class="__mc-b-cfg">\u2699 \u5df2\u5199\u5165 cfg</span>'
+      + '</span>'
+      + '<button type="button" class="__mc-btn __mc-btn-mini" id="__mc_patch_btn" style="display:none"></button>'
+      + '<span class="__mc-foot-note">\u5957\u4ef6\u505c\u7528\u7acb\u5373\u751f\u6548 \u00b7 \u7b2c\u4e09\u65b9\u505c\u7528\u91cd\u542f\u751f\u6548</span>';
 
     var toastEl = doc.createElement('div');
     toastEl.className = '__mc-toast'; toastEl.id = '__mc_toast';
+
+    /* v3：底部「补丁碰撞 N 组」（有碰撞才显示；点击开汇总弹窗——原侧栏入口卡退役）。 */
+    var patchBtn = foot.querySelector('#__mc_patch_btn');
+    patchBtn.addEventListener('click', function (e) { e.stopPropagation(); openPatchModal(); });
 
     /* v2 任务 7：底部待生效条（原型 #pend 同构；v2 任务 13 撤销/立即重启两钮接真） */
     var pendEl = doc.createElement('div');
@@ -403,7 +409,7 @@
     wireSide(side);
     wireCfg(cfg);
 
-    S.side = side; S.cfg = cfg; S.sub = sub; S.toastEl = toastEl;
+    S.side = side; S.cfg = cfg; S.sub = sub; S.toastEl = toastEl; S.patchBtn = patchBtn;
     S.pendEl = pendEl; S.pendTx = pendEl.querySelector('#__mc_pend_tx'); S.mbg = mbg; S.mdl = mdl;
     return ov;
   }
@@ -447,8 +453,8 @@
   function icGlyph(ic) {
     if (ic.g) return ic.g === 'kbw' ? '\u2298' : ic.g; // kbw → ⊘ 版本告警
     if (ic.k === 'orange') return ic.click === 'cf' ? '\u21c4' : '\u2193'; // ⇄ / ↓
-    if (ic.k === 'red') return '\u26a0';       // ⚠ 冲突
-    if (ic.k === 'gray') return '\u25ce';      // ◎ 同域
+    if (ic.k === 'red') return '\u26a0';       // ⚠ 严重冲突
+    if (ic.k === 'gray') return '\u25ce';      // ◎ 同域（legacy：仅旧 C# 快照兼容，v3 不再产出 gray）
     if (ic.k === 'blue') return '\u2191';      // ↑ 可更新
     if (ic.k === 'amber') return '\u27f3';     // ⟳ 待生效（纯状态，无 click）
     return '\u26a0';
@@ -601,7 +607,7 @@
       }
     }
     var h = shellWarnHtml() + '<div class="__mc-ordbar">'
-      + '<b style="color:#e8a33d;font-weight:500">\u6392\u5e8f\u6a21\u5f0f</b> \u2014 \u62d6\u62fd\u884c\u8c03\u6574\u987a\u5e8f\uff1b\u9009\u4e2d\u884c\u540e\u4e5f\u53ef\u7528 \u2191 \u2193 \u952e\u79fb\u52a8\uff08\u65e0\u969c\u788d\u66ff\u4ee3\uff09\u3002\u786c\u4f9d\u8d56\u94fe\u6761\u76ee\u81ea\u52a8\u4fdd\u6301\u4f9d\u8d56\u5e8f\u3002'
+      + '<b style="color:#e8a33d;font-weight:500">\u6392\u5e8f\u6a21\u5f0f</b> \u2014 \u62d6\u62fd\u8c03\u6574\u987a\u5e8f\uff0c\u6216\u9009\u4e2d\u4e00\u884c\u6309 \u2191\u2193\u3002\u786c\u4f9d\u8d56\u81ea\u52a8\u4fdd\u62a4\u3002'
       + protHtml
       + '<div class="__mc-ord-acts">'
       + '<button type="button" class="__mc-btn __mc-btn-mini" data-act="ordreset"' + dis + '>\u6062\u590d\u9ed8\u8ba4</button>'
@@ -647,8 +653,8 @@
     if (!ST.ordRows || !ST.ordRows.def || !ST.ordRows.def.length) return;
     ST.order = ST.ordRows.def.slice();
     renderSide();
-    toastRaw('\u5df2\u6062\u590d\u9ed8\u8ba4\u987a\u5e8f\uff08ID \u5b57\u6bcd\u5e8f\uff09',
-      '\u5c1a\u672a\u4fdd\u5b58\u2014\u2014\u70b9\u201c\u4fdd\u5b58\u987a\u5e8f\u201d\u540e\u5199\u5165\u5f85\u751f\u6548\u6e05\u5355');
+    toastRaw('\u5df2\u6062\u590d\u9ed8\u8ba4\u987a\u5e8f',
+      '\u5c1a\u672a\u4fdd\u5b58\u2014\u2014\u70b9\u300c\u4fdd\u5b58\u987a\u5e8f\u300d\u540e\u751f\u6548');
   }
 
   function ordSave() {
@@ -1132,33 +1138,35 @@
     return '<span class="__mc-ic __mc-' + k + '" style="cursor:default" aria-hidden="true">' + glyph + '</span>';
   }
 
-  /* ---- v2 任务 11：冲突详情弹窗（原型 cfHtml 照抄）----
-   * 每条冲突一卡片：h3=图标+"mod名 · 标签"（tag 冲突/碰撞/同域）；.sub=数据侧 title；
-   * 三 sec：冲突对象（who 加粗）/ 原因（reason）/ 处置建议（tips 编号列表）；
-   * 多卡片间 border-top 分隔线；底部固定风险文案（原型原文）+ 三动作钮。 */
+  /* ---- 冲突详情弹窗（v3 两级卡片：红=严重（只能二选一）/ 橙=普通告警（⇄碰撞/◎叠加））----
+   * h3={tag} · {mod名}；sub=一句话结论；sec：涉及 mod / 原因（reason 空不渲染）/ 怎么办；
+   * 多卡片间 border-top 分隔线；底部固定风险行删除（各卡自含）。 */
   function cfCardHtml(m, c, i) {
-    var lv = c.lv || 'gray';
+    var lv = c.lv === 'red' ? 'red' : 'orange';
+    var glyph = c.g || icGlyph({ k: lv, click: 'cf' });
     var h = '';
     if (i > 0) h += '<div style="border-top:1px solid #2a2f3d;margin-top:14px"></div>';
-    h += '<h3>' + chipHtml(lv, icGlyph({ k: lv, click: 'cf' })) + esc(m.name) + ' \u00b7 ' + esc(c.tag || '')
-      + '</h3><div class="__mc-m-sub">' + esc(c.title || '') + '</div>'
-      /* T11 M4：灰卡（L3 同域 + L1 灰卡）标题用"同域 mod"，红/橙仍为"冲突对象" */
-      + '<div class="__mc-m-sec"><div class="__mc-m-h">' + (lv === 'gray' ? '\u540c\u57df mod' : '\u51b2\u7a81\u5bf9\u8c61') + '</div>'
-      + '<div class="__mc-m-txt"><b style="color:#e8e6e0">' + esc((c.who || []).join('\u3001')) + '</b></div></div>'
-      + '<div class="__mc-m-sec"><div class="__mc-m-h">\u539f\u56e0</div>'
-      + '<div class="__mc-m-txt">' + esc(c.reason || '') + '</div></div>'
-      + '<div class="__mc-m-sec"><div class="__mc-m-h">\u5904\u7f6e\u5efa\u8bae\uff08\u81ea\u62c5\u9009\u62e9\uff09</div>'
-      + '<div class="__mc-m-txt">';
+    h += '<h3>' + chipHtml(lv, glyph) + esc((c.tag || '\u63d0\u793a') + ' \u00b7 ' + m.name) + '</h3>'
+      + '<div class="__mc-m-sub">' + esc(c.title || '') + '</div>'
+      + '<div class="__mc-m-sec"><div class="__mc-m-h">\u6d89\u53ca mod</div>'
+      + '<div class="__mc-m-txt"><b style="color:#e8e6e0">' + esc((c.who || []).join('\u3001')) + '</b></div></div>';
+    if (c.reason)
+      h += '<div class="__mc-m-sec"><div class="__mc-m-h">\u539f\u56e0</div>'
+        + '<div class="__mc-m-txt">' + esc(c.reason) + '</div></div>';
     var tips = c.tips || [];
-    for (var j = 0; j < tips.length; j++) h += (j > 0 ? '<br>' : '') + (j + 1) + '. ' + esc(tips[j]);
-    return h + '</div></div>';
+    if (tips.length) {
+      h += '<div class="__mc-m-sec"><div class="__mc-m-h">\u600e\u4e48\u529e</div>'
+        + '<div class="__mc-m-txt">';
+      for (var j = 0; j < tips.length; j++) h += (j > 0 ? '<br>' : '') + (j + 1) + '. ' + esc(tips[j]);
+      h += '</div></div>';
+    }
+    return h;
   }
 
   function cfModalHtml(m, cards) {
     var h = '';
     for (var i = 0; i < cards.length; i++) h += cfCardHtml(m, cards[i], i);
-    h += '<div class="__mc-risk">\u8c03\u6574\u52a0\u8f7d\u987a\u5e8f\u53ea\u80fd\u89c4\u907f\u90e8\u5206\u51b2\u7a81\uff08\u5199\u5e8f\u7c7b\uff09\uff0c\u4e0d\u80fd\u89e3\u51b3\u6570\u503c\u53e0\u52a0\u7c7b\u51b2\u7a81\u3002</div>'
-      + '<div class="__mc-m-acts"><button type="button" class="__mc-btn __mc-btn-mini" data-mact="close">\u5173\u95ed</button>'
+    h += '<div class="__mc-m-acts"><button type="button" class="__mc-btn __mc-btn-mini" data-mact="close">\u5173\u95ed</button>'
       + '<button type="button" class="__mc-btn __mc-btn-mini" data-mact="cfoff" data-guid="' + esc(m.guid) + '">\u505c\u7528\u6b64 mod</button>'
       /* Ruling 20：冲突/碰撞详情弹窗的"去调序"入口——关闭弹窗 → 进排序模式 */
       + '<button type="button" class="__mc-btn __mc-btn-pri __mc-btn-mini" data-mact="cforder">\u53bb\u8c03\u5e8f</button>'
@@ -1166,16 +1174,16 @@
     return h;
   }
 
-  /* 等待壳（MC_CF → MC_CF_DATA 一拍 drain 周期内的占位） */
+  /* 等待壳（MC_CF → MC_CF_DATA 一拍 drain 周期内的占位；v3 等待/空态片改橙 ◎） */
   function cfLoadingHtml(name) {
-    return '<h3>' + chipHtml('gray', '\u25ce') + '\u51b2\u7a81\u8be6\u60c5 \u00b7 ' + esc(name) + '</h3>'
+    return '<h3>' + chipHtml('orange', '\u25ce') + '\u51b2\u7a81\u8be6\u60c5 \u00b7 ' + esc(name) + '</h3>'
       + '<div class="__mc-m-sub">\u6b63\u5728\u8bfb\u53d6\u51b2\u7a81\u8be6\u60c5\u2026</div>'
       + '<div class="__mc-m-acts"><button type="button" class="__mc-btn __mc-btn-mini" data-mact="close">\u5173\u95ed</button></div>';
   }
 
   /* 空态壳（C# 回 cards:[] —— 一般不会到达：ics 由同一数据源产出） */
   function cfEmptyHtml(name) {
-    return '<h3>' + chipHtml('gray', '\u25ce') + '\u51b2\u7a81\u8be6\u60c5 \u00b7 ' + esc(name) + '</h3>'
+    return '<h3>' + chipHtml('orange', '\u25ce') + '\u51b2\u7a81\u8be6\u60c5 \u00b7 ' + esc(name) + '</h3>'
       + '<div class="__mc-m-sub">\u672a\u53d1\u73b0\u51b2\u7a81\u8be6\u60c5\u3002</div>'
       + '<div class="__mc-m-acts"><button type="button" class="__mc-btn __mc-btn-mini" data-mact="close">\u5173\u95ed</button></div>';
   }
@@ -1262,50 +1270,42 @@
     });
   }
 
+  /* 补丁碰撞汇总弹窗（v3 精简：一句结论 + 碰撞位置（中文 mod 名）+ 框架侧披露一段；
+   * owners 由 C# 给显示名，面板只拼接。数字噪音/风险长文/范围行删除。） */
   function patchModalHtml() {
     var s = ST.scan;
-    var h = '<h3>' + chipHtml('orange', '\u21c4') + '\u8865\u4e01\u78b0\u649e\uff08\u8fd0\u884c\u65f6\u5b9e\u6d4b\uff09</h3>';
+    var h = '<h3>' + chipHtml('orange', '\u21c4') + '\u8865\u4e01\u78b0\u649e</h3>';
     if (!s) {
       return h + '<div class="__mc-m-sub">\u6b63\u5728\u8bfb\u53d6\u626b\u63cf\u7ed3\u679c\u2026</div>'
         + '<div class="__mc-m-acts"><button type="button" class="__mc-btn __mc-btn-mini" data-mact="close">\u5173\u95ed</button></div>';
     }
     if (s.error) {
-      h += '<div class="__mc-risk">\u626b\u63cf\u5f02\u5e38\uff1a' + esc(s.error) + '</div>';
+      h += '<div class="__mc-risk">' + esc(s.error) + '</div>';
     } else {
-      h += '<div class="__mc-m-sub">\u626b\u63cf\u4e8e ' + esc(scanTimeText(s.at)) + ' \u00b7 \u5171 ' + (s.total || 0)
-        + ' \u7ec4\uff08\u53ef\u5f52\u5c5e ' + (s.routed || 0) + ' / \u672a\u77e5\u6765\u6e90 ' + (s.unknown || 0)
-        + '\uff09'
-        + ((s.framework || 0) > 0 ? ' \u00b7 \u6846\u67b6\u4fa7 ' + s.framework + ' \u7ec4\u672a\u8ba1\u5165' : '')
-        + ' \u00b7 \u6e38\u620f\u4fa7 ' + (s.game || 0) + ' \u4e2a\u65b9\u6cd5\uff08\u5df2\u6302\u8865\u4e01\u603b\u6570 '
-        + (s.patched || 0) + '\uff09\u00b7 ' + (s.ms || 0) + 'ms</div>'
-        + '<div class="__mc-m-sec"><div class="__mc-m-h">\u78b0\u649e\u7ec4\uff08\u540c\u4e00\u6e38\u620f\u65b9\u6cd5 \u22652 \u4e2a\u8865\u4e01 owner\uff09</div>';
+      h += '<div class="__mc-m-sub">\u6709 ' + (s.total || 0)
+        + ' \u5904\u6e38\u620f\u903b\u8f91\u88ab\u591a\u4e2a mod \u540c\u65f6\u4fee\u6539\uff0c\u540e\u52a0\u8f7d\u7684\u4f1a\u8986\u76d6\u5148\u52a0\u8f7d\u7684\u3002\u4e00\u822c\u4e0d\u7528\u5904\u7406\uff1b\u6e38\u620f\u884c\u4e3a\u5f02\u5e38\u65f6\u518d\u6765\u770b\u3002</div>'
+        + '<div class="__mc-m-sec"><div class="__mc-m-h">\u78b0\u649e\u4f4d\u7f6e</div>';
       var items = s.items || [];
-      if (!items.length) h += '<div class="__mc-m-txt">\u672a\u53d1\u73b0\u8865\u4e01\u78b0\u649e\uff08\u540c\u65b9\u6cd5\u591a owner\uff09\u7ec4\u3002</div>';
+      if (!items.length) h += '<div class="__mc-m-txt">\u6ca1\u6709\u53d1\u73b0\u78b0\u649e\u3002</div>';
       for (var i = 0; i < items.length; i++) {
         var it = items[i] || {};
-        h += '<div class="__mc-scan-grp"><div class="__mc-scan-m">' + esc(it.method || '?')
-          + (it.unknown ? ' <span style="color:#8a90a0;font-size:10.5px">[\u672a\u77e5\u6765\u6e90]</span>' : '') + '</div>'
-          + '<div class="__mc-scan-o">' + esc((it.owners || []).join(' \u00b7 ')) + '</div>'
-          + '<div class="__mc-scan-n">\u8865\u4e01\u5b9e\u4f8b ' + (it.patches || 0) + ' \u4e2a \u00b7 '
-          + (it.unknown ? '\u4e0d\u53ef\u5f52\u5c5e\uff08\u4ec5\u7edf\u8ba1\uff09' : '\u53ef\u5f52\u5c5e\u5df2\u88c5 mod') + '</div></div>';
+        h += '<div class="__mc-scan-grp"><div class="__mc-scan-m">' + esc(it.method || '?') + '</div>'
+          + '<div class="__mc-scan-o">' + esc((it.owners || []).join('\u3001')) + '</div></div>';
       }
       h += '</div>';
-      // 裁定 A（Ruling 14②）：框架侧多 owner 组不铺行/不计入碰撞总数，但汇总必须披露
+      /* 裁定 A（Ruling 14②）：框架侧多 owner 组不铺行/不计入碰撞总数，但汇总必须披露 */
       var fw = s.frameItems || [];
       if (fw.length) {
-        h += '<div class="__mc-m-sec"><div class="__mc-m-h">\u6846\u67b6\u4fa7\u672a\u8ba1\u5165\uff08' + (s.framework || fw.length)
-          + ' \u7ec4\uff0c\u975e\u6e38\u620f\u65b9\u6cd5\uff09</div>'
-          + '<div class="__mc-m-txt" style="font-size:11.5px">\u6846\u67b6/\u5f15\u64ce\u65b9\u6cd5\u4e0a\u7684\u591a owner \u5171\u6302\uff1a\u771f\u5b9e\u5b58\u5728\uff08\u542b\u5df2\u88c5 mod\uff09\uff0c\u4f46\u4e0d\u53c2\u4e0e\u6e38\u620f\u903b\u8f91\u78b0\u649e\u5224\u5b9a\uff0c\u4e0d\u4ea7\u751f\u884c\u5185\u6a59\u6807\u3002</div>';
+        h += '<div class="__mc-m-sec"><div class="__mc-m-h">\u53e6\u6709 ' + (s.framework || fw.length) + ' \u5904\u6846\u67b6\u5185\u90e8\u78b0\u649e</div>'
+          + '<div class="__mc-m-txt" style="font-size:11.5px">\u4e0d\u5f71\u54cd\u6e38\u620f\u903b\u8f91\uff0c\u672a\u8ba1\u5165\u4e0a\u9762\u7684\u6570\u5b57\u3002</div>'
+          + '<div class="__mc-scan-grp">';
         for (var fi = 0; fi < fw.length; fi++) {
           var fit = fw[fi] || {};
-          h += '<div class="__mc-scan-grp"><div class="__mc-scan-m">' + esc(fit.method || '?') + '</div>'
-            + '<div class="__mc-scan-o">' + esc((fit.owners || []).join(' \u00b7 ')) + '</div>'
-            + '<div class="__mc-scan-n">\u8865\u4e01\u5b9e\u4f8b ' + (fit.patches || 0) + ' \u4e2a \u00b7 \u4ec5\u62ab\u9732\uff08\u672a\u8ba1\u5165\u78b0\u649e\u7ec4\uff09</div></div>';
+          h += '<div class="__mc-scan-m">' + esc(fit.method || '?') + '</div>'
+            + '<div class="__mc-scan-o">' + esc((fit.owners || []).join('\u3001')) + '</div>';
         }
-        h += '</div>';
+        h += '</div></div>';
       }
-      h += '<div class="__mc-risk">\u540c\u4e00\u65b9\u6cd5\u591a\u4e2a\u8865\u4e01\u7684\u7ed3\u679c\u53d6\u51b3\u4e8e\u52a0\u8f7d\u987a\u5e8f\uff08\u540e\u5199\u8986\u76d6\u524d\u5199\uff09\uff1b\u8c03\u6574\u52a0\u8f7d\u987a\u5e8f\u4ec5\u7f13\u89e3\u5199\u5e8f\u7c7b\u51b2\u7a81\uff0c\u4e0d\u80fd\u89e3\u51b3\u6570\u503c\u53e0\u52a0\u7c7b\u51b2\u7a81\uff0c\u98ce\u9669\u81ea\u8d1f\u3002</div>'
-        + '<div class="__mc-m-sub" style="margin-top:8px">\u8303\u56f4\uff1a' + esc(s.scope || '') + '\uff08\u6846\u67b6/\u5f15\u64ce/\u63d2\u4ef6\u81ea\u8eab\u65b9\u6cd5\u4e0d\u8ba1\u5165\u78b0\u649e\u7ec4\u6570\uff09</div>';
     }
     h += '<div class="__mc-m-acts"><button type="button" class="__mc-btn __mc-btn-mini" data-pact="rescan"'
       + (ST.scanWait ? ' disabled' : '') + '>' + (ST.scanWait ? '\u626b\u63cf\u4e2d\u2026' : '\u91cd\u65b0\u626b\u63cf') + '</button>'
@@ -1467,6 +1467,14 @@
     });
   }
 
+  /* v3：底部「补丁碰撞 N 组」按钮文案/显隐（有碰撞才显示；数据=MC_SCAN_DATA.total）。 */
+  function renderPatchBtn() {
+    if (!S.patchBtn) return;
+    var s = ST.scan, n = s && !s.error ? (s.total || 0) : 0;
+    S.patchBtn.style.display = n > 0 ? '' : 'none';
+    S.patchBtn.textContent = '\u8865\u4e01\u78b0\u649e ' + n + ' \u7ec4';
+  }
+
   /* ================= 消息发送 ================= */
 
   function routeOf(k) {
@@ -1518,26 +1526,18 @@
     window.__mcOutbox.push({ type: 'MC_TOGGLE_MOD', guid: guid, enabled: m.enabled });
     var tp = isTpMod(m);
     if (tp) {
-      /* 任务 16：第三方两档语义（指南 §五）——软停（Tier 2 回调/清单 softDisable）vs 重启级；
-       * 缺席行（dll 已禁用）只有启用方向。小字原文给足生效时机。 */
+      /* 停用两档小字（v3 精简）：软停=行为已停止；标记停用=本次仍在运行。缺席行启用同文案。 */
       if (m.enabled) {
-        toastRaw(m.name + ' \u5df2\u6062\u590d\u542f\u7528',
-          m.absent ? 'dll \u5df2\u6062\u590d \u00b7 \u4e0b\u6b21\u542f\u52a8\u6b63\u5e38\u52a0\u8f7d'
-                   : (m.soft ? '\u884c\u4e3a\u5df2\u6062\u590d\uff08\u8f6f\u505c\uff09 \u00b7 \u4e0b\u6b21\u542f\u52a8\u6b63\u5e38\u52a0\u8f7d'
-                              : '\u4e0b\u6b21\u542f\u52a8\u6b63\u5e38\u52a0\u8f7d\uff08\u672c\u6b21\u4f1a\u8bdd\u4ecd\u5728\u8fd0\u884c\uff09'));
-      } else if (m.soft) {
-        toastRaw(m.name + ' \u5df2\u505c\u7528\uff08\u8f6f\u505c\uff09',
-          '\u884c\u4e3a\u5df2\u7acb\u5373\u505c\u6b62 \u00b7 \u4e0b\u6b21\u542f\u52a8\u540e\u4e0d\u518d\u52a0\u8f7d');
+        toastRaw(m.name + ' \u5df2\u542f\u7528', '\u4e0b\u6b21\u542f\u52a8\u52a0\u8f7d');
       } else {
-        toastRaw(m.name + ' \u5df2\u6807\u8bb0\u505c\u7528\uff08\u91cd\u542f\u7ea7\uff09',
-          '\u672c\u6b21\u4f1a\u8bdd\u4ecd\u5728\u8fd0\u884c \u00b7 \u4e0b\u6b21\u542f\u52a8\u540e\u4e0d\u518d\u52a0\u8f7d');
+        toastRaw(m.name + ' \u5df2\u505c\u7528',
+          m.soft ? '\u884c\u4e3a\u5df2\u505c\u6b62 \u00b7 \u4e0b\u6b21\u542f\u52a8\u4e0d\u518d\u52a0\u8f7d'
+                 : '\u672c\u6b21\u4ecd\u5728\u8fd0\u884c \u00b7 \u4e0b\u6b21\u542f\u52a8\u4e0d\u518d\u52a0\u8f7d');
       }
       return;
     }
-    toast(m.name + (m.enabled
-      ? ' \u5df2\u542f\u7528\uff1a\u6062\u590d\u751f\u6548\uff08\u22645\u79d2\uff09'
-      : ' \u5df2\u505c\u7528\uff1a\u884c\u4e3a\u7acb\u5373\u8fd8\u539f\uff0c\u4e0b\u6b21\u542f\u52a8\u4e0d\u518d\u52a0\u8f7d'),
-      'now');
+    toastRaw(m.name + (m.enabled ? ' \u5df2\u542f\u7528' : ' \u5df2\u505c\u7528'),
+      m.enabled ? '\u5df2\u751f\u6548' : '\u5df2\u8fd8\u539f \u00b7 \u4e0b\u6b21\u542f\u52a8\u4e0d\u518d\u52a0\u8f7d');
   }
 
   /* ================= 右区交互 ================= */
@@ -1737,10 +1737,11 @@
 
   function renderAll() {
     if (!S.root || !S.root.isConnected) return;
-    if (S.sub && ST.snap && ST.snap.self) S.sub.textContent = 'v' + ST.snap.self.ver + ' \u00b7 \u6539\u52a8\u5b9e\u65f6\u5199\u5165 cfg \u00b7 \u65e0\u9700\u91cd\u542f';
+    if (S.sub && ST.snap && ST.snap.self) S.sub.textContent = 'v' + ST.snap.self.ver + ' \u00b7 \u591a\u6570\u6539\u52a8\u5373\u65f6\u751f\u6548';
     renderSide();
     renderCfg();
     renderPending(); // v2 任务 7：面板重开时按已存摘要恢复底部待生效条
+    renderPatchBtn(); // v3：底部补丁碰撞按钮
   }
 
   window.__mcRender = function (snapshot) {
@@ -1821,12 +1822,9 @@
       ST.scan = event;
       var wasWait = ST.scanWait;
       ST.scanWait = false;
-      renderSide();
+      renderPatchBtn();
       if (ST.patchOpen) { setModal(patchModalHtml()); bindPatchModal(); }
-      if (wasWait) toastRaw(event.error ? '\u626b\u63cf\u5931\u8d25' : ('\u626b\u63cf\u5b8c\u6210\uff1a\u78b0\u649e ' + (event.total || 0) + ' \u7ec4'),
-        event.error || ('\u53ef\u5f52\u5c5e ' + (event.routed || 0) + ' \u7ec4 \u00b7 \u672a\u77e5\u6765\u6e90 ' + (event.unknown || 0) + ' \u7ec4'
-          + ((event.framework || 0) > 0 ? ' \u00b7 \u6846\u67b6\u4fa7 ' + event.framework + ' \u7ec4\u672a\u8ba1\u5165' : '')
-          + ' \u00b7 ' + (event.ms || 0) + 'ms'));
+      if (wasWait) toastRaw(event.error ? '\u626b\u63cf\u5931\u8d25' : ('\u626b\u63cf\u5b8c\u6210\uff1a\u78b0\u649e ' + (event.total || 0) + ' \u5904'), '');
     }
     /* v2 任务 9：排序数据（MC_ORDER_DATA：guids=生效序 / rows=显示元数据 / def=默认序）。
      * 面板开着且在排序模式才重绘；数据本体存 ST.ordRows（重进排序模式前可参照）。 */
@@ -1839,8 +1837,7 @@
     if (event && event.type === 'MC_ORDER_OK') {
       ST.ordSaving = false;
       if (ST.ord) { ST.ord = false; ST.order = null; renderSide(); renderCfg(); }
-      toastRaw('\u987a\u5e8f\u5df2\u4fdd\u5b58',
-        '\u91cd\u542f\u6e38\u620f\u540e\u7531\u542f\u52a8\u6e05\u7406\u5668\u5e94\u7528\uff08\u5e95\u90e8\u5f85\u751f\u6548\u6761\u53ef\u67e5\u770b\uff09');
+      toastRaw('\u987a\u5e8f\u5df2\u4fdd\u5b58', '\u91cd\u542f\u6e38\u620f\u540e\u751f\u6548');
     }
     /* v2 任务 9：整单拒绝（校验失败）——留在排序模式，本地调整不丢可重试 */
     if (event && event.type === 'MC_ORDER_FAIL') {
@@ -1866,6 +1863,7 @@
     if (!S.root) return;
     var el = S.root;
     S.root = null; S.side = S.cfg = S.sub = S.toastEl = null;
+    S.patchBtn = null;
     S.pendEl = null; S.pendTx = null; S.mbg = null; S.mdl = null; S.mdlRepoKey = null; // v2 任务 7/8：弹窗/待生效条随面板拆
     ST.uninstGuid = null; clearUninstTimer(); // v2 任务 10：卸载明细等待随面板拆终止
     ST.cfGuid = null; clearCfTimer();         // v2 任务 11：冲突详情等待随面板拆终止
@@ -1907,6 +1905,7 @@
     } catch (e) { alive = false; }
     if (alive) return;
     S.root = null; S.side = S.cfg = S.sub = S.toastEl = null;
+    S.patchBtn = null;
     S.pendEl = null; S.pendTx = null; S.mbg = null; S.mdl = null; S.mdlRepoKey = null; // v2 任务 7/8
     ST.uninstGuid = null; clearUninstTimer(); // v2 任务 10
     ST.cfGuid = null; clearCfTimer();         // v2 任务 11
