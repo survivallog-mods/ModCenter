@@ -24,9 +24,9 @@ namespace SurvivalLog.ModCenter;
 /// 3s 节流 + MC_CLOSE 立即落盘后恢复原值）。
 /// v2 生命周期任务 7：待生效清单汇总——BuildSnapshot 前主线程读 pending.json（mtime 节流），
 /// 归属到的 mod 行挂 ics ⟳ 徽标；Pump 每 2s 巡检，摘要变化推 MC_PENDING_SUMMARY（底部待生效条）。
-/// v2 生命周期任务 8：套件仓库页——MC_REPO_GET{force}（打开自动查：15 分钟会话缓存）/ MC_CHK
+/// v2 生命周期任务 8：更新链——MC_REPO_GET{force}（打开自动查：15 分钟会话缓存）/ MC_CHK
 /// （手动刷新：60 秒冷却）→ 后台 12 仓 fetch + RepoDecision.Build（主线程收割推 MC_REPO_DATA +
-/// 快照侧栏 ↑/↓/⊘ 徽标）；MC_UPD/MC_INST/MC_UPDALL 确认后走**串行**下载链（后台：下载（进度
+/// 快照侧栏 ↑/↓/⊘ 徽标）；MC_UPD/MC_INST 确认后走**串行**下载链（后台：下载（进度
 /// 250ms 节流推 MC_DL）→ zip MD5 对 update.json → 解包 BepInEx/plugins/*.dll 暂存 → 主线程
 /// PendingWriter.AddUpdate）→ 快照刷新（行内 ⟳ 出现、↑/↓ 消失）。GitHub 匿名 60 次/h：一轮
 /// 12 次，绝不后台轮询。
@@ -106,7 +106,7 @@ internal static class ConfigBridge
     private static readonly Dictionary<string, RepoClient.UpdateInfo> _repoInfos = new(StringComparer.Ordinal); // repoKey → fetch 结果（下载链直用，不二次 fetch）
     private static long _repoLastCheck;          // 上次完成一轮检查的 Unix 毫秒；0=从未
     private static bool _repoFetching;           // 后台 fetch 在跑（面板行"检查中…"）
-    private static bool _repoChain;              // 下载链串行闸（全部更新=循环单链，绝不并发）
+    private static bool _repoChain;              // 下载链串行闸（一次一仓，绝不并发）
     private static readonly HashSet<string> _chainGuids = new(StringComparer.OrdinalIgnoreCase); // 当前链覆盖的 guid（卸载竞态闸，必修 1）
     private static string _repoFetchError;       // 上一轮 fetch 异常（Kind5）；Kind1 清（入口卡失败态，必修 8）
     private static bool _repoRateLimited;        // 上一轮含 HTTP 403（T16/D：入口卡/行内专门提示）
@@ -933,13 +933,13 @@ internal static class ConfigBridge
         return ix > 0 ? n.Substring(0, ix) : n;
     }
 
-    /// <summary>guid（任意大小写）→ 行内 ⟳ tip 文案（"待生效：…（重启后应用）"）。</summary>
+    /// <summary>guid（任意大小写）→ 行内 ⟳ tip（v3 固定一句；明细在底部待生效条）。</summary>
     private static Dictionary<string, string> PendingTipsByRow()
     {
         var map = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
         foreach (var g in PendGroups())
             if (g.RowKey != null)
-                map[g.RowKey] = "待生效：" + PendLabel(g) + "（重启后应用）";
+                map[g.RowKey] = "待生效：重启游戏后应用";
         return map;
     }
 
@@ -1063,9 +1063,8 @@ internal static class ConfigBridge
     }
 
     /// <summary>侧栏仓库态徽标（↑/↓/⊘；BuildSnapshot 消费）。无远端（未查/检查失败）或已有
-    /// 待生效意图的行返回 null（后者只显 ⟳，裁定 3）。⊘ 与 ↓ 同为 orange+upd，G="kbw" 消歧。
-    /// 终审必修 6（D8 字面口径）：gamekb 不符的 Ok/Downgrade 行也挂 ⊘（不限于可动作态）；
-    /// Ok 行同时获得"重装当前版本"入口（必修 5，点击 ⊘ 弹同版本重装确认窗）。</summary>
+    /// 待生效意图的行返回 null（后者只显 ⟳）。⊘ 与 ↓ 同为 orange+upd，G="kbw" 消歧。
+    /// v3：tip 逐字精简（spec §5.3）；kbw 不符的 Ok/Downgrade 行仍挂 ⊘（D8 不拦截）。</summary>
     private static List<IcInfo> RepoIcsOf(string guid, HashSet<string> repoPend)
     {
         if (_repoRows == null) return null;
@@ -1078,15 +1077,15 @@ internal static class ConfigBridge
         switch (row.State)
         {
             case RepoState.Update:
-                ics.Add(new IcInfo { K = "blue", Tip = $"可更新到 {row.Remote} · 点击确认", Click = "upd" });
+                ics.Add(new IcInfo { K = "blue", Tip = $"可更新：{row.Local} → {row.Remote}", Click = "upd" });
                 break;
             case RepoState.Downgrade:
-                ics.Add(new IcInfo { K = "orange", Tip = $"远端 {row.Remote} 低于本地 {row.Local} · 点击确认（版本回退，风险自担）", Click = "upd" });
+                ics.Add(new IcInfo { K = "orange", Tip = $"可降级：本地 {row.Local} 比远端 {row.Remote} 新", Click = "upd" });
                 if (row.Kbw) ics.Add(KbIc(row));
                 break;
             case RepoState.Warn:
-                ics.Add(new IcInfo { K = "blue", Tip = $"可更新到 {row.Remote}（有版本告警）· 点击确认", Click = "upd" });
-                ics.Add(new IcInfo { K = "orange", Tip = row.Why + " · 是否继续由你决定 · 点击查看", Click = "upd", G = "kbw" });
+                ics.Add(new IcInfo { K = "blue", Tip = $"可更新：{row.Local} → {row.Remote}", Click = "upd" });
+                ics.Add(new IcInfo { K = "orange", Tip = "可能不适配当前游戏版本", Click = "upd", G = "kbw" });
                 break;
             case RepoState.Ok:
                 if (row.Kbw) ics.Add(KbIc(row)); // 同版本但 gamekb 不符：行内仍给 ⊘
@@ -1097,11 +1096,11 @@ internal static class ConfigBridge
         return ics.Count > 0 ? ics : null;
     }
 
-    /// <summary>D8 ⊘ 徽标（橙 + ⊘ 字形消歧；点击走更新/重装确认窗）。</summary>
+    /// <summary>D8 ⊘ 徽标（橙 + ⊘ 字形消歧；点击走更新确认窗，D8 红字在弹窗）。</summary>
     private static IcInfo KbIc(RepoRow row) => new()
     {
         K = "orange",
-        Tip = row.KbWhy + " · 点击查看",
+        Tip = "可能不适配当前游戏版本",
         Click = "upd",
         G = "kbw",
     };
@@ -1123,8 +1122,7 @@ internal static class ConfigBridge
                 if (!RepoAllFailed())
                 {
                     PushRepoData();
-                    PushEvent("{\"type\":\"MC_TOAST\",\"main\":" + JsonW.Str("刚检查过")
-                        + ",\"small\":" + JsonW.Str("60 秒内不重复查询（GitHub 匿名限额 60 次/小时，一轮 12 仓）") + "}");
+                    PushEvent("{\"type\":\"MC_TOAST\",\"main\":" + JsonW.Str("刚检查过，稍后再试") + "}");
                     return;
                 }
             }
@@ -1181,9 +1179,9 @@ internal static class ConfigBridge
         });
     }
 
-    /// <summary>确认更新/安装（MC_UPD/MC_INST {repoKey}）与全部更新（MC_UPDALL，Update 态整批
-    /// 循环单链——Warn 需逐仓红字确认、Install 非更新语义，均不入批）。下载串行闸 _repoChain。</summary>
-    private static void HandleRepoUpd(string repoKey, bool all)
+    /// <summary>确认更新/安装（MC_UPD/MC_INST {repoKey}）。下载串行闸 _repoChain。
+    /// v3：MC_UPDALL（全部更新）退役——批量入口随仓库页删除，逐仓确认（spec §5.3/D4）。</summary>
+    private static void HandleRepoUpd(string repoKey)
     {
         if (_repoChain)
         {
@@ -1205,19 +1203,6 @@ internal static class ConfigBridge
         }
         var pend = RepoPendingGuids();
         List<RepoRow> targets;
-        if (all)
-        {
-            targets = new List<RepoRow>();
-            foreach (var r in _repoRows)
-                if (r.State == RepoState.Update && RepoActionable(r, pend, out _)) targets.Add(r);
-            if (targets.Count == 0)
-            {
-                PushEvent("{\"type\":\"MC_TOAST\",\"main\":" + JsonW.Str("没有可整批更新的项")
-                    + ",\"small\":" + JsonW.Str("版本告警与降级项需逐仓确认") + "}");
-                return;
-            }
-        }
-        else
         {
             RepoRow row = null;
             foreach (var r in _repoRows)
@@ -1242,7 +1227,8 @@ internal static class ConfigBridge
     }
 
     /// <summary>行可动作判定：fetch 成功（Remote/信息在）且无待生效意图。Update/Downgrade/Warn/Install
-    /// 为常规动作；**Ok 同版本也放行**（D7"重装当前版本"入口，终审必修 5：语义=修复损坏安装）。</summary>
+    /// 为常规动作；Ok 同版本也放行（仅覆盖 ⊘ 告警行的"更新到同版本"确认路径；v3：独立
+    /// "重装当前版本"入口已退役，spec D3/D8）。</summary>
     private static bool RepoActionable(RepoRow r, HashSet<string> pend, out string why)
     {
         why = null;
@@ -1348,13 +1334,10 @@ internal static class ConfigBridge
                 _repoRateLimited = ui.RateLimited > 0;
                 if (_repoRateLimited)
                 {
-                    // T16/D：403 不显示成普通"检查失败"——入口卡/行内专门文案 + 一次 toast。
+                    // T16/D：403 不显示成普通"检查失败"——一次专门 toast（v3 精简文案）。
                     if (ui.OkCount == 0) _repoFetchError = "GitHub 限流（HTTP 403），请稍后再试";
-                    var small = ui.OkCount == 0
-                        ? "本轮 12 仓全部被限流（匿名 API 60 次/小时已用尽），请稍后再试"
-                        : "本轮 " + ui.RateLimited + " 个仓被限流，结果可能不完整，请稍后再试";
                     PushEvent("{\"type\":\"MC_TOAST\",\"main\":" + JsonW.Str("GitHub 限流")
-                        + ",\"small\":" + JsonW.Str(small) + "}");
+                        + ",\"small\":" + JsonW.Str("请稍后再试") + "}");
                 }
                 PushRender(BuildSnapshot().ToJson()); // 侧栏 ↑/↓/⊘ 徽标（快照协议承载）
                 PushRepoData();
@@ -2271,13 +2254,10 @@ internal static class ConfigBridge
                             HandleRepoGet(true); // 手动"检查更新"（60 秒冷却）
                             break;
                         case "MC_UPD":
-                            HandleRepoUpd(GetStr(el, "repoKey"), all: false);
+                            HandleRepoUpd(GetStr(el, "repoKey"));
                             break;
                         case "MC_INST":
-                            HandleRepoUpd(GetStr(el, "repoKey"), all: false);
-                            break;
-                        case "MC_UPDALL":
-                            HandleRepoUpd(null, all: true);
+                            HandleRepoUpd(GetStr(el, "repoKey"));
                             break;
                         // v2 任务 9：加载排序模式（进模式拉序 / 保存顺序覆盖——校验+整替在专门节）
                         case "MC_ORDER_GET":
