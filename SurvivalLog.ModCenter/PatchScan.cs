@@ -118,18 +118,26 @@ internal static class PatchScan
         return list;
     }
 
-    /// <summary>行内橙标（每个 mod 一枚聚合；tip=组数+前两组方法名+点击查看）。无碰撞=null。</summary>
+    /// <summary>行内橙标（每个 mod 一枚聚合；v3 tip=脚本碰撞 ×N + 对方显示名前 2 个）。
+    /// 无碰撞=null。</summary>
     internal static IcInfo IcsFor(string guid)
     {
         var hits = CollisionsFor(guid);
         if (hits.Count == 0) return null;
-        var names = string.Join("、", hits.Take(2).Select(c => c.Method));
-        if (hits.Count > 2) names += " 等";
+        var others = new List<string>();
+        foreach (var c in hits)
+            foreach (var o in c.Owners)
+            {
+                if (o.Guid != null && string.Equals(o.Guid, guid, StringComparison.OrdinalIgnoreCase)) continue;
+                if (others.IndexOf(o.Display) < 0) others.Add(o.Display);
+                if (others.Count >= 2) break;
+            }
+        var names = string.Join("、", others);
         return new IcInfo
         {
             K = "orange",
             Click = "cf",
-            Tip = "碰撞 · " + hits.Count + " 组同方法多补丁 · " + names + " · 点击查看",
+            Tip = "脚本碰撞 ×" + hits.Count + (names.Length > 0 ? "：与" + names : "") + "，点看详情",
         };
     }
 

@@ -55,19 +55,22 @@ internal sealed class MetaItem
 /// <summary>
 /// L1 已知冲突库条目（v2 任务 11；spec 2026-10-28-lifecycle-v2 §4.4 首批逐字照用）。
 /// 匹配键=GUID 优先、dll 文件名兜底（大小写不敏感、仅比较文件名、.dll 后缀可省）；
-/// 匹配逻辑纯函数见 <see cref="Meta.MatchL1"/>。Level=red|orange|gray（面板 icGlyph 色级），
-/// Tag 由色级派生（红=冲突 / 橙=碰撞 / 灰=同域）。Who=冲突对象（Meta.En 内部名；卡片渲染时
-/// 转"中文名（En）"，既保 spec 逐字可核又读得懂）。表驱动：新增/撤收录只动表，不动逻辑。
+/// 匹配逻辑纯函数见 <see cref="Meta.MatchL1"/>。Level=red|orange（v3 两级：gray 退役，功能叠加
+/// 并入 orange + ◎ 显式字形）。TipShort=行内图标短提示（逐字）；Tag=弹窗卡级标签（逐字：
+/// 严重冲突/功能叠加）。Who=冲突对象（Meta.En 内部名；卡片渲染时转"中文名（En）"）。
+/// 表驱动：新增/撤收录只动表，不动逻辑。
 /// </summary>
 internal sealed class ConflictEntry
 {
     public string MatchGuid; // BepInEx 插件 GUID（主匹配键）
     public string MatchDll;  // dll 文件名（兜底匹配键；仅文件名，可带/不带 .dll）
-    public string Level;     // red | orange | gray
-    public string Title;     // 卡片副标题（弹窗 .sub）
+    public string Level;     // red | orange（v3 两级）
+    public string TipShort;  // 行内图标短提示（v3 逐字；完整结论在弹窗卡片）
+    public string Tag;       // 弹窗卡级标签（v3 逐字；仅 L1 表内条目使用）
+    public string Title;     // 卡片结论一句话（弹窗副标题）
     public string[] Who;     // 冲突对象（Meta.En 内部名；未登记原样展示）
-    public string Reason;    // 原因（弹窗"原因"段逐字）
-    public string[] Tips;    // 处置建议（弹窗编号列表）
+    public string Reason;    // 原因（弹窗"原因"段逐字；可空=面板不渲染该段）
+    public string[] Tips;    // 处置建议（弹窗"怎么办"编号列表）
 }
 
 /// <summary>
@@ -503,20 +506,24 @@ internal static class Meta
             MatchGuid = "com.jangfullmoon.storagecapacityexpansion",
             MatchDll = "StorageCapacityExpansion.dll",
             Level = "red",
-            Title = "储物改写冲突（已知冲突库）",
+            TipShort = "严重冲突：与「储物扩容」只能留一个，点看详情",
+            Tag = "严重冲突",
+            Title = "和第三方「储物扩容」只能留一个：同时开启会互相覆盖柜子和背包的容量数值。",
             Who = new[] { "CabinetSize", "BackpackExpand", "CabinetEverywhere" },
-            Reason = "改写 73 件柜族家具 BagId 至共享包并改包尺寸、强写 ColdRate/PowerCost——与套件储物类数值改写相乘叠加（×1.5 ×1.5 = ×2.25），并可能使储物柜直达的镜像缓存错位失效",
-            Tips = new[] { "停用/卸载第三方侧（推荐）", "停用套件侧任一受影响 mod", "调整加载顺序无法解决数值叠加" }
+            Reason = "「储物扩容」改写 73 件柜子的内部数据并强改数值，与套件的修改相乘叠加（×1.5 ×1.5 = ×2.25）。",
+            Tips = new[] { "停用或卸载「储物扩容」（推荐）", "或者停用上面任意一个套件 mod", "调加载顺序没有用" }
         },
         new ConflictEntry
         {
             MatchGuid = "survivallog.expandedstorage",
             MatchDll = "ExpandedStorage",
-            Level = "gray",
-            Title = "同域共存（类型标注）",
+            Level = "orange",
+            TipShort = "功能叠加：与套件背包扩容效果叠加，点看详情",
+            Tag = "功能叠加",
+            Title = "这几个 mod 都在改储物数值，效果会叠加，可能超出预期。",
             Who = new[] { "BackpackExpand" },
-            Reason = "仅玩家背包扩容/负重 ×10，与套件背包扩容机制正交但数值叠加可能超预期",
-            Tips = new[] { "保留一方", "维持现状（接受叠加结果）" }
+            Reason = "",
+            Tips = new[] { "介意叠加就只留一个" }
         }
         // 明确排除（spec §4.4 末条，勿因"同作者/同包名族"误加）：
         // com.jangfullmoon.karinasprite / KarinaSprite.dll —— 纯立绘替换、零游戏钩子，

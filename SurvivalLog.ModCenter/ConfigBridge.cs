@@ -2003,7 +2003,7 @@ internal static class ConfigBridge
                 if (sourceInstalled) list.Add(e); // 冲突源未装 = 无冲突（不跨行误报）
             }
         }
-        return list.OrderBy(e => e.Level == "red" ? 0 : (e.Level == "orange" ? 1 : 2)).ToList();
+        return list.OrderBy(e => e.Level == "red" ? 0 : 1).ToList(); // v3 两级：red→orange 稳定排序
     }
 
     /// <summary>同域已装集合（按显示名稳定排序）；未登记域=空表。</summary>
@@ -2017,11 +2017,11 @@ internal static class ConfigBridge
         return mates.OrderBy(x => x.Name, StringComparer.OrdinalIgnoreCase).ToList();
     }
 
-    /// <summary>行内冲突 ics（BuildSnapshot/BuildTp 共用）：L1 每条一图标（red/gray，click=cf），
-    /// 随后 L2 碰撞橙标（v2 任务 12；每 mod 聚合一枚，click=cf），末尾 L3 同域灰（域内已装 ≥2 且
-    /// 均为域表登记项——第三方未登记不计入，防盲目误报）。
-    /// T11 M3：L1 已有卡片（红/灰任一）的 mod 跳过 L3 灰标——避免"红+灰/双灰"噪音（expandedstorage
-    /// 只出 L1 灰卡）。未加载行（套件 dll 缺失/缺席行）不产冲突标。无命中=空表。</summary>
+    /// <summary>行内冲突 ics（BuildSnapshot/BuildTp 共用）：L1 每条一图标（红=严重 / 橙=叠加◎，
+    /// click=cf），随后 L2 碰撞橙标（每 mod 聚合一枚，click=cf），末尾 L3 叠加橙标 ◎（域内已装
+    /// ≥2 且均为域表登记项——第三方未登记不计入，防盲目误报）。
+    /// T11 M3：L1 已有卡片的 mod 跳过 L3 叠加标——避免"红+◎/双◎"噪音（expandedstorage
+    /// 只出 L1 橙卡）。未加载行（套件 dll 缺失/缺席行）不产冲突标。无命中=空表。</summary>
     private static List<IcInfo> CfIcsFor(List<CfRow> all, string guid)
     {
         var list = new List<IcInfo>();
@@ -2056,31 +2056,27 @@ internal static class ConfigBridge
             }
     }
 
-    /// <summary>行内 L1 图标：tip=原因摘要（Title）+ 对象 + 建议数（控制器裁定 2；完整原因在弹窗）。</summary>
+    /// <summary>行内 L1 图标：tip=表内 TipShort 逐字（v3 精简；完整结论在弹窗卡片）。</summary>
     private static IcInfo EntryIc(ConflictEntry e)
     {
-        var who = new List<string>();
-        foreach (var w in e.Who) who.Add(Meta.DisplayNameOf(w));
-        var kind = e.Level == "red" ? "冲突" : (e.Level == "orange" ? "碰撞" : "同域");
         return new IcInfo
         {
             K = e.Level,
             Click = "cf",
-            Tip = kind + " · " + e.Title + " · 对象 " + string.Join("、", who) + " · 处置建议 " + e.Tips.Length + " 条",
+            Tip = e.TipShort,
         };
     }
 
-    /// <summary>行内 L3 同域图标：tip 列出同域其他已装 mod（不含本行）。</summary>
+    /// <summary>行内 L3 叠加图标（v3：并入橙色级 + ◎ 显式字形——旧面板 icGlyph 先认 g，兼容；
+    /// tip 一句话，不再列名单）。</summary>
     private static IcInfo DomainIc(CfRow row, List<CfRow> mates)
     {
-        var others = new List<string>();
-        foreach (var x in mates)
-            if (!string.Equals(x.Guid, row.Guid, StringComparison.OrdinalIgnoreCase)) others.Add(x.Name);
         return new IcInfo
         {
-            K = "gray",
+            K = "orange",
+            G = "◎",
             Click = "cf",
-            Tip = "同域共存（" + row.Domain + "功能域）· 与 " + string.Join("、", others) + " · 仅标注不判定 · 点击查看",
+            Tip = "功能叠加：" + row.Domain + "类 mod 效果会叠加，点看详情",
         };
     }
 
@@ -2099,7 +2095,7 @@ internal static class ConfigBridge
         {
             var entries = EntriesFor(row, rows);
             foreach (var e in entries) data.Cards.Add(EntryCard(e));
-            foreach (var c in PatchScan.CollisionsFor(row.Guid)) data.Cards.Add(PatchCard(c)); // T12 L2
+            foreach (var c in PatchScan.CollisionsFor(row.Guid)) data.Cards.Add(PatchCard(c, row.Guid)); // T12 L2
             if (row.Domain != null && entries.Count == 0) // T11 M3：L1 已有卡片 → 不再叠 L3 灰卡
             {
                 var mates = DomainMates(row, rows);
@@ -2115,7 +2111,7 @@ internal static class ConfigBridge
         var c = new CfCardInfo
         {
             Lv = e.Level,
-            Tag = Meta.TagOf(e.Level),
+            Tag = string.IsNullOrEmpty(e.Tag) ? Meta.TagOf(e.Level) : e.Tag, // v3：Tag 入表逐字（旧条目兜底派生）
             Title = e.Title,
             Reason = e.Reason,
         };
@@ -2124,40 +2120,41 @@ internal static class ConfigBridge
         return c;
     }
 
-    /// <summary>L2 碰撞卡（v2 任务 12）：lv=orange / tag=碰撞；title=方法名；reason 按控制器
-    /// 裁定 3 文案（"对同一游戏方法 X 挂了补丁，结果取决于加载顺序（后写覆盖前写）"）；tips=
-    /// 停用一方 / 调序（仅缓解写序类冲突，风险自负）。who=owner 显示串（未知来源带标注）。</summary>
-    private static CfCardInfo PatchCard(PatchCollision c)
+    /// <summary>L2 碰撞卡（v3 精简）：lv=orange / tag=脚本碰撞；title=一句话结论（对方=组内
+    /// 其他 owner 显示名，括号带方法名）；reason 空（面板不渲染该段）；tips 两条白话。
+    /// who=owner 显示串（未知来源带标注，OwnerDisplay）。</summary>
+    private static CfCardInfo PatchCard(PatchCollision c, string selfGuid)
     {
+        var others = new List<string>();
+        foreach (var o in c.Owners)
+            if (o.Guid == null || !string.Equals(o.Guid, selfGuid, StringComparison.OrdinalIgnoreCase))
+                others.Add(o.Display);
         var card = new CfCardInfo
         {
             Lv = "orange",
-            Tag = Meta.TagOf("orange"),
-            Title = "运行时补丁碰撞 · " + c.Method,
-            Reason = "对同一游戏方法 " + c.Method + " 挂了 " + c.Owners.Count + " 个补丁（共 " + c.PatchCount
-                   + " 个补丁实例），结果取决于加载顺序（后写覆盖前写）。",
+            Tag = "脚本碰撞",
+            Title = "和「" + string.Join("、", others) + "」改了同一处游戏逻辑（" + c.Method + "），后加载的生效，行为可能异常。",
+            Reason = "",
         };
         card.Who.AddRange(c.Who());
-        card.Tips.Add("停用其中一方");
-        card.Tips.Add("尝试调整加载顺序（仅缓解写序类冲突，风险自负）");
+        card.Tips.Add("一般不用管");
+        card.Tips.Add("出现异常就停用其中一个，或试试「去调序」");
         return card;
     }
 
-    /// <summary>L3 同域卡（原型 cfHtml 的灰卡同构；who=域内全部已装登记 mod）。文案为通用标注，
-    /// 不含判定结论——spec §4.4"只标注不判定"。tips 照原型同域卡两句。</summary>
+    /// <summary>L3 叠加卡（v3：并入橙；tag=功能叠加；一句话结论 + 单条建议；who=域内全部已装
+    /// 登记 mod，含本行）。"原因"段不再单列。</summary>
     private static CfCardInfo DomainCard(CfRow row, List<CfRow> mates)
     {
         var c = new CfCardInfo
         {
-            Lv = "gray",
-            Tag = Meta.TagOf("gray"),
-            Title = "同域共存（功能域标注）",
-            Reason = "同属「" + row.Domain + "」功能域：多个 mod 可能改写同一类游戏数据，"
-                   + "机制可正交互补、也可能数值叠加超出预期。功能域标注只用于提示同域共存，不做冲突判定，自行取舍。",
+            Lv = "orange",
+            Tag = "功能叠加",
+            Title = "这几个 mod 都在改" + row.Domain + "数值，效果会叠加，可能超出预期。",
+            Reason = "",
         };
         foreach (var x in mates) c.Who.Add(x.Name);
-        c.Tips.Add("保留一方");
-        c.Tips.Add("维持现状（接受叠加结果）");
+        c.Tips.Add("介意叠加就只留一个");
         return c;
     }
 
