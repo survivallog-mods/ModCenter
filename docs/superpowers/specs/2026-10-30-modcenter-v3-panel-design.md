@@ -114,10 +114,11 @@ karina 排除注释原样保留（防后人误加）。
   - 非 tp 且非 missing 才有「卸载…」行（hint=`删文件，重启后生效`）；missing 只有安装行。
 - **行内图标 Tip 逐字**（ConfigBridge 产出）：
   - update（蓝↑）：`可更新：{local} → {remote}`
-  - install（蓝↑）：`可安装：{remote}`
   - downgrade（橙↓）：`可降级：本地 {local} 比远端 {remote} 新`
   - 版本告警 ⊘（橙，G=kbw）：`可能不适配当前游戏版本`
   - 待生效 ⟳（琥珀，无 click）：`待生效：重启游戏后应用`
+  - （实施修正：未装行不产 ↑ 图标——C# RepoIcsOf 从不为 Install 态产图标（v2 同口径），
+    安装入口只有详情「维护」区按钮。）
 
 ### 5.4 文案逐字总表（panel.js）
 

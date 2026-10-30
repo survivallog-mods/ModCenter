@@ -264,11 +264,10 @@ v2 在此之上补齐**生命周期闭环**（作者 2026-10-28 拍板，spec §
 | `MC_SET` | `guid, section, key, value` | 写值（Meta 键或第三方真实键）→ 回 `MC_SET_OK{k,badge}` / `MC_SET_FAIL{k,err}`；未登记键拒绝 |
 | `MC_TOGGLE_MOD` | `guid, enabled` | 套件=直写该 mod `General.Enabled`（热还原）；第三方=marker/软停三层语义；回推新快照 |
 | `MC_EVIDENCE` | `tag` | 验证辅助（只读）：写多表断言快照到 `ModCenter_evidence.txt`；正常玩家不触发 |
-| `MC_REPO_GET` | `force` | 仓库视图打开：15 分钟会话缓存内推缓存；`force=false`；fetch 在跑只推现状 |
-| `MC_CHK` | — | 手动"检查更新"：60 秒冷却（GitHub 匿名 60 次/h），冷却内 only toast |
+| `MC_REPO_GET` | `force` | （v3 起面板不再发送，保留兼容）打开拉取：15 分钟会话缓存内推缓存；fetch 在跑只推现状 |
+| `MC_CHK` | — | 头部「检查更新」：60 秒冷却（GitHub 匿名 60 次/h），冷却内 only toast `刚检查过，稍后再试` |
 | `MC_UPD` | `repoKey` | 确认更新 → 串行下载链（下载→zip MD5→解包 dll→暂存→写 pending） |
 | `MC_INST` | `repoKey` | 安装（与更新同链；前端按 local==null 分流） |
-| `MC_UPDALL` | — | Update 态整批串行更新；Warn 需逐仓确认、Install 非更新语义，均不入批 |
 | `MC_ORDER_GET` | — | 返回生效序（pending.order 命中前置 + 其余 GUID 字母序）+ 行元数据 + 默认序 |
 | `MC_ORDER_SAVE` | `guids[]` | 白名单精确校验（可排序集必须不重不漏）；通过 → 写 pending.order；回 `MC_ORDER_OK` / `MC_ORDER_FAIL{err}` |
 | `MC_UNINST` | `guid` | 构造卸载明细（self/套件/链上第三方/缺席行四路由）→ `MC_UNINST_DATA`；不可达 → `MC_TOAST` 拒因 |
@@ -293,7 +292,7 @@ v2 在此之上补齐**生命周期闭环**（作者 2026-10-28 拍板，spec §
 | `MC_ORDER_OK` / `MC_ORDER_FAIL` | `{type}` / `{type,err}` | 保存结果；OK 后面板自动退出排序模式 |
 | `MC_UNINST_DATA` | `{type,guid,name,self,files[],note?}` | 卸载明细（BepInEx 根相对路径）；`self=true` 为 ModCenter 自身 |
 | `MC_CF_DATA` | `{type,guid,cards[]}` | 冲突卡片：`{lv,tag,title,who[],reason,tips[]}`；不在链上回空 `cards` |
-| `MC_SCAN_DATA` | `{type,at,patched,game,total,routed,unknown,framework,ms,scope,error,items[],frameItems[]}` | L2 扫描汇总；`framework`=框架侧未计入组数，`frameItems`=披露明细 |
+| `MC_SCAN_DATA` | `{type,at,patched,game,total,routed,unknown,framework,ms,scope,error,items[],frameItems[]}` | L2 扫描汇总；`framework`=框架侧未计入组数，`frameItems`=披露明细；`items[].owners[]`/`frameItems[].owners[]`=显示名（v3：套件中文名/第三方插件名/`未知来源（id）`） |
 
 ### 3.3 快照 `ics` 字段
 
@@ -301,47 +300,50 @@ v2 在此之上补齐**生命周期闭环**（作者 2026-10-28 拍板，spec §
 
 | 字段 | 类型 | 说明 |
 |---|---|---|
-| `k` | string | 色级 `red\|orange\|gray\|blue\|amber` |
+| `k` | string | 色级 `red\|orange\|blue\|amber`（v3 两级：gray 退役；旧快照 gray 由面板 icGlyph legacy 映射 ◎） |
 | `tip` | string | 悬停完整提示（title） |
 | `click` | string? | `cf`=冲突详情 / `upd`=更新确认；缺省=纯状态（不弹窗） |
 | `g` | string? | 字形消歧（§4.1）；缺省按 `k+click` 推断 |
 | `w` | bool? | 停用弱化（`General.Enabled=false` 的套件行；面板 `.__mc-weak`） |
 
-## 4. 面板与七形图标语言
+## 4. 面板与图标语言（v3 两级）
 
 > **布局/样式的可视对照稿 = 本目录 `prototype.html`（项目资产）**：独立浏览器可开，
 > CSS 与 DOM 结构逐字对照 `panel.js`，模拟数据覆盖全部视图与弹窗状态，顶部有场景切换条。
 > **同步纪律：调整布局样式先在 prototype.html 上改并目检，定稿后把改动回写 `panel.js`
 > （CSS 字符串 + 对应渲染函数），两处必须同一次提交内一致**；历史原型
 > （2026-10-24 v4 / 2026-10-28 v2）在套件仓 docs/superpowers/specs/，已由本文件取代为现行对照稿。
-> **v3 方向（2026-10-30 作者拍板，prototype.html 已先行实施，panel.js 待回写）**：
-> ① 提示信息全面精简（短句/白话/无术语），冲突两级化——严重（红 ⚠，明确冲突只能二选一）
-> 与普通告警（橙，可能有问题；⇄脚本碰撞 / ◎功能叠加），gray 色级退役；
+> **v3（2026-10-30 作者拍板，已实施）**：
+> ① 提示信息全面精简（短句/白话/无术语），冲突两级化——**严重**（红 ⚠，明确冲突只能二选一）
+> 与**普通告警**（橙，可能有问题；⇄脚本碰撞 / ◎功能叠加），gray 色级退役（◎ 用显式 `G="◎"`）；
 > ② 取消独立「套件仓库」页——顶部「检查更新」按钮 + 列表行内图标 + 详情页「维护」区按钮，
 > 按钮不进左侧列表；补丁碰撞汇总挪到底部图例栏；
-> ③ 「重装当前版本」入口随仓库页退役（2026-10-30 作者确认：需要时先卸载再安装）——
-> panel.js 回写时删除 ok 行重装按钮与 `repoVerbOf` 重装分支（必修 5 / D7"保留重装入口"口径作废）。
+> ③ 「重装当前版本」与「全部更新（MC_UPDALL）」退役（需要时先卸载再安装 / 逐仓更新）。
+> 逐字文案总表与边界：`docs/superpowers/specs/2026-10-30-modcenter-v3-panel-design.md`。
 
-### 4.1 七形图标（色随级、形随义）
+### 4.1 图标语言（v3 两级：色随级、形随义）
 
 18px 圆片、字号 9.5px、容器 flex `gap:3px`；悬停 `brightness(1.25)` + title 全文；
-**义不单靠颜色**（WCAG 色义规则：每形字形不同）。
+**义不单靠颜色**（WCAG 色义规则：每形字形不同）。冲突两级：红=严重（只能二选一/多选一）、
+橙=普通告警（可能有问题；⇄/◎ 靠字形区分）。gray 色级退役（panel `icGlyph` 的 gray 分支
+保留为 legacy——仅旧 C# 快照兼容）。
 
 | 形 | 色级 | 含义 | 点击路由 | 数据源 |
 |---|---|---|---|---|
-| `⚠` | red | L1 已知冲突 | `cf` | `Meta.KnownConflicts` 命中（GUID 优先、dll 文件名兜底） |
-| `⇄` | orange | L2 运行时补丁碰撞（每 mod 聚合一枚） | `cf` | `PatchScan` 同方法 ≥2 owner |
-| `◎` | gray | L3 同域共存（只标注不判定） | `cf` | `Meta.Domains` 域内已装登记 mod ≥2 |
+| `⚠` | red | **严重冲突**（明确冲突，只能二选一/多选一） | `cf` | `Meta.KnownConflicts` 命中（tip=表内 `TipShort` 逐字） |
+| `⇄` | orange | 普通告警·脚本碰撞（运行时补丁碰撞，每 mod 聚合一枚） | `cf` | `PatchScan.IcsFor`（tip=`脚本碰撞 ×N：与…`） |
+| `◎` | orange | 普通告警·功能叠加（同域共存，只标注不判定；显式 `G="◎"`） | `cf` | `Meta.Domains` 域内已装登记 mod ≥2 |
 | `↑` | blue | 可更新（远端 > 本地） | `upd` | `RepoDecision` State=Update |
 | `↓` | orange | 可降级更新（远端 < 本地，D7 风险自担） | `upd` | State=Downgrade |
-| `⊘` | orange | 游戏版本告警（D8 不拦截） | `upd` | State=Warn（`g="⊘"`/`g="kbw"` 与 ↓ 消歧） |
-| `⟳` | amber | 待生效（重启后应用） | 无（`cursor:default`） | pending.json 归属到本行的 op（install/replace/delete/disable/enable） |
+| `⊘` | orange | 游戏版本告警（D8 不拦截） | `upd` | State=Warn/kbw（`G="kbw"` 与 ↓ 消歧） |
+| `⟳` | amber | 待生效（重启后应用） | 无（`cursor:default`） | pending.json 归属到本行的 op（tip 固定 `待生效：重启游戏后应用`） |
 
-补充口径：
+补充口径（v3）：
 
 - **等宽布局**：图标容器 `flex-shrink:0`；行内图标顺序=冲突标 → 仓库态 → 待生效。
-- **聚合**：L2 碰撞每行只挂一枚 ⇄（tip=组数+前两组方法名），不铺图标洪水；L1 多冲突可多枚。
-- **停用弱化**（Ruling 15 / T12 M7）：套件行 `General.Enabled=false` 时冲突/碰撞/同域标
+- **聚合**：L2 碰撞每行只挂一枚 ⇄（tip=`脚本碰撞 ×N：与{对方显示名}`，对方取前 2 个）；
+  L1 多冲突可多枚。
+- **停用弱化**（Ruling 15 / T12 M7）：套件行 `General.Enabled=false` 时冲突/碰撞/叠加标
   保留但 `w:true` + tip 前缀"（已停用）"——**补丁不因停用而移除**，不得表述为"已移除"。
 - **待生效意图吃动作徽标**：同一行已有 pending 意图（含 delete 卸载）时只显 ⟳，
   ↑/↓/⊘ 消失（避免"看到可更新却已在卸载"）。
@@ -349,17 +351,19 @@ v2 在此之上补齐**生命周期闭环**（作者 2026-10-28 拍板，spec §
 
 ### 4.2 弹窗与视图
 
-- **冲突详情**（`cf`）：每冲突一张卡片（标题/冲突对象/原因/编号处置建议），底部固定
-  风险文案"调整加载顺序只能规避部分冲突（写序类），不能解决数值叠加类冲突。"
-  + 三钮：关闭 / 停用此 mod / 卸载此 mod…（转 T10 确认弹窗）。
-- **更新确认**（`upd`）：版本对比 kv；D7 回退红字、D8 gamekb 不符红字（均不拦截）；
-  主钮按态着色（更新=琥珀 / 安装=蓝 / 降级=橙）。
-- **仓库视图**：12 行五态；`Remote=null` 渲染"检查失败"（**绝不显示"已是最新"**）；
-  已有待生效意图的行按钮换 ⟳ 待生效。
-- **卸载确认**：完整文件明细（dll/cfg/记录）+ 固定记录行 + "不受影响"说明；
-  self 分支特别文案（两靴后面板消失、引导壳 MCShell 基座级保留）。
-- **进度四态弹窗**：确认 → 内联进度条（下载/校验/解包/写入待生效）→ ok / err；
-  进度更新不重建弹窗；可"隐藏（后台继续）"。
+- **冲突详情**（`cf`，v3 两级卡片）：h3=`{tag} · {mod名}`（tag=严重冲突/脚本碰撞/功能叠加）+
+  一句话结论 + 涉及 mod + 原因（空则不渲染该段）+ 怎么办（编号列表）；
+  底部固定风险行删除（各卡自含）；四钮：关闭 / 停用此 mod / 去调序 / 卸载此 mod…（转确认弹窗）。
+- **更新确认**（`upd`，v3 精简）：版本对比一行；D7 回退红字、D8 告警红字仅异常时出现
+  （均不拦截）；主钮按态着色（更新=琥珀 / 安装=蓝 / 降级=橙）。
+- **仓库视图**：退役（v3）——顶部「检查更新」+ 行内图标 + 详情「维护」区承接；
+  「全部更新」「重装当前版本」入口随之退役（D3/D4）。
+- **卸载确认**（v3 精简）：一句话说明（存档/其他 mod 不受影响）+ 文件明细红字（末行固定
+  "停用 / 排序记录（如有）"）；self 分支红字（两靴 + 引导壳基座级保留）。
+- **进度弹窗**：`进行中` + 内联进度条（下载/校验/解包/写入待生效）→ `已就绪` / `{动词}失败`；
+  进度更新不重建弹窗；可「隐藏」。
+- **补丁碰撞汇总**（v3）：底部图例栏按钮（有碰撞才显示）→ 一句结论 + 碰撞位置（中文 mod 名）
+  + 框架侧未计入披露段；可「重新扫描」。
 - 全部弹窗为面板内浮层；ESC 先关弹窗再关面板；✕/点遮罩为保底路径。
 
 ### 4.3 底部待生效条
@@ -519,38 +523,31 @@ PendingWriter 合并语义对临时文件 `selftest-pending.json` 自证（旧�
 - 证据全文存 `.superpowers/sdd/2026-10-28-modcenter-v2-lifecycle/task-6-gamever.txt` /
   `task-6-reposelftest.txt`（BepInEx 侧原件已按惯例清，副本在 sdd 目录）。
 
-### 5.3 套件仓库页与更新确认链（v2 生命周期任务 8）
+### 5.3 更新链与检查更新（v3：无独立仓库页；机制承接 v2 任务 8）
 
-- **入口与视图**：侧栏顶部仓库入口卡（13px 迷你 ↑ + "N 个可更新 · M 个可安装 · K 个版本告警"），
-  点击进仓库视图：12 行五态（`ok/update/downgrade/warn/install`）+ "检查更新" + "全部更新（N）" +
-  上次检查时间与网络状态（直连/镜像）。
-- **查询节流**：**面板打开即自动查一次**（D6/Ruling 22：`MC_OPEN` 分支调用
-  `HandleRepoGet(force=false)`，15 分钟会话缓存内只推缓存不重复 fetch——12×4=48 < 60
-  匿名限额；T16/D 加固），手动检查 60 秒冷却（冷却内只 toast"刚检查过（GitHub 匿名限额
-  60 次/小时）"）；**绝不后台轮询**。一轮 fetch = 12 次 API 请求。
-  **403 专门提示（T16/D）**：fetch 命中 HTTP 403 时入口卡/行内显示"GitHub 限流，请稍后再试"
-  + 一次 toast，不显示成普通"检查失败"（`RepoRow.HttpStatus` / `RepoData.rateLimited`）。
-- **fetch**：主线程取本地态（`SnapshotLocal` + `GameVersion.ReadCached() ?? ReadLocal()`）→
-  后台 `Task.Run` 12 仓顺序 `FetchLatest`（失败=null）→ `RepoDecision.Build` 纯函数 →
-  主线程整体替换行数据（fetch 期间旧值保持，零跨线程行读写）→ 推 `MC_REPO_DATA` +
-  刷新快照（侧栏 ↑/↓/⊘ 随快照下发）。
-- **下载链**（串行闸，拒绝并发）：下载（`DownloadAsset`，进度 250ms/1% 双门限节流推
-  `MC_DL`）→ **zip MD5 对 update.json**（失败=删 zip、清 staging、不写 pending）→
-  解包 `BepInEx/plugins/*.dll`（只取直下条目，防子目录夹带）到 `staging\` 同名暂存 →
-  zip 即刻清理 → 主线程 `PendingWriter.AddUpdate`（`op.Md5` = **暂存 dll 自身 MD5**，
-  Ruling 11；若目标是 ModCenter 本体，另写 `BepInEx\ModCenter\selfupdate.flag`——T16 一次
-  重启自更新）→ 刷新 pending/摘要/快照（行内 ⟳ 出现、↑/↓ 消失）→ `MC_DL ok` + toast。
-- **两层校验闭环**：zip 层（下载时对 update.json.md5）=来源可信；dll 层（清理器执行前
-  对 `op.md5`）=写盘到安装间完整。
-- **守卫**：未知仓键/未检查过/检查中/Remote=null/已有待生效意图/非动作态 → `MC_TOAST`
-  拒因，不动磁盘。`MC_UPDALL` 只跑 Update 态（Warn 需逐仓红字确认、Install 非更新语义，
-  均不入批）。
-- **确认弹窗**：D7 版本回退红字、D8 gamekb 不符红字（按钮保持可用）、未校验注记（灰字）、
-  "校验与生效"说明；正文字段均来自 `RepoRow`（`Why` 在 Warn/Downgrade 态非空）。
-- **装机实测**：RobotSpeed 本地 1.6.0 → 面板查到 1.7.0 → 确认 → 下载 22.5KB 全程约 2s →
-  `pending.json` 落 `replace` + staging dll 在场、**无 zip 残留**、`op.md5 == 暂存 dll MD5` →
-  重启 → 清理器 `replace ... OK`、pending 0/1、在役 dll MD5 与暂存一致 → 仓库页
-  "1.7.0 → 1.7.0 ✓ 最新"、⟳ 消失、底条隐藏。守卫/冷却/D7 侧栏 ↓/Remote=null 合成态均实测。
+> v2 的"套件仓库页"（12 行五态 + 检查/全部更新按钮 + 上次检查行 + 入口卡）已退役；
+> **机制全部保留**，入口改为三处：顶部「检查更新」按钮（`MC_CHK`）、列表行内图标
+> （↑/↓/⊘，点击直接确认）、详情「维护」区按钮（`maintHtml`：更新到 X / 安装 X / 降级到 X）。
+
+- **查询节流**：面板打开自动查一次（15 分钟会话缓存，D6/Ruling 22 不变）+ 手动 60 秒冷却
+  （冷却内 toast `刚检查过，稍后再试`）+ **绝不后台轮询**。检查完成汇总 toast 由面板拼
+  （JS 在 `MC_CHK` 后等 `MC_REPO_DATA`：`检查完成：N 个可更新、…`/`都是最新版`，spec D8）。
+  **403 专门提示**：`GitHub 限流`+`请稍后再试`（`RepoData.rateLimited` 口径不变）。
+- **fetch/下载链**：与 v2 完全一致——后台 12 仓顺序 fetch → `RepoDecision.Build` 五态 →
+  串行下载（`MC_DL` 节流）→ zip MD5 → 解包暂存 → `PendingWriter.AddUpdate` → 行内 ⟳。
+- **`MC_UPDALL`（全部更新）退役**（v3/D4）：面板入口与 C# 分支/处理器删除；Warn/降级/
+  安装一律逐仓确认。
+- **「重装当前版本」退役**（v3/D3）：`repoVerbOf` 重装分支与 ok 行按钮删除；需要时先卸载
+  再安装。Ok+kbw 行的 ⊘ 图标仍可走"更新到同版本"确认（D8 不拦截口径不变）。
+- **详情「维护」区（`maintHtml`）**：仓库行 pending → 文本 `⟳ 待生效 · 重启游戏后应用`；
+  update/downgrade/install 且 Remote 在 → 按钮 + 版本灰字；非 tp 非 missing 才有「卸载…」行
+  （hint=`删文件，重启后生效`）；missing 只有安装行。__self 页保留仅卸载的 `uninstActHtml`
+  （hint=`需重启两次`）。
+- **行内图标 tip 逐字**：见 §4.1 表（未装行不产 ↑ 图标——v2 同口径，安装走「维护」区）。
+- **装机实测（v2 历史记录，结论不受呈现层改动影响）**：RobotSpeed 本地 1.6.0 → 面板查到
+  1.7.0 → 确认 → 下载 22.5KB 全程约 2s → `pending.json` 落 `replace` + staging dll 在场、
+  无 zip 残留、`op.md5 == 暂存 dll MD5` → 重启 → 清理器 `replace ... OK` → ⟳ 消失、底条隐藏。
+  守卫/冷却/D7 侧栏 ↓/Remote=null 合成态均实测。
 
 ### 5.4 手动排序（v2 生命周期任务 9）
 
@@ -686,11 +683,11 @@ PendingWriter 合并语义对临时文件 `selftest-pending.json` 自证（旧�
   | # | 匹配 GUID | 匹配 dll | 级别 | 冲突对象 | 处置建议 |
   |---|---|---|---|---|---|
   | 1 | `com.jangfullmoon.storagecapacityexpansion` | `StorageCapacityExpansion.dll` | red | CabinetSize / BackpackExpand / CabinetEverywhere | 3 条 |
-  | 2 | `survivallog.expandedstorage` | `ExpandedStorage` | gray（低相关） | 背包扩容 | 2 条 |
+  | 2 | `survivallog.expandedstorage` | `ExpandedStorage` | orange（功能叠加 ◎，v3 由 gray 并入） | 背包扩容 | 1 条 |
 
-  首条原因逐字含"改写 73 件柜族家具 BagId 至共享包并改包尺寸、强写 ColdRate/PowerCost
-  ……镜像缓存错位失效"；第二条为"仅玩家背包扩容/负重 ×10，与套件背包扩容机制正交但数值
-  叠加可能超预期"。`com.jangfullmoon.karinasprite` **明确排除**（纯立绘替换、零游戏钩子，
+  首条 v2 原因逐字含"改写 73 件柜族家具 BagId 至共享包并改包尺寸、强写 ColdRate/PowerCost
+  ……镜像缓存错位失效"（v3 起两条目的 TipShort/Tag/Title/Reason/Tips 按 spec §5.2 逐字重写，
+  上句为 v2 断言史录）。`com.jangfullmoon.karinasprite` **明确排除**（纯立绘替换、零游戏钩子，
   同作者包名易误联想，收录只会误报）——表尾注释防后人误加。
 - **匹配 `Meta.MatchL1(guid, dllName)`**：GUID 全表优先 → dll 文件名全表兜底；文件名只取
   最后一段、自动剥 `.dll`（可省）、`OrdinalIgnoreCase`；纯函数（无 BepInEx 依赖）。
@@ -764,11 +761,9 @@ PendingWriter 合并语义对临时文件 `selftest-pending.json` 自证（旧�
 - **owner→mod 归属**（裁定 2）：①精确 GUID 全表 ②前缀（owner 以 `<GUID>.` 开头，如
   `com.local.survivallog.quickaction.trace` → quickaction）③其余=未知来源（显示"未知来源（id）"，
   不臆造归属）。两遍扫描保证精确优先于前缀。
-- **行内橙标**（裁定 3）：每个 mod **聚合一枚** ⇄（tip=组数+前两组方法名+点击查看；多组不铺图标
-  洪水），click=cf 复用冲突详情弹窗；`MC_CF` 返回该 mod 涉及的每组一张橙卡（方法名+owner 名单+
-  建议）。**未知来源组不铺行**，只进扫描汇总（`MC_SCAN_DATA` 的 `unknown` 计数与 `[未知来源]` 组）。
-- **卡片文案**（裁定 3）：reason=对同一游戏方法 X 挂了 N 个补丁（共 M 个补丁实例），结果取决于
-  加载顺序（后写覆盖前写）；tips=停用其中一方 / 尝试调整加载顺序（仅缓解写序类冲突，风险自负）。
+- **行内橙标**（裁定 3；v3 tip 精简）：每个 mod **聚合一枚** ⇄（tip=`脚本碰撞 ×N：与{对方显示名}，点看详情`，多组不铺图标洪水），click=cf 复用冲突详情弹窗；`MC_CF` 返回该 mod 涉及的每组一张橙卡（tag=脚本碰撞，title 一句话含方法名，who=owner 显示名名单）。
+- **未知来源组不铺行**，只进扫描汇总（`MC_SCAN_DATA` 的 `unknown` 计数与 `[未知来源]` 组）。
+- **卡片文案**（裁定 3；v3 精简）：title=`和「{对方}」改了同一处游戏逻辑（{方法名}），后加载的生效，行为可能异常。`；reason 不再单列；tips=`一般不用管` / `出现异常就停用其中一个，或试试「去调序」`。
 - **面板**：侧栏仓库入口卡下方"补丁碰撞 N 组"汇总行（可归属/未知来源/框架侧未计入/游戏侧方法数/
   耗时/扫描时刻；点击弹汇总窗，列出全部游戏侧组 + 框架侧"未计入"披露区，含"重新扫描"→ MC_SCAN）；
   橙标点击走既有 cf 弹窗。
@@ -808,8 +803,9 @@ PendingWriter 合并语义对临时文件 `selftest-pending.json` 自证（旧�
 
 ### 6.3 三层呈现与边界
 
-- **图标优先级与聚合**：冲突标（L1 红/L2 橙/L3 灰）置最前，随后仓库态（↑/↓/⊘），
-  最后 ⟳。L2 每行聚合一枚 ⇄（tip=组数+前两组方法名，多组不铺图标洪水）；L1 多冲突可多枚。
+- **图标优先级与聚合**（v3 两级）：冲突标置最前（L1 红=严重 / L2 橙⇄=脚本碰撞 / L3 橙◎=功能叠加），
+  随后仓库态（↑/↓/⊘），最后 ⟳。L2 每行聚合一枚 ⇄（tip=`脚本碰撞 ×N：与…`，多组不铺图标洪水）；
+  L1 多冲突可多枚。
 - **L2 范围口径**（Ruling 14）：只看游戏侧方法（声明类型程序集 `HotUpdate` 或命名空间
   `GameCore.*`）；框架（BepInEx/HarmonyLib/MonoMod）、引擎（UnityEngine/Vuplex）、插件自身
   内部方法不计入碰撞组数。**框架侧多 owner 组继续过滤不铺行，但必须在扫描汇总披露
@@ -820,8 +816,8 @@ PendingWriter 合并语义对临时文件 `selftest-pending.json` 自证（旧�
   "补丁已移除"。停用行保留冲突/碰撞/同域标但加 `w:true`（透明度 .45）+ tip 前缀"（已停用）"。
 - **不自动处置**：三层只标注与解释，停用/卸载/调序全部由玩家点击；调序建议旁固定
   风险文案（"只能规避部分冲突（写序类），不能解决数值叠加类冲突"）。
-- **L3 灰标范围**（Ruling 13）：维持 spec 定义（域内已装登记 mod ≥2 即标注），
-  常驻灰标为可发布的产品取舍，等作者实机反馈后再议规则。
+- **L3 叠加标范围**（Ruling 13；v3 由灰改橙 ◎=普通告警）：维持 spec 定义（域内已装登记
+  mod ≥2 即标注），只标注不判定。
 - **数据同源**：快照 ics 与 `MC_CF` 卡片共用 `EntriesFor / DomainMates` 一套口径，
   杜绝两处漂移；L2 的 ics/卡片/汇总共用 `PatchScan._last` 一份缓存。
 - **探针**：`Debug.PatchScan`（默认关）跑一轮 dump 到 `BepInEx/ModCenter_patchscan.txt`，
@@ -887,6 +883,10 @@ v1 的第三方重启级禁用流程 = 面板写 `[DisabledTp]` marker → 游�
 | 单槽 MCCleaner.dll 基座级（Ruling 8） | 清理器独立 1.0.x 版本线、不参与游戏内自更新 | **作废**（T16/Ruling 21）：清理逻辑并入 ModCenter.dll；patchers 只留冻结 `MCShell.dll`；游戏内更新本体即更新清理逻辑 |
 | `StartDetached`（DllDisabler） | v1 退出改名执行器 | 迁 `RestartHelper.StartDetachedPS`，唯一用途=一键重启 |
 | 第三方 `[Disabled]` 标记名单 | v1 T6/T14 | 退役（T16 已换 `.disabled` 真禁用），本版不留读取方 |
+| 独立「套件仓库」页视图 | v2 任务 8（12 行五态/检查行/全部更新按钮/入口卡） | **v3 退役**（spec D2）：顶部「检查更新」+ 行内图标 + 详情「维护」区承接；fetch/下载链机制不变，`MC_REPO_DATA` 照推 |
+| `MC_UPDALL`（全部更新） | v2 Update 态整批串行 | **v3 退役**（spec D4）：面板入口与 C# 分支/处理器删除，逐仓确认 |
+| 「重装当前版本」入口 | 必修 5（D7）ok 行重装按钮 | **v3 退役**（spec D3）：需要时先卸载再安装；Ok+kbw ⊘ 仍可"更新到同版本"确认 |
+| `gray` 冲突色级 | v2 三级（红/橙/灰，◎=同域灰标） | **v3 退役**（spec D1）：功能叠加并入 orange + 显式 `G="◎"`；panel `icGlyph` gray 分支保留为 legacy |
 
 ### 7.4 幂等不变量（所有 op 必须幂等）
 
