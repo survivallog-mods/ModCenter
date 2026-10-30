@@ -125,8 +125,8 @@ internal static class PatchScan
         var hits = CollisionsFor(guid);
         if (hits.Count == 0) return null;
         var others = new List<string>();
-        foreach (var c in hits)
-            foreach (var o in c.Owners)
+        for (var i = 0; i < hits.Count && others.Count < 2; i++) // 终审 F5：外层同守卫，最多 2 个对方
+            foreach (var o in hits[i].Owners)
             {
                 if (o.Guid != null && string.Equals(o.Guid, guid, StringComparison.OrdinalIgnoreCase)) continue;
                 if (others.IndexOf(o.Display) < 0) others.Add(o.Display);

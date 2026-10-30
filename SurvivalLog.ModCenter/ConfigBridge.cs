@@ -1837,7 +1837,7 @@ internal static class ConfigBridge
             if (op.Type == McPending.TypeDelete && targets.Contains(NormOpRel(op.Target)))
             {
                 PushEvent("{\"type\":\"MC_TOAST\",\"main\":" + JsonW.Str(u.Name + " 已有待生效卸载意图")
-                    + ",\"small\":" + JsonW.Str("重启游戏后由启动清理器彻底删除（底部待生效条可查看）") + "}");
+                    + ",\"small\":" + JsonW.Str("重启游戏后彻底删除（底部待生效条可查看）") + "}"); // v3 术语清零（终审 F2）
                 return;
             }
 
@@ -1877,8 +1877,8 @@ internal static class ConfigBridge
                     ? dllOp + ".disabled"
                     : dllOp + (u.CfgRel != null ? " + " + u.CfgRel : "")
                       + (u.DisabledTwin ? " + " + dllOp + ".disabled" : "")));
-            PushEvent("{\"type\":\"MC_TOAST\",\"main\":" + JsonW.Str(u.Name + " 已加入待生效")
-                + ",\"small\":" + JsonW.Str("重启游戏后由启动清理器彻底删除（dll + cfg + 停用记录）——强杀亦不丢失") + "}");
+            PushEvent("{\"type\":\"MC_TOAST\",\"main\":" + JsonW.Str("已加入待生效：卸载 " + u.Name)
+                + ",\"small\":" + JsonW.Str("重启游戏后执行") + "}"); // v3 精简（spec §5.4/终审 F2）
         }
         catch (Exception e)
         {
@@ -2039,7 +2039,9 @@ internal static class ConfigBridge
             }
     }
 
-    /// <summary>行内 L1 图标：tip=表内 TipShort 逐字（v3 精简；完整结论在弹窗卡片）。</summary>
+    /// <summary>行内 L1 图标：tip=表内 TipShort 逐字（v3 精简；完整结论在弹窗卡片）。
+    /// 功能叠加条目（orange+Tag=功能叠加）带显式 G="◎"——否则面板按 orange+cf 推断成 ⇄
+    /// （终审 F1：新旧面板同错，spec §5.2 字形◎ / §2 反目标）。</summary>
     private static IcInfo EntryIc(ConflictEntry e)
     {
         return new IcInfo
@@ -2047,6 +2049,7 @@ internal static class ConfigBridge
             K = e.Level,
             Click = "cf",
             Tip = e.TipShort,
+            G = e.Tag == "功能叠加" ? "◎" : null,
         };
     }
 

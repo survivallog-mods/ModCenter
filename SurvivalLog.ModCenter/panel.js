@@ -516,7 +516,7 @@
         + icsHtml(m)
         /* 必修 7：dll 不在场（未安装）→ 开关锁定，去仓库安装走详情页入口 */
         + (m.missing
-          ? '<span class="__mc-mini-sw __mc-lock" title="\u672a\u5b89\u88c5\uff1a\u8bf7\u5230\u300c\u5957\u4ef6\u4ed3\u5e93\u300d\u5b89\u88c5"></span>'
+          ? '<span class="__mc-mini-sw __mc-lock" title="\u672a\u5b89\u88c5\uff1a\u8fdb\u8be6\u60c5\u9875\u5728\u300c\u7ef4\u62a4\u300d\u5b89\u88c5"></span>'
           : swBtn(m.enabled, ' data-act="toggle" data-guid="' + esc(m.guid) + '"')) + '</div>';
     }
     h += '<div class="__mc-cat">\u9762\u677f\u81ea\u8eab</div>';
@@ -1143,7 +1143,7 @@
    * 多卡片间 border-top 分隔线；底部固定风险行删除（各卡自含）。 */
   function cfCardHtml(m, c, i) {
     var lv = c.lv === 'red' ? 'red' : 'orange';
-    var glyph = c.g || icGlyph({ k: lv, click: 'cf' });
+    var glyph = c.g || (c.tag === '\u529f\u80fd\u53e0\u52a0' ? '\u25ce' : icGlyph({ k: lv, click: 'cf' })); // 终审 F4：叠加卡按 tag 推断 ◎
     var h = '';
     if (i > 0) h += '<div style="border-top:1px solid #2a2f3d;margin-top:14px"></div>';
     h += '<h3>' + chipHtml(lv, glyph) + esc((c.tag || '\u63d0\u793a') + ' \u00b7 ' + m.name) + '</h3>'
@@ -1800,15 +1800,21 @@
       if (event.dl) ST.dl = { repoKey: event.dl.repoKey, pct: event.dl.pct, stage: event.dl.stage };
       else ST.dl = null;
       renderSide();
-      /* v3：头部「检查更新」在等结果 → 拼汇总 toast（spec D8；C# 零改动）。 */
-      if (ST.chkWaiting) {
+      /* v3：头部「检查更新」在等结果 → 拼汇总 toast（spec D8；C# 零改动）。
+       * 终审 F3：checking=本轮未完（等完成拍，不消费标记）；全失败/限流不得报"都是最新版"
+       * （403 已有 C# 专门 toast；全失败在此补一句）。 */
+      if (ST.chkWaiting && !event.checking) {
         ST.chkWaiting = false;
-        var c = repoCounts(), parts = [];
-        if (c.upd) parts.push(c.upd + ' \u4e2a\u53ef\u66f4\u65b0');
-        if (c.inst) parts.push(c.inst + ' \u4e2a\u53ef\u5b89\u88c5');
-        if (c.warn) parts.push(c.warn + ' \u4e2a\u7248\u672c\u5f85\u786e\u8ba4');
-        toastRaw(parts.length ? '\u68c0\u67e5\u5b8c\u6210\uff1a' + parts.join('\u3001') : '\u68c0\u67e5\u5b8c\u6210\uff1a\u90fd\u662f\u6700\u65b0\u7248',
-          parts.length ? '\u5217\u8868\u91cc\u5df2\u7528\u56fe\u6807\u6807\u51fa\uff0c\u70b9\u56fe\u6807\u6216\u8fdb\u8be6\u60c5\u5904\u7406' : '');
+        if (event.failAll) {
+          toastRaw('\u68c0\u67e5\u5931\u8d25\uff0c\u7a0d\u540e\u518d\u8bd5', '');
+        } else if (!event.rateLimited) {
+          var c = repoCounts(), parts = [];
+          if (c.upd) parts.push(c.upd + ' \u4e2a\u53ef\u66f4\u65b0');
+          if (c.inst) parts.push(c.inst + ' \u4e2a\u53ef\u5b89\u88c5');
+          if (c.warn) parts.push(c.warn + ' \u4e2a\u7248\u672c\u5f85\u786e\u8ba4');
+          toastRaw(parts.length ? '\u68c0\u67e5\u5b8c\u6210\uff1a' + parts.join('\u3001') : '\u68c0\u67e5\u5b8c\u6210\uff1a\u90fd\u662f\u6700\u65b0\u7248',
+            parts.length ? '\u5217\u8868\u91cc\u5df2\u7528\u56fe\u6807\u6807\u51fa\uff0c\u70b9\u56fe\u6807\u6216\u8fdb\u8be6\u60c5\u5904\u7406' : '');
+        }
       }
     }
     /* v2 任务 8：下载链进度/结果（MC_DL：down|check|unzip|write|ok|err） */

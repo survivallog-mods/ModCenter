@@ -768,7 +768,7 @@ function renderSide() {
       + '<span class="__mc-st"></span><span class="__mc-nm">' + esc(m.name) + '</span>'
       + icsHtml(m)
       + (m.missing
-        ? '<span class="__mc-mini-sw __mc-lock" title="未安装：请到「套件仓库」安装"></span>'
+        ? '<span class="__mc-mini-sw __mc-lock" title="未安装：进详情页在「维护」安装"></span>'
         : swBtn(m.enabled, ' data-act="toggle" data-guid="' + esc(m.guid) + '"')) + '</div>';
   }
   h += '<div class="__mc-cat">面板自身</div>';
