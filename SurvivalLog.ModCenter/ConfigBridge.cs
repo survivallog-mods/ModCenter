@@ -1009,8 +1009,8 @@ internal static class ConfigBridge
         _pendSig = PendingSig();
         PushRender(BuildSnapshot().ToJson()); // 行内 ⟳ 同拍消失（BuildSnapshot 内部再强制重读）
         PushPendingSummary();                 // 底条隐藏（n=0 且无 applied）
-        PushEvent("{\"type\":\"MC_TOAST\",\"main\":" + JsonW.Str("已撤销全部待生效操作")
-            + ",\"small\":" + JsonW.Str("加载顺序一并恢复默认（字母序）；暂存文件由下次启动清理器回收") + "}");
+        PushEvent("{\"type\":\"MC_TOAST\",\"main\":" + JsonW.Str("已撤销待生效操作")
+            + ",\"small\":" + JsonW.Str("加载顺序也恢复默认") + "}"); // v3 精简（spec §5.4）
     }
 
     /// <summary>
@@ -1041,7 +1041,7 @@ internal static class ConfigBridge
         _restartRequested = true;
         _restartQuitAge = 0f;
         PushEvent("{\"type\":\"MC_TOAST\",\"main\":" + JsonW.Str("正在重启游戏…")
-            + ",\"small\":" + JsonW.Str("已请求重启：本进程退出后经 Steam 重拉（约 10 秒）") + "}");
+            + ",\"small\":" + JsonW.Str("本进程退出后经 Steam 自动重拉") + "}"); // v3 精简（spec §5.4）
     }
 
     // ============ 套件仓库页（v2 任务 8：拉取/检查节流 + 下载确认链） ============
@@ -1186,7 +1186,7 @@ internal static class ConfigBridge
         if (_repoChain)
         {
             PushEvent("{\"type\":\"MC_TOAST\",\"main\":" + JsonW.Str("已有下载在进行")
-                + ",\"small\":" + JsonW.Str("更新链串行执行（限流+带宽），完成后再试") + "}");
+                + ",\"small\":" + JsonW.Str("一次只处理一个，完成后再试") + "}"); // v3 精简
             return;
         }
         if (_repoFetching)
@@ -1378,10 +1378,8 @@ internal static class ConfigBridge
                         PendingWriter.AddUpdate(ui.Row, ui.Info, ui.Staged); // 主线程唯一写者
                         PushEvent("{\"type\":\"MC_DL\",\"repoKey\":" + JsonW.Str(ui.RepoKey)
                             + ",\"pct\":100,\"stage\":\"ok\"}");
-                        var verb = ui.Row.State == RepoState.Ok ? "重装 "
-                            : (string.IsNullOrEmpty(ui.Row.Local) ? "安装 " : "更新 ");
                         PushEvent("{\"type\":\"MC_TOAST\",\"main\":" + JsonW.Str(name + " 已加入待生效")
-                            + ",\"small\":" + JsonW.Str("已下载并 MD5 校验 · " + verb + name + " → " + to + " · 重启后由启动清理器替换") + "}");
+                            + ",\"small\":" + JsonW.Str("已下载并校验，重启游戏后自动替换") + "}"); // v3 精简
                         RefreshPending(true);
                         _pendSig = PendingSig();
                         PushPendingSummary();
@@ -1399,8 +1397,10 @@ internal static class ConfigBridge
                 {
                     PushEvent("{\"type\":\"MC_DL\",\"repoKey\":" + JsonW.Str(ui.RepoKey)
                         + ",\"pct\":100,\"stage\":\"err\",\"err\":" + JsonW.Str(ui.Err ?? "未知错误") + "}");
-                    PushEvent("{\"type\":\"MC_TOAST\",\"main\":" + JsonW.Str("更新失败（未写入待生效）")
-                        + ",\"small\":" + JsonW.Str((ui.Err ?? "未知错误") + " · 暂存已清理") + "}");
+                    var v = ui.Row != null && ui.Row.State == RepoState.Downgrade ? "降级"
+                        : (ui.Row != null && !string.IsNullOrEmpty(ui.Row.Local) ? "更新" : "安装"); // v3 精简
+                    PushEvent("{\"type\":\"MC_TOAST\",\"main\":" + JsonW.Str(v + "失败")
+                        + ",\"small\":" + JsonW.Str((ui.Err ?? "未知错误") + " · 没有做任何更改，可稍后重试") + "}");
                 }
                 break;
             case 4:
@@ -1413,8 +1413,8 @@ internal static class ConfigBridge
                 _repoFetching = false;
                 _repoFetchError = ui.Err ?? "未知异常"; // 入口卡"检查失败（点击重试）"（必修 8）
                 PushRepoData();
-                PushEvent("{\"type\":\"MC_TOAST\",\"main\":" + JsonW.Str("检查更新失败")
-                    + ",\"small\":" + JsonW.Str((ui.Err ?? "未知异常") + " · 已保留上次数据，可稍后重试") + "}");
+                PushEvent("{\"type\":\"MC_TOAST\",\"main\":" + JsonW.Str("检查失败，稍后再试")
+                    + ",\"small\":" + JsonW.Str(ui.Err ?? "未知异常") + "}"); // v3 精简（spec §5.4/Task2）
                 break;
         }
     }
