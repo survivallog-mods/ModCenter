@@ -1,0 +1,1902 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>ModCenter 面板原型 · v2（对照 panel.js 1.7.0）</title>
+<!--
+  ============================================================================
+  ModCenter 面板 UI 原型（项目资产，独立可开：双击浏览器打开即可）
+  ============================================================================
+  对应实现：同目录 panel.js（内嵌资源 SurvivalLog.ModCenter.panel.js，v1.7.0）。
+  本文件是布局/样式的**可视对照稿**：CSS 与 DOM 结构逐字对照 panel.js 的
+  CSS 字符串与 renderSide/renderCfg/renderSideOrder/各弹窗模板；
+  模拟数据覆盖全部状态（七形图标 / 仓库五态 / 排序模式 / 各弹窗 / 待生效条 / toast）。
+
+  用途：调整布局样式先在这里改、在浏览器里看效果；定稿后把改动**同步回 panel.js**
+  （CSS 字符串 + 对应渲染函数），并保持本文件与 panel.js 一致。DESIGN.md §4 已登记此纪律。
+
+  v3 方向（2026-10-30 作者拍板，本文件已先行实施，panel.js 待回写）：
+    ① 提示信息全面精简——短句、白话、无内部术语；冲突分两级：
+       **严重**（红 ⚠，明确冲突只能二选一/多选一）与**普通告警**（橙，可能有问题；
+       ⇄脚本碰撞 / ◎功能叠加，靠字形区分）。原 L1/L2/L3 三级灰标退役（gray 色级废除）。
+    ② 取消独立「套件仓库」页——顶部一个「检查更新」按钮即可；更新入口 =
+       列表行内图标（点击直接进确认弹窗）+ 详情页「维护」区按钮（更新到 X / 安装 X）；
+       **按钮一律不进左侧 mod 列表**。侧栏仓库入口卡与补丁碰撞行删除；
+       碰撞汇总挪到底部图例栏（有碰撞才显示）。
+
+  分区导览（与 panel.js 对照）：
+    <style> 第一段      = panel.js CSS 字符串原样（仅把 JS 拼串展开为普通 CSS，值未动）
+    <style> 第二段      = 原型页专用（demo-bar / z-index 覆盖），不随回写
+    MOCK 区             = 模拟快照/仓库/排序/扫描数据（Meta.cs 取材，非真实玩家数据）
+    渲染区              = panel.js render* / *Html 函数移植（发消息一律 send() 打桩）
+    demo 区             = 场景切换条（原 v2 原型的 demo-bar 同思路）
+
+  注意：
+  · 面板 CSS 每条规则仍锚定 #__mc_overlay（游戏内零泄漏依赖），回写时直接复制整段。
+  · 滑条/开关/拖拽/键盘排序等交互在本页可用（纯本地模拟）；凡写 cfg/网络/重启动作
+    一律打桩不落地，只弹（原型）toast。
+  ============================================================================
+-->
+<style>
+/* ============================================================
+   第一段：panel.js CSS 字符串原样展开（值未动，回写以本段为准）
+   ============================================================ */
+#__mc_overlay{position:fixed;inset:0;z-index:2147483647;display:flex;align-items:center;justify-content:center;background:rgba(5,6,10,.8);}
+#__mc_overlay *{box-sizing:border-box;margin:0;padding:0;}
+/* 面板框 */
+#__mc_overlay #__mc_panel{width:92%;height:88%;background:#171a23;border:1px solid #2a2f3d;border-radius:14px;display:flex;flex-direction:column;overflow:hidden;box-shadow:0 18px 70px rgba(0,0,0,.75);font-family:"Segoe UI","Microsoft YaHei",system-ui,sans-serif;color:#e8e6e0;user-select:none;}
+#__mc_overlay .__mc-head{display:flex;align-items:center;gap:12px;padding:13px 18px;border-bottom:1px solid #2a2f3d;background:#1d212c;}
+#__mc_overlay .__mc-title{font-size:17px;letter-spacing:2px;font-weight:600;}
+#__mc_overlay .__mc-sub{font-size:12px;color:#6b7180;}
+#__mc_overlay .__mc-close{margin-left:auto;width:32px;height:32px;border-radius:8px;border:1px solid #2a2f3d;background:transparent;color:#9aa0ad;font-size:15px;cursor:pointer;line-height:1;font-family:inherit;}
+#__mc_overlay .__mc-close:hover{border-color:#f87171;color:#f87171;}
+/* 主体：左列 + 右区 */
+#__mc_overlay .__mc-body{flex:1;display:flex;min-height:0;}
+#__mc_overlay .__mc-side{width:280px;flex-shrink:0;border-right:1px solid #2a2f3d;overflow-y:auto;padding:8px;display:flex;flex-direction:column;} /* Ruling 18：原型定稿 280px */
+#__mc_overlay .__mc-side>*{flex-shrink:0;} /* 子项不压缩（溢出走滚动，防行被压扁） */
+#__mc_overlay .__mc-side .__mc-cat{font-size:11px;color:#6b7180;letter-spacing:2px;padding:8px 10px 4px;}
+#__mc_overlay .__mc-mod-row{display:flex;align-items:center;gap:6px;padding:9px 10px;border-radius:8px;cursor:pointer;border:1px solid transparent;} /* Ruling 18：原型定稿 gap 6px */
+#__mc_overlay .__mc-mod-row:hover{background:rgba(255,255,255,.03);}
+#__mc_overlay .__mc-mod-row.__mc-sel{background:rgba(232,163,61,.13);border-color:rgba(232,163,61,.27);}
+#__mc_overlay .__mc-mod-row .__mc-st{width:8px;height:8px;border-radius:50%;background:#4ade80;flex-shrink:0;}
+#__mc_overlay .__mc-mod-row.__mc-off .__mc-st{background:#565d6d;}
+#__mc_overlay .__mc-mod-row .__mc-nm{font-size:13.5px;flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+#__mc_overlay .__mc-mod-row.__mc-off .__mc-nm,#__mc_overlay .__mc-mod-row.__mc-lock .__mc-nm{color:#6b7180;}
+#__mc_overlay .__mc-tp-empty{padding:6px 10px;font-size:12px;color:#6b7180;}
+/* 迷你开关 */
+#__mc_overlay .__mc-mini-sw{width:30px;height:17px;border-radius:9px;background:#565d6d;position:relative;cursor:pointer;flex-shrink:0;transition:.15s;border:0;appearance:none;outline:none;}
+#__mc_overlay .__mc-mini-sw::after{content:"";position:absolute;left:2px;top:2px;width:13px;height:13px;border-radius:50%;background:#cfd3dc;transition:.15s;}
+#__mc_overlay .__mc-mini-sw.__mc-on{background:#4ade80;}
+#__mc_overlay .__mc-mini-sw.__mc-on::after{left:15px;}
+#__mc_overlay .__mc-mini-sw.__mc-big{width:46px;height:25px;}
+#__mc_overlay .__mc-mini-sw.__mc-big::after{width:20px;height:20px;top:2px;}
+#__mc_overlay .__mc-mini-sw.__mc-big.__mc-on::after{left:23px;}
+#__mc_overlay .__mc-mini-sw.__mc-lock{opacity:.35;cursor:not-allowed;pointer-events:none;}
+/* 右区 */
+#__mc_overlay .__mc-cfg{flex:1;overflow-y:auto;padding:16px 22px 30px;min-width:0;}
+#__mc_overlay .__mc-mod-title{display:flex;align-items:center;gap:12px;}
+#__mc_overlay .__mc-mod-title h2{font-size:18px;font-weight:600;}
+#__mc_overlay .__mc-mod-title .__mc-en{font-size:12px;color:#6b7180;font-weight:400;}
+#__mc_overlay .__mc-mod-desc{margin:8px 0 4px;font-size:13px;color:#9aa0ad;line-height:1.6;}
+#__mc_overlay .__mc-stop-banner{margin:10px 0 0;padding:9px 14px;border-radius:8px;font-size:12.5px;line-height:1.6;background:rgba(127,29,29,.2);border:1px solid rgba(248,113,113,.27);color:#fca5a5;display:none;}
+#__mc_overlay .__mc-stop-banner.__mc-show{display:block;}
+#__mc_overlay .__mc-grp{margin-top:20px;}
+#__mc_overlay .__mc-grp>h3{font-size:12.5px;color:#e8a33d;letter-spacing:2px;padding-bottom:7px;border-bottom:1px solid #2a2f3d;margin-bottom:4px;font-weight:500;}
+#__mc_overlay .__mc-item{display:flex;align-items:center;gap:14px;padding:10px 4px;border-bottom:1px dashed rgba(255,255,255,.06);}
+#__mc_overlay .__mc-item .__mc-info{flex:1;min-width:0;}
+#__mc_overlay .__mc-item .__mc-info .__mc-lb{font-size:13.5px;}
+#__mc_overlay .__mc-item .__mc-info .__mc-ck{font-size:11px;color:#6b7180;font-family:Consolas,monospace;margin-top:2px;}
+#__mc_overlay .__mc-item .__mc-info .__mc-ck.__mc-note{color:#8a90a0;}
+#__mc_overlay .__mc-item.__mc-failed .__mc-ctl{opacity:.35;pointer-events:none;}
+#__mc_overlay .__mc-item.__mc-missing .__mc-ctl{opacity:.35;pointer-events:none;}
+#__mc_overlay .__mc-item .__mc-info .__mc-ck.__mc-fail-note{color:#f87171;}
+#__mc_overlay .__mc-item .__mc-ctl{width:min(300px,42%);flex-shrink:0;display:flex;align-items:center;gap:10px;justify-content:flex-end;}
+#__mc_overlay .__mc-item .__mc-badge{width:96px;flex-shrink:0;text-align:right;font-size:11.5px;}
+#__mc_overlay .__mc-b-now{color:#4ade80;}#__mc_overlay .__mc-b-reload{color:#60a5fa;}
+#__mc_overlay .__mc-b-reboot{color:#f87171;}#__mc_overlay .__mc-b-cfg{color:#b8a1e3;}
+/* 覆盖清单 */
+#__mc_overlay .__mc-ovr-add{display:flex;gap:8px;align-items:center;padding:10px 4px 6px;}
+#__mc_overlay .__mc-ovr-add input{width:120px;background:#0f1219;border:1px solid #2a2f3d;color:#e8e6e0;border-radius:6px;padding:5px 9px;font-size:13px;font-family:Consolas,monospace;}
+#__mc_overlay .__mc-ovr-add button{background:#0f1219;border:1px solid #e8a33d;color:#e8a33d;border-radius:6px;padding:5px 14px;font-size:13px;cursor:pointer;font-family:inherit;}
+#__mc_overlay .__mc-ovr-add button:hover{background:rgba(232,163,61,.13);}
+#__mc_overlay .__mc-del{width:26px;height:26px;border-radius:6px;border:1px solid #2a2f3d;background:transparent;color:#6b7180;font-size:12px;cursor:pointer;flex-shrink:0;font-family:inherit;line-height:1;}
+#__mc_overlay .__mc-del:hover{border-color:#f87171;color:#f87171;}
+#__mc_overlay .__mc-ovr-empty{padding:12px 4px;font-size:12.5px;color:#6b7180;}
+/* 控件（滑条自绘 4px 轨道 + 13px 圆钮，游戏 WebView 不画 accent-color 原生轨道） */
+#__mc_overlay input[type=range]{-webkit-appearance:none;appearance:none;flex:1;accent-color:#e8a33d;background:transparent;height:16px;}
+#__mc_overlay input[type=range]::-webkit-slider-runnable-track{height:4px;background:#2a2f3d;border-radius:2px;}
+#__mc_overlay input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:13px;height:13px;border-radius:50%;background:#e8a33d;margin-top:-4.5px;border:0;}
+#__mc_overlay input[type=range]::-moz-range-track{height:4px;background:#2a2f3d;border-radius:2px;}
+#__mc_overlay input[type=range]::-moz-range-thumb{width:13px;height:13px;border-radius:50%;background:#e8a33d;border:0;}
+#__mc_overlay input[type=text]{flex:1;min-width:0;background:#0f1219;border:1px solid #2a2f3d;color:#e8e6e0;border-radius:6px;padding:4px 9px;font-size:13px;text-align:left;font-family:inherit;}
+/* T20 numbox（纯文本数值框）——后位于通用 text 规则压回紧凑定宽 */
+#__mc_overlay .__mc-numbox{flex:0 0 auto;width:62px;background:#0f1219;border:1px solid #2a2f3d;color:#e8e6e0;border-radius:6px;padding:4px 6px;font-size:13px;text-align:center;font-family:inherit;}
+#__mc_overlay .__mc-bov-lb{font-size:11px;color:#6b7180;flex-shrink:0;}
+#__mc_overlay .__mc-ovr-add input{flex:0 0 auto;}
+#__mc_overlay input:focus,#__mc_overlay select:focus{outline:1px solid #e8a33d;}
+#__mc_overlay select{background:#0f1219;border:1px solid #2a2f3d;color:#e8e6e0;border-radius:6px;padding:5px 8px;font-size:12.5px;font-family:inherit;max-width:170px;}
+/* 底部图例 */
+#__mc_overlay .__mc-foot{display:flex;align-items:center;gap:18px;padding:9px 18px;border-top:1px solid #2a2f3d;background:#1d212c;font-size:12px;color:#6b7180;}
+#__mc_overlay .__mc-foot .__mc-lg{display:flex;gap:14px;}
+#__mc_overlay .__mc-foot .__mc-foot-note{margin-left:auto;}
+/* toast（z-index:10 = 弹窗(9)/待生效条(5)之上） */
+#__mc_overlay .__mc-toast{position:absolute;right:18px;bottom:16px;background:rgba(15,18,25,.94);border:1px solid #4ade80;color:#e8e6e0;border-radius:10px;padding:10px 16px;font-size:13px;display:none;box-shadow:0 8px 30px rgba(0,0,0,.63);line-height:1.5;max-width:60%;z-index:10;}
+#__mc_overlay .__mc-toast.__mc-show{display:block;}
+#__mc_overlay .__mc-toast.__mc-err{border-color:#f87171;}
+#__mc_overlay .__mc-toast small{color:#9aa0ad;display:block;font-size:11.5px;}
+#__mc_overlay .__mc-loading{padding:40px 0;text-align:center;color:#6b7180;font-size:13px;letter-spacing:1px;}
+/* 行内图标徽标（18px 圆片七形） */
+#__mc_overlay .__mc-ics{display:flex;align-items:center;gap:3px;flex-shrink:0;}
+#__mc_overlay .__mc-ic{width:18px;height:18px;border-radius:50%;display:inline-flex;align-items:center;justify-content:center;font-size:9.5px;line-height:1;border:1px solid;cursor:pointer;font-family:"Segoe UI Symbol",inherit;position:relative;}
+#__mc_overlay .__mc-ic:hover{filter:brightness(1.25);}
+#__mc_overlay .__mc-ic.__mc-red{color:#f87171;border-color:rgba(248,113,113,.45);background:rgba(248,113,113,.1);}
+#__mc_overlay .__mc-ic.__mc-orange{color:#fbbf24;border-color:rgba(251,191,36,.45);background:rgba(251,191,36,.08);}
+#__mc_overlay .__mc-ic.__mc-gray{color:#8a90a0;border-color:rgba(138,144,160,.4);background:rgba(138,144,160,.08);}
+#__mc_overlay .__mc-ic.__mc-blue{color:#60a5fa;border-color:rgba(96,165,250,.5);background:rgba(96,165,250,.1);}
+#__mc_overlay .__mc-ic.__mc-amber{color:#e8a33d;border-color:rgba(232,163,61,.5);background:rgba(232,163,61,.1);cursor:default;}
+#__mc_overlay .__mc-ic.__mc-weak{opacity:.45;}
+/* 通用按钮 */
+#__mc_overlay .__mc-btn{background:#0f1219;border:1px solid #2a2f3d;color:#9aa0ad;border-radius:7px;padding:6px 14px;font-size:12.5px;cursor:pointer;font-family:inherit;}
+#__mc_overlay .__mc-btn:hover{border-color:#e8a33d;color:#e8a33d;}
+#__mc_overlay .__mc-btn.__mc-btn-pri{border-color:rgba(232,163,61,.5);color:#e8a33d;background:rgba(232,163,61,.1);}
+#__mc_overlay .__mc-btn.__mc-btn-pri:hover{background:rgba(232,163,61,.18);}
+#__mc_overlay .__mc-btn:disabled{opacity:.4;cursor:not-allowed;}
+#__mc_overlay .__mc-btn.__mc-btn-mini{padding:3px 10px;font-size:11.5px;}
+/* 底部待生效条 */
+#__mc_overlay .__mc-pending{position:absolute;left:0;right:0;bottom:0;display:none;align-items:center;gap:12px;padding:9px 18px;background:#1d212c;border-top:1px solid rgba(232,163,61,.4);font-size:12.5px;z-index:5;}
+#__mc_overlay .__mc-pending.__mc-show{display:flex;}
+#__mc_overlay .__mc-sp{flex:1;}
+/* 面板内浮层弹窗 */
+#__mc_overlay .__mc-modal-bg{position:absolute;left:0;top:0;right:0;bottom:0;background:rgba(5,6,10,.66);display:none;align-items:center;justify-content:center;z-index:9;}
+#__mc_overlay .__mc-modal-bg.__mc-show{display:flex;}
+#__mc_overlay .__mc-modal{width:520px;max-width:92%;max-height:86%;overflow-y:auto;background:#1d212c;border:1px solid #2a2f3d;border-radius:12px;padding:18px 20px;box-shadow:0 22px 80px rgba(0,0,0,.8);}
+#__mc_overlay .__mc-modal h3{font-size:15.5px;margin-bottom:4px;display:flex;align-items:center;gap:8px;}
+#__mc_overlay .__mc-m-sub{font-size:11.5px;color:#6b7180;margin-bottom:12px;}
+#__mc_overlay .__mc-m-sec{margin-top:12px;}
+#__mc_overlay .__mc-m-h{font-size:11.5px;color:#e8a33d;letter-spacing:2px;margin-bottom:6px;}
+#__mc_overlay .__mc-m-txt{font-size:12.5px;color:#9aa0ad;line-height:1.75;}
+#__mc_overlay .__mc-m-acts{display:flex;gap:8px;flex-wrap:wrap;margin-top:14px;}
+/* 套件仓库页 */
+#__mc_overlay .__mc-repo-entry{margin:4px 6px 8px;padding:10px 12px;border-radius:10px;border:1px solid rgba(96,165,250,.3);background:rgba(96,165,250,.07);cursor:pointer;display:flex;align-items:center;gap:10px;}
+#__mc_overlay .__mc-repo-entry:hover{background:rgba(96,165,250,.12);}
+#__mc_overlay .__mc-repo-entry .__mc-re-tt{font-size:12.5px;color:#60a5fa;}
+#__mc_overlay .__mc-repo-entry .__mc-re-dd{font-size:11px;color:#6b7180;margin-top:3px;display:flex;align-items:center;gap:5px;}
+#__mc_overlay .__mc-shellwarn{margin:4px 6px 8px;padding:9px 12px;border-radius:9px;border:1px solid rgba(248,113,113,.45);background:rgba(248,113,113,.1);color:#f87171;font-size:11.5px;line-height:1.55;}
+/* L2 补丁碰撞汇总行 */
+#__mc_overlay .__mc-patch-entry{margin:0 6px 8px;padding:8px 12px;border-radius:10px;border:1px solid rgba(251,191,36,.28);background:rgba(251,191,36,.05);cursor:pointer;display:flex;align-items:center;gap:8px;}
+#__mc_overlay .__mc-patch-entry:hover{background:rgba(251,191,36,.1);}
+#__mc_overlay .__mc-patch-entry .__mc-pe-tt{font-size:12px;color:#fbbf24;}
+#__mc_overlay .__mc-patch-entry .__mc-pe-dd{font-size:10.5px;color:#6b7180;margin-top:2px;}
+#__mc_overlay .__mc-scan-grp{border-top:1px solid #2a2f3d;padding-top:9px;margin-top:9px;}
+#__mc_overlay .__mc-scan-grp:first-child{border-top:0;padding-top:0;margin-top:0;}
+#__mc_overlay .__mc-scan-m{font-family:Consolas,monospace;font-size:12.5px;color:#e8e6e0;}
+#__mc_overlay .__mc-scan-o{font-size:11.5px;color:#9aa0ad;margin-top:3px;line-height:1.6;}
+#__mc_overlay .__mc-scan-n{font-size:10.5px;color:#6b7180;margin-top:2px;}
+#__mc_overlay .__mc-repo-top{display:flex;align-items:center;gap:10px;margin-bottom:12px;}
+#__mc_overlay .__mc-repo-top .__mc-lc{margin-left:auto;font-size:11px;color:#6b7180;}
+#__mc_overlay .__mc-repo-row{display:flex;align-items:center;gap:12px;padding:9px 12px;border-radius:9px;border:1px solid transparent;}
+#__mc_overlay .__mc-repo-row:hover{background:rgba(255,255,255,.03);}
+#__mc_overlay .__mc-repo-row .__mc-rn{width:170px;font-size:13.5px;flex-shrink:0;}
+#__mc_overlay .__mc-repo-row .__mc-cols{font-family:Consolas,monospace;font-size:12px;color:#9aa0ad;flex-shrink:0;}
+#__mc_overlay .__mc-repo-row .__mc-cols b{color:#4ade80;font-weight:400;}
+#__mc_overlay .__mc-repo-row .__mc-cols i{color:#6b7180;font-style:normal;}
+#__mc_overlay .__mc-repo-row .__mc-cols i.__mc-failtx{color:#f87171;}
+#__mc_overlay .__mc-repo-row .__mc-why{font-size:11px;color:#f87171;}
+#__mc_overlay .__mc-repo-row .__mc-vernote{font-size:10.5px;color:#8a90a0;cursor:default;}
+#__mc_overlay .__mc-rep-hd{display:flex;gap:14px;padding:6px 12px;font-size:11px;color:#6b7180;letter-spacing:1px;}
+#__mc_overlay .__mc-ok{color:#4ade80;font-size:11.5px;}
+#__mc_overlay .__mc-risk{margin-top:10px;padding:8px 12px;border-radius:8px;font-size:11.5px;line-height:1.6;background:rgba(127,29,29,.18);border:1px solid rgba(248,113,113,.25);color:#fca5a5;}
+#__mc_overlay .__mc-btn.__mc-btn-blue{border-color:rgba(96,165,250,.45);color:#60a5fa;}
+#__mc_overlay .__mc-btn.__mc-btn-blue:hover{background:rgba(96,165,250,.1);}
+#__mc_overlay .__mc-btn.__mc-btn-org{border-color:rgba(251,191,36,.5);color:#fbbf24;}
+#__mc_overlay .__mc-btn.__mc-btn-org:hover{background:rgba(251,191,36,.1);}
+#__mc_overlay .__mc-modal .__mc-files{font-family:Consolas,monospace;font-size:11.5px;color:#9aa0ad;line-height:1.9;}
+#__mc_overlay .__mc-modal .__mc-files .__mc-file-del{color:#f87171;}
+#__mc_overlay .__mc-kv .__mc-kk{color:#9aa0ad;width:88px;flex-shrink:0;}
+#__mc_overlay .__mc-maint{margin-top:20px;}
+#__mc_overlay .__mc-maint>h3{font-size:12.5px;color:#e8a33d;letter-spacing:2px;padding-bottom:7px;border-bottom:1px solid #2a2f3d;margin-bottom:4px;font-weight:500;}
+#__mc_overlay .__mc-btn.__mc-btn-danger{border-color:rgba(248,113,113,.4);color:#f87171;}
+#__mc_overlay .__mc-btn.__mc-btn-danger:hover{background:rgba(248,113,113,.1);}
+#__mc_overlay .__mc-pending.__mc-weak{border-top-color:rgba(107,113,128,.4);}
+#__mc_overlay .__mc-kv{display:flex;align-items:center;gap:10px;padding:7px 0;font-size:13px;flex-wrap:wrap;}
+#__mc_overlay .__mc-kv .__mc-kvv{font-family:Consolas,monospace;font-size:12.5px;}
+#__mc_overlay .__mc-dlbar{height:6px;border-radius:3px;background:#0f1219;border:1px solid #2a2f3d;overflow:hidden;margin-top:8px;}
+#__mc_overlay .__mc-dlbar i{display:block;height:100%;background:#e8a33d;width:0;transition:width .2s;}
+/* 加载排序模式 */
+#__mc_overlay .__mc-ordbar{margin:4px 6px 8px;padding:9px 12px;border-radius:10px;border:1px dashed rgba(232,163,61,.45);font-size:11px;color:#9aa0ad;line-height:1.7;}
+#__mc_overlay .__mc-ordbar .__mc-ord-acts{display:flex;gap:6px;margin-top:7px;}
+#__mc_overlay .__mc-ordbar .__mc-ord-prot{margin-top:6px;color:#fbbf24;line-height:1.6;}
+#__mc_overlay .__mc-side-foot{margin-top:auto;padding:8px 6px 4px;border-top:1px solid #2a2f3d;}
+#__mc_overlay .__mc-side-foot button{width:100%;background:#0f1219;border:1px solid #2a2f3d;color:#9aa0ad;border-radius:8px;padding:7px 0;font-size:12px;cursor:pointer;font-family:inherit;}
+#__mc_overlay .__mc-side-foot button:hover{border-color:#e8a33d;color:#e8a33d;}
+#__mc_overlay .__mc-grip{color:#4b5261;font-size:11px;letter-spacing:-2px;cursor:grab;flex-shrink:0;padding:0 2px;}
+#__mc_overlay .__mc-mod-row.__mc-ord-row.__mc-dragging{opacity:.35;}
+#__mc_overlay .__mc-mod-row.__mc-ord-row.__mc-dragging .__mc-grip{cursor:grabbing;}
+#__mc_overlay .__mc-mod-row.__mc-ord-row.__mc-drop-above{box-shadow:0 -2px 0 0 #e8a33d;}
+#__mc_overlay .__mc-mod-row.__mc-ord-row.__mc-drop-below{box-shadow:0 2px 0 0 #e8a33d;}
+#__mc_overlay .__mc-ver{font-size:10.5px;color:#6b7180;font-family:Consolas,monospace;flex-shrink:0;}
+#__mc_overlay .__mc-side::-webkit-scrollbar,#__mc_overlay .__mc-cfg::-webkit-scrollbar{width:8px;}
+#__mc_overlay .__mc-side::-webkit-scrollbar-thumb,#__mc_overlay .__mc-cfg::-webkit-scrollbar-thumb{background:#2a2f3d;border-radius:4px;}
+
+/* ============================================================
+   第二段：原型页专用（不随回写 panel.js）
+   ============================================================ */
+#__mc_overlay{z-index:100;padding-top:56px;} /* 游戏内是 2147483647（见 panel.js）；原型页降层 + 给 demo-bar 让位 */
+#demo-bar{position:fixed;left:12px;top:12px;z-index:200;display:flex;flex-wrap:wrap;gap:6px;max-width:calc(100% - 24px);
+  padding:10px 12px;border-radius:10px;background:rgba(10,12,18,.92);border:1px solid #3a4152;}
+#demo-bar .demo-sep{width:1px;background:#3a4152;margin:2px 4px;}
+#demo-bar button{background:#171a23;border:1px solid #3a4152;color:#9aa0ad;border-radius:6px;padding:4px 10px;font-size:12px;cursor:pointer;font-family:"Segoe UI","Microsoft YaHei",system-ui,sans-serif;}
+#demo-bar button:hover{border-color:#e8a33d;color:#e8a33d;}
+#demo-bar .demo-cap{font-size:11px;color:#6b7180;align-self:center;letter-spacing:1px;}
+</style>
+</head>
+<body>
+
+<!-- ===================== 场景切换条（原型专用，不随回写） ===================== -->
+<div id="demo-bar">
+  <span class="demo-cap">原型场景</span>
+  <button data-demo="view-cfg">管理视图</button>
+  <button data-demo="view-ord">排序模式</button>
+  <span class="demo-sep"></span>
+  <button data-demo="m-cf">冲突详情</button>
+  <button data-demo="m-upd">更新确认</button>
+  <button data-demo="m-down">降级确认</button>
+  <button data-demo="m-warn">版本告警确认</button>
+  <button data-demo="m-inst">安装确认</button>
+  <button data-demo="m-dl">下载进度</button>
+  <button data-demo="m-done">已加入待生效</button>
+  <button data-demo="m-uninst">卸载确认</button>
+  <button data-demo="m-uninst-self">卸载（本面板）</button>
+  <button data-demo="m-scan">补丁碰撞汇总</button>
+  <button data-demo="m-reboot">重启确认</button>
+  <span class="demo-sep"></span>
+  <button data-demo="pend-on">待生效条·3项</button>
+  <button data-demo="pend-applied">待生效条·中性档</button>
+  <button data-demo="pend-off">隐藏</button>
+  <span class="demo-sep"></span>
+  <button data-demo="toast-ok">Toast·成功</button>
+  <button data-demo="toast-err">Toast·失败</button>
+</div>
+
+<!-- ===================== 面板骨架（与 panel.js build() 同构） ===================== -->
+<div id="__mc_overlay">
+  <div id="__mc_panel" style="position:relative">
+    <div class="__mc-head">
+      <div class="__mc-title">MOD 管理中心</div>
+      <div class="__mc-sub" id="__mc_sub">v1.7.0 · 多数改动即时生效</div>
+      <button type="button" class="__mc-btn __mc-btn-mini" data-demo="check-upd" style="margin-left:auto">检查更新</button>
+      <button type="button" class="__mc-close" aria-label="关闭面板" data-demo="panel-close" style="margin-left:0">✕</button>
+    </div>
+    <div class="__mc-body">
+      <div class="__mc-side" id="__mc_side"></div>
+      <div class="__mc-cfg" id="__mc_cfg"></div>
+    </div>
+    <div class="__mc-foot">
+      <span class="__mc-lg">
+        <span class="__mc-b-now">⚡ 立即生效</span>
+        <span class="__mc-b-reload">📁 读档后</span>
+        <span class="__mc-b-reboot">🔄 重启后</span>
+        <span class="__mc-b-cfg">⚙ 已写入 cfg</span>
+      </span>
+      <button type="button" class="__mc-btn __mc-btn-mini" id="__mc_patch_btn" data-demo="m-scan" style="display:none">补丁碰撞</button>
+      <span class="__mc-foot-note">套件停用立即生效 · 第三方停用重启生效</span>
+    </div>
+    <div class="__mc-pending" id="__mc_pending">
+      <span aria-hidden="true">⟳</span>
+      <span class="__mc-pend-tx" id="__mc_pend_tx"></span><span class="__mc-sp"></span>
+      <button type="button" class="__mc-btn __mc-btn-mini" data-x="undo">撤销</button>
+      <button type="button" class="__mc-btn __mc-btn-pri __mc-btn-mini" data-x="reboot">立即重启</button>
+    </div>
+    <div class="__mc-modal-bg" id="__mc_modal_bg"><div class="__mc-modal" id="__mc_modal"></div></div>
+    <div class="__mc-toast" id="__mc_toast"></div>
+  </div>
+</div>
+
+<script>
+/* ============================================================================
+ * ModCenter 面板原型脚本：渲染函数移植自 panel.js（v1.7.0），发消息一律 send() 打桩。
+ * 数据为模拟快照（取材 Meta.cs），覆盖七形图标 / 仓库五态 / 排序 / 全部弹窗状态。
+ * ========================================================================== */
+
+/* ---- 打桩：原型不发消息不出网 ---- */
+function send(msg) { console.log('[原型 outbox]', msg); }
+
+/* ---- 常量（panel.js 同源） ---- */
+var BADGE = {
+  now:    { t: '⚡ 立即生效', cls: '__mc-b-now' },
+  reload: { t: '📁 读档后',   cls: '__mc-b-reload' },
+  reboot: { t: '🔄 重启后',   cls: '__mc-b-reboot' },
+  cfg:    { t: '⚙ 已写入 cfg', cls: '__mc-b-cfg' },
+};
+var TOAST_SMALL = {
+  now:    '立即生效',
+  reload: '读档后生效',
+  cfg:    '已保存，生效时机看该 mod',
+  reboot: '重启后生效',
+};
+var SELF_NAME = 'Mod 管理中心';
+var SELF_EN = 'ModCenter（本面板）';
+var SELF_GUID = 'com.local.survivallog.modcenter';
+var OVR_SECTION = '其他', OVR_KEY = 'Overrides';
+var BOV_SECTION = 'Global', BOV_KEY = 'BagOverrides';
+
+/* ============================================================================
+ * MOCK 数据（快照 / 仓库 / 排序 / 扫描）——取材 Meta.cs 与装机实测记录
+ * ========================================================================== */
+
+var MOCK = {
+  mods: [
+    {
+      guid: 'com.local.survivallog.backpackexpand', name: '背包扩容', en: 'BackpackExpand', enabled: true,
+      desc: '宽度/基础高度/负重三个明确数值统一应用全部背包（0=恢复官方原值）；天赋『背包加一行』照常每级+1；热改即时生效。',
+      ics: [{ k: 'orange', g: '◎', tip: '功能叠加：与储物类 mod 效果叠加，点看详情', click: 'cf' }],
+      groups: [
+        { title: '扩容数值（0=恢复官方原值）', items: [
+          { k: 'Expand.Width',  l: '背包宽度', t: 'int', v: 11, min: 0, max: 30, st: 1, b: 'now', note: '全部背包统一列数（原生最大 10）' },
+          { k: 'Expand.Height', l: '基础高度', t: 'int', v: 10, min: 0, max: 30, st: 1, b: 'now', note: '初始背包与登山包行数；天赋『背包加一行』每级自动 +1，照常生效' },
+          { k: 'Expand.Burden', l: '负重上限', t: 'int', v: 48000, min: 0, max: 150000, st: 1000, b: 'reload', note: '全部背包统一基础值，天赋加成照常叠加；读档后体现' },
+        ]},
+        { title: '防呆上限（0=不封顶）', items: [
+          { k: 'Global.MaxWidth',  l: '宽度上限', t: 'int', v: 16, min: 0, max: 30, st: 1, b: 'now', note: 'Width 超出即夹到此值；过宽挤压背包页右侧栏' },
+          { k: 'Global.MaxHeight', l: '高度上限', t: 'int', v: 18, min: 0, max: 30, st: 1, b: 'now' },
+        ]},
+      ],
+    },
+    {
+      guid: 'com.local.survivallog.cabinetsize', name: '柜子容量', en: 'CabinetSize', enabled: true,
+      desc: '常用 13 包（置物架/冰箱/载具/工具柜）单独定宽高（0=恢复该柜原生）；其余柜子按 小/中/大/特大 档位自动调整；任意柜子可加个性化覆盖（优先级最高）；热改即时生效。',
+      ics: [{ k: 'red', tip: '严重冲突：与「储物扩容」只能留一个，点看详情', click: 'cf' }],
+      groups: [
+        { title: '专属修改：常用 13 包（0=恢复该柜原生）', items: [
+          { k: 'Bag.Shelf',    l: '置物架（宽×高）', t: 'int', v: 16, min: 0, max: 40, st: 1, b: 'now' },
+          { k: 'Bag.Fridge',   l: '冰箱（宽×高）',   t: 'int', v: 12, min: 0, max: 40, st: 1, b: 'now' },
+        ]},
+        { title: '通用：档位与上限（未单独列出的柜子自动落档）', items: [
+          { k: 'Tier.Auto', l: '启用档位自动调整', t: 'bool', v: true, b: 'now' },
+          { k: 'Tier.XLHeight', l: '特大档高度', t: 'int', v: 22, min: 0, max: 40, st: 1, b: 'now' },
+          { k: 'Tier.Policy', l: '档位策略', t: 'sel', v: '标准', opts: ['保守', '标准', '激进'], b: 'now', note: '影响未单独列出柜子的落档倾向' },
+        ]},
+      ],
+      bagOvr: [ { id: 101, w: 16, h: 12 }, { id: 205, w: 20, h: 14 } ],
+    },
+    {
+      guid: 'com.local.survivallog.cabinetburden', name: '柜子负重解放', en: 'CabinetBurden', enabled: true,
+      desc: '储物家具负重清零（0=官方"无重量上限"语义，柜子界面负重条自动隐藏）；名单自动发现，默认排除购物车/轿车；切换/改名单后重进存档对已存在容器生效。',
+      groups: [
+        { title: '负重名单（改后重进存档生效）', items: [
+          { k: 'Burden.Enabled', l: '启用负重清零', t: 'bool', v: true, b: 'reload' },
+          { k: 'Burden.Max', l: '负重上限（0=不封顶）', t: 'int', v: 0, min: 0, max: 99999, st: 500, b: 'reload' },
+        ]},
+      ],
+    },
+    {
+      guid: 'com.local.survivallog.fridgechill', name: '保鲜增强', en: 'FridgeChill', enabled: true,
+      desc: '冰箱/保鲜类容器食材保鲜时长倍率；天赋保鲜上限可调。',
+      ics: [{ k: 'blue', tip: '可更新：1.6.0 → 1.7.0', click: 'upd' }],
+      groups: [
+        { title: '保鲜', items: [
+          { k: 'Chill.Mult', l: '保鲜时长倍率', t: 'float', v: 2, min: 0.1, max: 10, st: 0.1, b: 'now' },
+          { k: 'Chill.TalentCap', l: '天赋保鲜上限', t: 'int', v: 30, min: 0, max: 999, st: 1, b: 'now' },
+        ]},
+      ],
+    },
+    {
+      guid: 'com.local.survivallog.quickaction', name: '动作加速', en: 'QuickAction', enabled: true,
+      desc: '全游戏动作耗时按分类统一加速（毫秒，0=官方原值）；单个动作可加覆盖单独调。',
+      ics: [{ k: 'amber', tip: '待生效：更新 1.7.0，重启后应用' }],
+      groups: [
+        { title: '分类耗时（毫秒，0=官方原值）', items: [
+          { k: 'Speed.Gather',  l: '采集类', t: 'int', v: 800, min: 0, max: 5000, st: 50, b: 'now' },
+          { k: 'Speed.Craft',   l: '制作类', t: 'int', v: 600, min: 0, max: 5000, st: 50, b: 'now' },
+          { k: 'Speed.Combat',  l: '战斗类', t: 'int', v: 500, min: 0, max: 5000, st: 50, b: 'now' },
+        ]},
+      ],
+      ovr: [ { id: 1001, ms: 800 }, { id: 1002, ms: 1200 } ],
+    },
+    {
+      guid: 'com.local.survivallog.cabineteverywhere', name: '更好的储物柜', en: 'CabinetEverywhere', enabled: true,
+      desc: '全容器作为制作/烹饪/酿造等取料源直达；柜子页签标签筛选与场景固定视图。仅支持启用/停用。',
+      groups: [],
+    },
+    {
+      guid: 'com.local.survivallog.roleunlock', name: '角色解锁', en: 'RoleUnlock', enabled: false,
+      desc: '角色专属内容逐项解锁；关闭即还原官方门槛。',
+      ics: [{ k: 'orange', g: '◎', tip: '（已停用）功能叠加：与角色类 mod', click: 'cf', w: true }],
+      groups: [
+        { title: '藤蔓与花种子', items: [
+          { k: 'Plant.Vine', l: '藤蔓种子', t: 'bool', v: true, b: 'now' },
+          { k: 'Plant.Flower', l: '花种子', t: 'bool', v: false, b: 'now' },
+        ]},
+        { title: '配方与规划', items: [
+          { k: 'Plan.ClearPool', l: '净水池配方', t: 'bool', v: true, b: 'now' },
+        ]},
+      ],
+    },
+    {
+      guid: 'com.local.survivallog.robotspeed', name: '机器人提速', en: 'RobotSpeed', enabled: true,
+      desc: '机器人移速/充电/续航/耗电/动作时长/货舱六维倍率 + 与手动动作对齐。',
+      ics: [{ k: 'amber', tip: '待生效：更新 1.7.0，重启后应用' }],
+      groups: [
+        { title: '机器人提速', items: [
+          { k: 'Robot.Move',  l: '移动速度', t: 'float', v: 1.5, min: 0.1, max: 10, st: 0.1, b: 'now' },
+          { k: 'Robot.Charge', l: '充电速度', t: 'float', v: 1.2, min: 0.1, max: 10, st: 0.1, b: 'now' },
+          { k: 'Robot.Battery', l: '续航倍率', t: 'float', v: 2, min: 0.1, max: 10, st: 0.1, b: 'now' },
+          { k: 'Robot.Cargo', l: '货舱容量', t: 'float', v: 1.5, min: 0.1, max: 10, st: 0.1, b: 'now' },
+        ]},
+      ],
+    },
+    {
+      guid: 'com.local.survivallog.planpick', name: '自选生存规划', en: 'PlanPick', enabled: true,
+      desc: '生存规划改自选：解锁日全表候选 + 搜索 + 键盘；整数百分比加成。',
+      ics: [
+        { k: 'orange', tip: '脚本碰撞 ×2：与动作加速，点看详情', click: 'cf' },
+        { k: 'orange', g: '◎', tip: '功能叠加：与囤鼠桃园（规划类）', click: 'cf' },
+      ],
+      groups: [
+        { title: '花费', items: [
+          { k: 'Cost.BonusPct', l: '规划加成上限（%）', t: 'int', v: 50, min: 0, max: 500, st: 5, b: 'now' },
+        ]},
+        { title: '列表', items: [
+          { k: 'List.ShowLocked', l: '显示未解锁项', t: 'bool', v: true, b: 'now' },
+        ]},
+      ],
+    },
+    {
+      guid: 'com.local.survivallog.predisasterspeed', name: '灾前加速', en: 'PreDisasterSpeed', enabled: false, missing: true,
+      desc: '灾变倒计时前的官方速度条增强（热键变档 + 真三倍校正）。仅支持启用/停用。',
+      ics: [{ k: 'blue', tip: '可安装：1.7.0', click: 'upd' }],
+      groups: [],
+    },
+    {
+      guid: 'com.local.survivallog.endlessguard', name: '囤鼠桃园', en: 'EndlessGuard', enabled: true,
+      desc: '无尽模式永不沦陷：拦新沦陷 + 恢复已沦陷的交易点/探险图/营地 + 抹掉沦陷倒计时；附 11 条拾遗扩展规划（D100-D300）。',
+      ics: [{ k: 'orange', tip: '可降级：本地 2.0.0 比远端 1.7.0 新', click: 'upd' }],
+      groups: [
+        { title: '沦陷防护', items: [
+          { k: 'Guard.Block', l: '拦截新沦陷', t: 'bool', v: true, b: 'now' },
+          { k: 'Guard.Restore', l: '恢复已沦陷地点', t: 'bool', v: true, b: 'reload' },
+        ]},
+        { title: '生存规划扩展', items: [
+          { k: 'Plan.D300', l: '启用拾遗扩展规划', t: 'bool', v: false, b: 'reload', note: 'D100–D300 共 11 条' },
+        ]},
+      ],
+    },
+  ],
+  tp: [
+    {
+      guid: 'com.third.bettertrade', name: '智能交易', en: 'BetterTrade', enabled: true,
+      desc: '（第三方 · 通用接入）交易相关增强。作者自定义说明缺省时展示此通用描述。',
+      ics: [{ k: 'orange', tip: '脚本碰撞 ×7：与状态栏增强等，点看详情', click: 'cf' }],
+      groups: [
+        { title: '配置', items: [
+          { k: 'Trade.AutoSell', l: '自动出售灰装', t: 'bool', v: false, b: 'cfg' },
+        ]},
+      ],
+    },
+    {
+      guid: 'com.third.statsui', name: '状态栏增强', en: 'StatsUI', enabled: true,
+      desc: '（第三方 · 通用接入）角色状态栏信息增强。',
+      ics: [{ k: 'orange', tip: '脚本碰撞 ×1：与智能交易，点看详情', click: 'cf' }],
+      groups: [
+        { title: '配置', items: [
+          { k: 'Ui.Compact', l: '紧凑模式', t: 'bool', v: true, b: 'cfg' },
+        ]},
+      ],
+    },
+    {
+      guid: 'com.third.neighborbasket', name: '邻居篮筐优化', en: 'NeighborBasket', enabled: true,
+      desc: '（第三方 · 声明式接入：对方作者定义的中文页面）。',
+      groups: [
+        { title: '通用', items: [
+          { k: 'Nb.Range', l: '取货半径', t: 'int', v: 6, min: 1, max: 20, st: 1, b: 'cfg' },
+        ]},
+      ],
+    },
+    {
+      guid: 'com.third.oldsave', name: '旧档迁移助手', en: 'OldSaveMigrator', enabled: false, soft: true,
+      desc: '（第三方 · 通用接入）旧版本存档迁移工具。',
+      groups: [
+        { title: '配置', items: [
+          { k: 'Mig.DryRun', l: '仅预览不写入', t: 'bool', v: true, b: 'cfg' },
+        ]},
+      ],
+    },
+  ],
+  repo: {
+    lastCheck: Date.now() - 6 * 60 * 1000, checking: false, mirror: '',
+    rows: [
+      { repoKey: 'backpackexpand',    guid: 'com.local.survivallog.backpackexpand',    name: '背包扩容',    local: '1.7.0', remote: '1.7.0', status: 'ok' },
+      { repoKey: 'cabinetsize',       guid: 'com.local.survivallog.cabinetsize',       name: '柜子容量',    local: '1.7.0', remote: '1.7.0', status: 'warn', why: '该版本适配的游戏版本与你本机不一致' },
+      { repoKey: 'cabinetburden',     guid: 'com.local.survivallog.cabinetburden',     name: '柜子负重解放', local: '1.7.0', remote: '1.7.0', status: 'ok' },
+      { repoKey: 'fridgechill',       guid: 'com.local.survivallog.fridgechill',       name: '保鲜增强',    local: '1.6.0', remote: '1.7.0', status: 'update' },
+      { repoKey: 'quickaction',       guid: 'com.local.survivallog.quickaction',       name: '动作加速',    local: '2.1.2', remote: '1.7.0', status: 'downgrade', pending: true },
+      { repoKey: 'cabineteverywhere', guid: 'com.local.survivallog.cabineteverywhere', name: '更好的储物柜', local: '1.7.0', remote: '1.7.0', status: 'ok', verNote: '未校验游戏版本：本地版本通道不可读' },
+      { repoKey: 'roleunlock',        guid: 'com.local.survivallog.roleunlock',        name: '角色解锁',    local: null,    remote: '1.7.0', status: 'install' },
+      { repoKey: 'robotspeed',        guid: 'com.local.survivallog.robotspeed',        name: '机器人提速',  local: '1.7.0', remote: '1.7.0', status: 'ok', pending: true },
+      { repoKey: 'planpick',          guid: 'com.local.survivallog.planpick',          name: '自选生存规划', local: '1.7.0', remote: null,   status: 'ok' },
+      { repoKey: 'predisasterspeed',  guid: 'com.local.survivallog.predisasterspeed',  name: '灾前加速',    local: null,    remote: '1.7.0', status: 'install' },
+      { repoKey: 'endlessguard',      guid: 'com.local.survivallog.endlessguard',      name: '囤鼠桃园',    local: '1.6.0', remote: '1.7.0', status: 'update' },
+      { repoKey: 'modcenter',         guid: SELF_GUID,                                  name: 'Mod 管理中心', local: '1.7.0', remote: '1.7.0', status: 'ok' },
+    ],
+  },
+  order: {
+    guids: [
+      'com.local.survivallog.modcenter', 'com.local.survivallog.backpackexpand',
+      'com.local.survivallog.cabinetsize', 'com.local.survivallog.cabinetburden',
+      'com.local.survivallog.fridgechill', 'com.local.survivallog.quickaction',
+      'com.local.survivallog.cabineteverywhere', 'com.local.survivallog.roleunlock',
+      'com.local.survivallog.robotspeed', 'com.local.survivallog.planpick',
+      'com.local.survivallog.predisasterspeed', 'com.local.survivallog.endlessguard',
+      'com.third.bettertrade', 'com.third.statsui', 'com.third.neighborbasket', 'com.third.oldsave',
+    ],
+    rows: [
+      { guid: 'com.local.survivallog.modcenter', name: 'Mod 管理中心', ver: '1.7.0' },
+      { guid: 'com.local.survivallog.backpackexpand', name: '背包扩容', ver: '1.7.0' },
+      { guid: 'com.local.survivallog.cabinetsize', name: '柜子容量', ver: '1.7.0' },
+      { guid: 'com.local.survivallog.cabinetburden', name: '柜子负重解放', ver: '1.7.0' },
+      { guid: 'com.local.survivallog.fridgechill', name: '保鲜增强', ver: '1.6.0' },
+      { guid: 'com.local.survivallog.quickaction', name: '动作加速', ver: '2.1.2' },
+      { guid: 'com.local.survivallog.cabineteverywhere', name: '更好的储物柜', ver: '1.7.0' },
+      { guid: 'com.local.survivallog.roleunlock', name: '角色解锁', ver: '1.7.0' },
+      { guid: 'com.local.survivallog.robotspeed', name: '机器人提速', ver: '1.7.0' },
+      { guid: 'com.local.survivallog.planpick', name: '自选生存规划', ver: '1.7.0' },
+      { guid: 'com.local.survivallog.predisasterspeed', name: '灾前加速', ver: '' },
+      { guid: 'com.local.survivallog.endlessguard', name: '囤鼠桃园', ver: '2.0.0' },
+      { guid: 'com.third.bettertrade', name: '智能交易', ver: '0.9.4' },
+      { guid: 'com.third.statsui', name: '状态栏增强', ver: '1.2.0' },
+      { guid: 'com.third.neighborbasket', name: '邻居篮筐优化', ver: '0.3.1' },
+      { guid: 'com.third.oldsave', name: '旧档迁移助手', ver: '0.1.0' },
+    ],
+    def: [
+      'com.local.survivallog.backpackexpand', 'com.local.survivallog.cabineteverywhere',
+      'com.local.survivallog.cabinetburden', 'com.local.survivallog.cabinetsize',
+      'com.local.survivallog.endlessguard', 'com.local.survivallog.fridgechill',
+      'com.local.survivallog.modcenter', 'com.local.survivallog.planpick',
+      'com.local.survivallog.predisasterspeed', 'com.local.survivallog.quickaction',
+      'com.local.survivallog.robotspeed', 'com.local.survivallog.roleunlock',
+      'com.third.bettertrade', 'com.third.neighborbasket', 'com.third.oldsave', 'com.third.statsui',
+    ],
+    prot: [ { g: 'com.local.survivallog.cabineteverywhere', d: 'com.local.survivallog.backpackexpand' } ],
+  },
+  scan: {
+    at: new Date().getTime(), total: 8, routed: 8, unknown: 0, framework: 1,
+    game: 55, patched: 58, ms: 3, scope: '游戏侧方法（HotUpdate / GameCore.*）',
+    items: [
+      { method: 'FurnitureTagRules.Evaluate', owners: ['com.third.bettertrade', 'com.third.statsui', 'com.third.neighborbasket'], patches: 3 },
+      { method: 'FurnitureTagRules.TryGetMatchRank', owners: ['com.third.bettertrade', 'com.third.neighborbasket'], patches: 2 },
+      { method: 'FurnitureTagComponent.TryGetPutRank', owners: ['com.third.bettertrade', 'com.third.statsui'], patches: 2 },
+      { method: 'WebUILayer.OnUpdate', owners: ['com.third.bettertrade', 'com.third.statsui'], patches: 2 },
+      { method: 'WebUI_BackpackUI.CallShowAction', owners: ['com.third.bettertrade', 'com.third.statsui'], patches: 2 },
+      { method: 'ItemManager.CollectTradeContainers', owners: ['com.third.bettertrade', 'com.third.statsui'], patches: 2 },
+      { method: 'Reducer_Data_Item.RA_GetCookingBagList', owners: ['com.third.bettertrade', 'com.third.statsui'], patches: 2 },
+      { method: 'WebUIVm.HandleCallback', owners: ['com.local.survivallog.quickaction', 'com.local.survivallog.planpick'], patches: 2 },
+    ],
+    frameItems: [
+      { method: 'Vuplex.BaseWebView.HandleMessageEmitted', owners: ['com.third.statsui', 'com.third.neighborbasket', 'com.third.bettertrade'], patches: 3 },
+    ],
+  },
+};
+
+/* ---- 面板状态（panel.js S/ST 同名同义；S.* 固定指向骨架元素） ---- */
+var S = {
+  side: document.getElementById('__mc_side'),
+  cfg: document.getElementById('__mc_cfg'),
+  sub: document.getElementById('__mc_sub'),
+  toastEl: document.getElementById('__mc_toast'),
+  pendEl: document.getElementById('__mc_pending'),
+  pendTx: document.getElementById('__mc_pend_tx'),
+  mbg: document.getElementById('__mc_modal_bg'),
+  mdl: document.getElementById('__mc_modal'),
+};
+var ST = {
+  snap: { self: { ver: '1.7.0' }, mods: MOCK.mods, tp: MOCK.tp },
+  sel: 'com.local.survivallog.backpackexpand',
+  pend: null, repo: false, repoData: MOCK.repo, dl: null,
+  ord: false, order: null, ordRows: null, ordSaving: false,
+  uninstGuid: null, cfGuid: null, scan: MOCK.scan, patchOpen: false, scanWait: false,
+};
+var ORD = { src: null };
+var TH = Object.create(null);
+
+/* ============================================================================
+ * 渲染函数（panel.js 移植；仅发消息处改 send() 打桩，其余逻辑原样）
+ * ========================================================================== */
+
+function esc(s) {
+  return String(s == null ? '' : s).replace(/[&<>"']/g, function (c) {
+    return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c];
+  });
+}
+function fmt(v) { var n = +v; return isNaN(n) ? String(v) : String(Math.round(n * 1000) / 1000); }
+function badgeOf(b) { return BADGE[b] || BADGE.cfg; }
+
+function mods() { return ST.snap ? ST.snap.mods : []; }
+function tps() { return ST.snap ? ST.snap.tp : []; }
+function findMod(guid) {
+  var i, ms = mods();
+  for (i = 0; i < ms.length; i++) if (ms[i].guid === guid) return ms[i];
+  var ts = tps();
+  for (i = 0; i < ts.length; i++) if (ts[i].guid === guid) return ts[i];
+  return null;
+}
+function isTpMod(m) { return tps().indexOf(m) !== -1; }
+function curMod() {
+  if (ST.sel === '__self') return null;
+  var m = ST.sel ? findMod(ST.sel) : null;
+  return m || mods()[0] || null;
+}
+function itemOf(m, g, i) { return (m.groups[g] && m.groups[g].items[i]) || null; }
+function clampItem(it, v) {
+  if (typeof it.min === 'number' && v < it.min) v = it.min;
+  if (typeof it.max === 'number' && v > it.max) v = it.max;
+  return v;
+}
+
+function swBtn(on, attrs, big) {
+  return '<button type="button" class="__mc-mini-sw' + (big ? ' __mc-big' : '') + (on ? ' __mc-on' : '') + '"'
+    + attrs + ' aria-checked="' + !!on + '"></button>';
+}
+
+function icGlyph(ic) {
+  if (ic.g) return ic.g === 'kbw' ? '⊘' : ic.g;
+  if (ic.k === 'orange') return ic.click === 'cf' ? '⇄' : '↓';
+  if (ic.k === 'red') return '⚠';
+  if (ic.k === 'gray') return '◎';
+  if (ic.k === 'blue') return '↑';
+  if (ic.k === 'amber') return '⟳';
+  return '⚠';
+}
+
+function icsHtml(m) {
+  var ics = m && m.ics;
+  if (!ics || !ics.length) return '';
+  var h = '<span class="__mc-ics">';
+  for (var i = 0; i < ics.length; i++) {
+    var ic = ics[i];
+    if (!ic || !ic.k || !ic.tip) continue;
+    h += '<span class="__mc-ic __mc-' + esc(ic.k) + (ic.w ? ' __mc-weak' : '') + '" data-guid="' + esc(m.guid) + '"'
+      + (ic.click ? ' data-click="' + esc(ic.click) + '"' : '')
+      + ' title="' + esc(ic.tip) + '" aria-label="' + esc(ic.tip) + '">'
+      + esc(icGlyph(ic)) + '</span>';
+  }
+  return h + '</span>';
+}
+
+function repoCounts() {
+  var d = ST.repoData, c = { upd: 0, inst: 0, warn: 0 };
+  if (!d || !d.rows) return c;
+  for (var i = 0; i < d.rows.length; i++) {
+    var r = d.rows[i];
+    if (r.pending) continue;
+    if (r.status === 'update') c.upd++;
+    else if (r.status === 'install') c.inst++;
+    else if (r.status === 'warn') c.warn++;
+  }
+  return c;
+}
+
+function sideFootHtml(ordMode) {
+  return '<div class="__mc-side-foot"><button type="button" data-act="ordtoggle">'
+    + (ordMode ? '退出排序模式' : '加载排序模式')
+    + '</button></div>';
+}
+
+function ordInfoOf(guid) {
+  var name = guid, ver = '', enabled = true;
+  var rows = ST.ordRows && ST.ordRows.rows;
+  if (rows) for (var i = 0; i < rows.length; i++)
+    if (rows[i] && rows[i].guid === guid) { name = rows[i].name || guid; ver = rows[i].ver || ''; break; }
+  var m = findMod(guid);
+  if (m) { name = m.name; enabled = m.enabled !== false; }
+  return { m: m, name: name, ver: ver, enabled: enabled };
+}
+
+function ordIcsHtml(info) {
+  var ics = info.m && info.m.ics;
+  if (!ics || !ics.length) return '';
+  var h = '';
+  for (var i = 0; i < ics.length; i++) {
+    var ic = ics[i];
+    if (!ic || !ic.k || !ic.tip || ic.click !== 'cf') continue;
+    h += '<span class="__mc-ic __mc-' + esc(ic.k) + (ic.w ? ' __mc-weak' : '') + '" style="cursor:default" title="' + esc(ic.tip)
+      + '" aria-label="' + esc(ic.tip) + '">' + esc(icGlyph(ic)) + '</span>';
+  }
+  return h ? '<span class="__mc-ics">' + h + '</span>' : '';
+}
+
+function renderSideOrder() {
+  var dis = ST.order ? '' : ' disabled';
+  var prot = (ST.ordRows && ST.ordRows.prot) || [];
+  var protHtml = '';
+  if (prot.length) {
+    var byG = {}, orderG = [];
+    for (var pi = 0; pi < prot.length; pi++) {
+      var pg = prot[pi] && prot[pi].g, pd = prot[pi] && prot[pi].d;
+      if (!pg || !pd) continue;
+      if (!byG[pg]) { byG[pg] = []; orderG.push(pg); }
+      if (byG[pg].indexOf(pd) === -1) byG[pg].push(pd);
+    }
+    if (orderG.length) {
+      var parts = [];
+      for (var oi = 0; oi < orderG.length; oi++) {
+        var g0 = orderG[oi];
+        var nm = ordInfoOf(g0).name;
+        var deps = byG[g0].map(function (x) { return ordInfoOf(x).name; }).join('、');
+        parts.push(nm + '（依赖 ' + deps + '）');
+      }
+      protHtml = '<div class="__mc-ord-prot">被硬依赖保护 ' + orderG.length + ' 项：' + esc(parts.join('、')) + '</div>';
+    }
+  }
+  var h = '<div class="__mc-ordbar">'
+    + '<b style="color:#e8a33d;font-weight:500">排序模式</b> — 拖拽调整顺序，或选中一行按 ↑↓。硬依赖自动保护。'
+    + protHtml
+    + '<div class="__mc-ord-acts">'
+    + '<button type="button" class="__mc-btn __mc-btn-mini" data-act="ordreset"' + dis + '>恢复默认</button>'
+    + '<button type="button" class="__mc-btn __mc-btn-pri __mc-btn-mini" data-act="ordsave"' + dis + '>保存顺序</button>'
+    + '</div></div>';
+  h += '<div class="__mc-cat">加载顺序（默认 = 模组 ID 字母序）</div>';
+  if (!ST.order) {
+    h += '<div class="__mc-loading">正在读取加载顺序…</div>';
+  } else {
+    for (var i = 0; i < ST.order.length; i++) {
+      var guid = ST.order[i], info = ordInfoOf(guid), n = i + 1;
+      h += '<div class="__mc-mod-row __mc-ord-row' + (info.enabled ? '' : ' __mc-off')
+        + '" data-guid="' + esc(guid) + '" tabindex="0" draggable="true">'
+        + '<span class="__mc-grip" aria-hidden="true">⋮⋮</span>'
+        + '<span class="__mc-ver">' + (n < 10 ? '0' : '') + n + '</span>'
+        + '<span class="__mc-nm">' + esc(info.name) + '</span>'
+        + '<span class="__mc-ver">' + esc(info.ver) + '</span>'
+        + '<span class="__mc-sp"></span>'
+        + ordIcsHtml(info)
+        + '</div>';
+    }
+  }
+  h += sideFootHtml(true);
+  S.side.innerHTML = h;
+}
+
+function renderSide() {
+  if (!S.side) return;
+  if (ST.ord) { renderSideOrder(); return; }
+  var ms = mods(), ts = tps();
+  var h = '<div class="__mc-cat">套件 MOD（' + ms.length + '）</div>';
+  for (var i = 0; i < ms.length; i++) {
+    var m = ms[i];
+    h += '<div class="__mc-mod-row' + (m.enabled ? '' : ' __mc-off')
+      + (ST.sel === m.guid ? ' __mc-sel' : '') + '" data-guid="' + esc(m.guid) + '">'
+      + '<span class="__mc-st"></span><span class="__mc-nm">' + esc(m.name) + '</span>'
+      + icsHtml(m)
+      + (m.missing
+        ? '<span class="__mc-mini-sw __mc-lock" title="未安装：请到「套件仓库」安装"></span>'
+        : swBtn(m.enabled, ' data-act="toggle" data-guid="' + esc(m.guid) + '"')) + '</div>';
+  }
+  h += '<div class="__mc-cat">面板自身</div>';
+  h += '<div class="__mc-mod-row __mc-lock' + (ST.sel === '__self' ? ' __mc-sel' : '')
+    + '" data-guid="__self">'
+    + '<span class="__mc-st" style="background:#e8a33d;"></span><span class="__mc-nm">' + esc(SELF_NAME) + '</span>'
+    + '<span class="__mc-mini-sw __mc-lock" title="防呆：面板不可停用自身"></span></div>';
+  h += '<div class="__mc-cat">第三方 MOD（通用 / 声明式）</div>';
+  if (ts.length === 0) {
+    h += '<div class="__mc-tp-empty">（暂无第三方 mod 接入）</div>';
+  } else {
+    for (var j = 0; j < ts.length; j++) {
+      var t = ts[j];
+      h += '<div class="__mc-mod-row' + (t.enabled ? '' : ' __mc-off')
+        + (ST.sel === t.guid ? ' __mc-sel' : '') + '" data-guid="' + esc(t.guid) + '">'
+        + '<span class="__mc-st"></span><span class="__mc-nm">' + esc(t.name) + '</span>'
+        + icsHtml(t)
+        + swBtn(t.enabled, ' data-act="toggle" data-guid="' + esc(t.guid) + '"') + '</div>';
+    }
+  }
+  h += sideFootHtml(false);
+  S.side.innerHTML = h;
+}
+
+/* ---- 右区：控件与条目 ---- */
+
+function ctlHtml(it, gi, ii) {
+  if (it.t === 'bool') {
+    return swBtn(!!it.v, ' data-act="set" data-g="' + gi + '" data-i="' + ii + '"', true);
+  }
+  if (it.t === 'sel') {
+    var opts = (it.opts && it.opts.length) ? it.opts : [it.v];
+    var o = '';
+    for (var i = 0; i < opts.length; i++)
+      o += '<option value="' + esc(opts[i]) + '"' + (opts[i] === it.v ? ' selected' : '') + '>' + esc(opts[i]) + '</option>';
+    return '<select data-act="set" data-g="' + gi + '" data-i="' + ii + '">' + o + '</select>';
+  }
+  if (it.t === 'str') {
+    return '<input type="text" value="' + esc(it.v) + '" data-act="set" data-g="' + gi + '" data-i="' + ii + '">';
+  }
+  var step = (it.st != null) ? it.st : 0.1;
+  var hasMin = typeof it.min === 'number', hasMax = typeof it.max === 'number';
+  var num = '<input type="text" class="__mc-numbox" inputmode="numeric"'
+    + ' data-num="' + (it.t === 'float' ? 'float' : 'int') + '"'
+    + ' value="' + fmt(it.v)
+    + '" data-act="set" data-g="' + gi + '" data-i="' + ii + '">';
+  if (!hasMin || !hasMax) return num;
+  return '<input type="range" min="' + it.min + '" max="' + it.max + '" step="' + step + '" value="' + fmt(it.v)
+    + '" data-act="set" data-g="' + gi + '" data-i="' + ii + '">' + num;
+}
+
+function itemHtml(m, it, gi, ii) {
+  var bd = badgeOf(it.b);
+  return '<div class="__mc-item' + (it.fail ? ' __mc-failed' : '') + (m.missing ? ' __mc-missing' : '') + '">'
+    + '<div class="__mc-info">'
+    + '<div class="__mc-lb">' + esc(it.l) + '</div>'
+    + '<div class="__mc-ck">' + esc(it.k) + '</div>'
+    + (it.note ? '<div class="__mc-ck __mc-note">' + esc(it.note) + '</div>' : '')
+    + (it.fail ? '<div class="__mc-ck __mc-fail-note">⚠ ' + esc(it.fail) + '</div>' : '')
+    + '</div>'
+    + '<div class="__mc-ctl">' + ctlHtml(it, gi, ii) + '</div>'
+    + '<div class="__mc-badge ' + bd.cls + '">' + esc(bd.t) + '</div>'
+    + '</div>';
+}
+
+function ovrHtml(m) {
+  var h = '<div class="__mc-grp"><h3>动作覆写（单个动作单独调）</h3>'
+    + '<div class="__mc-ovr-add">'
+    + '<input type="text" id="__mc_ovr_new" placeholder="动作 ID" inputmode="numeric">'
+    + '<button type="button" data-act="ovr-add">＋ 新增覆写</button>'
+    + '</div>';
+  var ovr = m.ovr || [];
+  if (!ovr.length) {
+    h += '<div class="__mc-ovr-empty">暂无覆写。新增后在此列出，滑条即时调整。</div>';
+  } else {
+    for (var idx = 0; idx < ovr.length; idx++) {
+      h += '<div class="__mc-item">'
+        + '<div class="__mc-info">'
+        + '<div class="__mc-lb">动作 #' + ovr[idx].id + '</div>'
+        + '<div class="__mc-ck">' + OVR_SECTION + '.' + OVR_KEY + ' · ' + ovr[idx].id + ':' + ovr[idx].ms + '</div>'
+        + '</div>'
+        + '<div class="__mc-ctl">'
+        + '<input type="range" min="0" max="5000" step="50" value="' + ovr[idx].ms + '" data-act="ovr-set" data-idx="' + idx + '">'
+        + '<input type="text" class="__mc-numbox" inputmode="numeric" data-num="int" value="' + ovr[idx].ms + '" data-act="ovr-set" data-idx="' + idx + '">'
+        + '</div>'
+        + '<div class="__mc-badge __mc-b-now">⚡ 立即生效</div>'
+        + '<button type="button" class="__mc-del" data-act="ovr-del" data-idx="' + idx + '" title="删除此覆写">✕</button>'
+        + '</div>';
+    }
+  }
+  return h + '</div>';
+}
+
+function bagOvrHtml(m) {
+  var h = '<div class="__mc-grp"><h3>个性化修改：任意柜子单独调（优先级最高）</h3>'
+    + '<div class="__mc-ovr-add">'
+    + '<input type="text" id="__mc_bov_new" placeholder="柜子 ID" inputmode="numeric" data-num="int">'
+    + '<button type="button" data-act="bov-add">＋ 新增柜子</button>'
+    + '</div>';
+  var bov = m.bagOvr || [];
+  if (!bov.length) {
+    h += '<div class="__mc-ovr-empty">暂无个性化条目。按 BagId 新增任意柜子（含纸箱/机器槽等黑名单柜），优先级高于上方专属与通用。</div>';
+  } else {
+    for (var idx = 0; idx < bov.length; idx++) {
+      h += '<div class="__mc-item">'
+        + '<div class="__mc-info">'
+        + '<div class="__mc-lb">柜子 #' + bov[idx].id + '</div>'
+        + '<div class="__mc-ck">' + BOV_SECTION + '.' + BOV_KEY + ' · ' + bov[idx].id + ':' + bov[idx].w + 'x' + bov[idx].h + '</div>'
+        + '</div>'
+        + '<div class="__mc-ctl">'
+        + '<span class="__mc-bov-lb">宽</span>'
+        + '<input type="text" class="__mc-numbox" inputmode="numeric" data-num="int" value="' + bov[idx].w + '" data-act="bov-set" data-idx="' + idx + '" data-k="w" title="宽度（0..40）">'
+        + '<span class="__mc-bov-lb">高</span>'
+        + '<input type="text" class="__mc-numbox" inputmode="numeric" data-num="int" value="' + bov[idx].h + '" data-act="bov-set" data-idx="' + idx + '" data-k="h" title="高度（0..30）">'
+        + '</div>'
+        + '<div class="__mc-badge __mc-b-now">⚡ 立即生效</div>'
+        + '<button type="button" class="__mc-del" data-act="bov-del" data-idx="' + idx + '" title="删除此柜子">✕</button>'
+        + '</div>';
+    }
+  }
+  return h + '</div>';
+}
+
+/* 维护区（详情页底部）：更新/安装按钮按仓库态出现；卸载常驻（未安装不显示）。
+ * v3：更新按钮只在此处与列表图标两处，不进左侧列表。 */
+function maintHtml(m) {
+  var r = isTpMod(m) ? null : repoRowOfGuid(m.guid);
+  var h = '<div class="__mc-maint"><h3>维护</h3>';
+  if (r && r.pending) {
+    h += '<div class="__mc-kv"><span class="__mc-kk">更新</span>'
+      + '<span style="color:#e8a33d;font-size:12px">⟳ 待生效 · 重启游戏后应用</span></div>';
+  } else if (r && r.remote != null && (r.status === 'update' || r.status === 'downgrade' || r.status === 'install' || r.local == null)) {
+    var isDown = r.status === 'downgrade';
+    var isInst = r.local == null || r.status === 'install';
+    var label = isDown ? '降级到 ' + r.remote : (isInst ? '安装 ' + r.remote : '更新到 ' + r.remote);
+    var cls = isDown ? '__mc-btn-org' : (isInst ? '__mc-btn-blue' : '__mc-btn-pri');
+    var ver = isInst ? '未安装 → ' + r.remote : r.local + ' → ' + r.remote;
+    h += '<div class="__mc-kv"><span class="__mc-kk">更新</span>'
+      + '<button type="button" class="__mc-btn ' + cls + ' __mc-btn-mini" data-ract="upd" data-repo="' + esc(r.repoKey) + '">' + esc(label) + '</button>'
+      + '<span style="font-size:11px;color:#6b7180">' + esc(ver) + '</span></div>';
+  }
+  if (!m.missing) {
+    h += '<div class="__mc-kv"><span class="__mc-kk">卸载</span>'
+      + '<button type="button" class="__mc-btn __mc-btn-danger __mc-btn-mini" data-act="uninst" data-guid="' + esc(m.guid) + '">卸载…</button>'
+      + '<span style="font-size:11px;color:#6b7180">删文件，重启后生效</span></div>';
+  }
+  return h + '</div>';
+}
+
+/* __self 页专用：只有卸载入口 */
+function uninstActHtml(guid) {
+  return '<div class="__mc-maint"><h3>维护</h3>'
+    + '<div class="__mc-kv"><span class="__mc-kk">卸载</span>'
+    + '<button type="button" class="__mc-btn __mc-btn-danger __mc-btn-mini" data-act="uninst" data-guid="' + esc(guid) + '">卸载…</button>'
+    + '<span style="font-size:11px;color:#6b7180">需重启两次</span></div></div>';
+}
+
+/* ---- 右区：仓库数据访问（无独立页面；驱动行内图标与「维护」区按钮） ---- */
+
+function repoRowOf(key) {
+  var d = ST.repoData;
+  if (!d || !d.rows || !key) return null;
+  for (var i = 0; i < d.rows.length; i++)
+    if (d.rows[i].repoKey === key) return d.rows[i];
+  return null;
+}
+function repoRowOfGuid(guid) {
+  var d = ST.repoData;
+  if (!d || !d.rows || !guid) return null;
+  for (var i = 0; i < d.rows.length; i++)
+    if (d.rows[i].guid === guid) return d.rows[i];
+  return null;
+}
+
+function dlStageText(st, pct) {
+  if (st === 'down') return '正在下载… ' + (pct || 0) + '%';
+  if (st === 'check') return '校验中…';
+  if (st === 'unzip') return '解包中…';
+  if (st === 'write') return '写入待生效…';
+  return '处理中…';
+}
+
+/* ---- 右区：配置页（mod 详情 / __self） ---- */
+
+function renderCfg() {
+  if (!S.cfg) return;
+  if (ST.sel === '__self' || !mods().length) {
+    S.cfg.innerHTML = '<div class="__mc-mod-title"><h2>' + esc(SELF_NAME) + '</h2>'
+      + '<span class="__mc-en">' + esc(SELF_EN) + '</span></div>'
+      + '<div class="__mc-mod-desc">面板自身。不可停用；如需移除，用下方卸载。</div>'
+      + uninstActHtml(SELF_GUID);
+    return;
+  }
+  var m = curMod();
+  if (!m) return;
+  var tp = isTpMod(m);
+  var banner = tp
+    ? (m.absent
+      ? '已停用：当前未加载。启用后下次启动恢复。'
+      : (m.soft
+        ? '已停用：行为已停止，下次启动不再加载。'
+        : '已停用：本次仍在运行，下次启动不再加载。'))
+    : (m.missing
+      ? '未安装：此页只读。可在下方「维护」安装。'
+      : '已停用：改动仍会保存，重新启用后生效。');
+  var h = '<div class="__mc-mod-title"><h2>' + esc(m.name) + '</h2><span class="__mc-en">' + esc(m.en) + '</span></div>'
+    + '<div class="__mc-mod-desc">' + esc(m.desc) + '</div>'
+    + '<div class="__mc-stop-banner' + (m.enabled ? '' : ' __mc-show') + '">' + banner + '</div>';
+  for (var gi = 0; gi < m.groups.length; gi++) {
+    h += '<div class="__mc-grp"><h3>' + esc(m.groups[gi].title) + '</h3>';
+    for (var ii = 0; ii < m.groups[gi].items.length; ii++)
+      h += itemHtml(m, m.groups[gi].items[ii], gi, ii);
+    h += '</div>';
+  }
+  if (m.groups.length === 0) {
+    h += '<div class="__mc-grp"><h3>配置</h3>'
+      + '<div class="__mc-ovr-empty">该 mod 只有启用 / 停用，没有其他设置。</div></div>';
+  }
+  if (m.ovr) h += ovrHtml(m);
+  if (m.bagOvr) h += bagOvrHtml(m);
+  h += maintHtml(m);
+  S.cfg.innerHTML = h;
+}
+
+/* ---- toast ---- */
+
+function toast(main, badge, err, errDetail) {
+  if (!S.toastEl) return;
+  var small = err
+    ? '写入被拒绝' + (errDetail ? '：' + errDetail : '') + '（详见 LogOutput）'
+    : (TOAST_SMALL[badge] || TOAST_SMALL.reboot);
+  S.toastEl.className = '__mc-toast __mc-show' + (err ? ' __mc-err' : '');
+  S.toastEl.innerHTML = '<span>' + esc(main) + '</span><small>' + esc(small) + '</small>';
+  clearTimeout(toast._h);
+  toast._h = setTimeout(function () { S.toastEl.className = '__mc-toast'; }, 2600);
+}
+function toastRaw(main, small) {
+  if (!S.toastEl) return;
+  S.toastEl.className = '__mc-toast __mc-show';
+  S.toastEl.innerHTML = '<span>' + esc(main) + '</span><small>' + esc(small || '') + '</small>';
+  clearTimeout(toast._h);
+  toast._h = setTimeout(function () { S.toastEl.className = '__mc-toast'; }, 3400);
+}
+
+/* ---- 浮层弹窗 + 待生效条 ---- */
+
+function chipHtml(k, glyph) {
+  return '<span class="__mc-ic __mc-' + k + '" style="cursor:default" aria-hidden="true">' + glyph + '</span>';
+}
+
+/* 冲突卡片（v3 两级）：红=严重（只能二选一）/ 橙=普通告警（可能有问题）。
+ * 一张卡三句话：title=结论一句；涉及 mod；怎么办。reason 可省。 */
+function cfCardHtml(m, c, i) {
+  var lv = c.lv === 'red' ? 'red' : 'orange';
+  var h = '';
+  if (i > 0) h += '<div style="border-top:1px solid #2a2f3d;margin-top:14px"></div>';
+  h += '<h3>' + chipHtml(lv, c.g || icGlyph({ k: lv, click: 'cf' })) + esc((c.tag || '提示') + ' · ' + m.name) + '</h3>'
+    + '<div class="__mc-m-sub">' + esc(c.title || '') + '</div>';
+  if ((c.who || []).length)
+    h += '<div class="__mc-m-sec"><div class="__mc-m-h">涉及 mod</div>'
+      + '<div class="__mc-m-txt"><b style="color:#e8e6e0">' + esc(c.who.join('、')) + '</b></div></div>';
+  if (c.reason)
+    h += '<div class="__mc-m-sec"><div class="__mc-m-h">原因</div><div class="__mc-m-txt">' + esc(c.reason) + '</div></div>';
+  var tips = c.tips || [];
+  if (tips.length) {
+    h += '<div class="__mc-m-sec"><div class="__mc-m-h">怎么办</div><div class="__mc-m-txt">';
+    for (var j = 0; j < tips.length; j++) h += (j > 0 ? '<br>' : '') + (j + 1) + '. ' + esc(tips[j]);
+    h += '</div></div>';
+  }
+  return h;
+}
+
+function cfModalHtml(m, cards) {
+  var h = '';
+  for (var i = 0; i < cards.length; i++) h += cfCardHtml(m, cards[i], i);
+  h += '<div class="__mc-m-acts"><button type="button" class="__mc-btn __mc-btn-mini" data-mact="close">关闭</button>'
+    + '<button type="button" class="__mc-btn __mc-btn-mini" data-mact="cfoff" data-guid="' + esc(m.guid) + '">停用此 mod</button>'
+    + '<button type="button" class="__mc-btn __mc-btn-pri __mc-btn-mini" data-mact="cforder">去调序</button>'
+    + '<button type="button" class="__mc-btn __mc-btn-danger __mc-btn-mini" data-mact="cfdel" data-guid="' + esc(m.guid) + '">卸载此 mod…</button></div>';
+  return h;
+}
+
+function patchOwnerName(g) {
+  var m = findMod(g);
+  return m ? m.name : '未知 mod';
+}
+
+function patchModalHtml() {
+  var s = ST.scan;
+  var h = '<h3>' + chipHtml('orange', '⇄') + '补丁碰撞</h3>';
+  if (!s) {
+    return h + '<div class="__mc-m-sub">正在读取扫描结果…</div>'
+      + '<div class="__mc-m-acts"><button type="button" class="__mc-btn __mc-btn-mini" data-mact="close">关闭</button></div>';
+  }
+  if (s.error) {
+    h += '<div class="__mc-risk">' + esc(s.error) + '</div>';
+  } else {
+    h += '<div class="__mc-m-sub">有 ' + (s.total || 0) + ' 处游戏逻辑被多个 mod 同时修改，后加载的会覆盖先加载的。一般不用处理；游戏行为异常时再来看。</div>'
+      + '<div class="__mc-m-sec"><div class="__mc-m-h">碰撞位置</div>';
+    var items = s.items || [];
+    if (!items.length) h += '<div class="__mc-m-txt">没有发现碰撞。</div>';
+    for (var i = 0; i < items.length; i++) {
+      var it = items[i] || {};
+      h += '<div class="__mc-scan-grp"><div class="__mc-scan-m">' + esc(it.method || '?') + '</div>'
+        + '<div class="__mc-scan-o">' + esc((it.owners || []).map(patchOwnerName).join('、')) + '</div></div>';
+    }
+    h += '</div>';
+    var fw = s.frameItems || [];
+    if (fw.length) {
+      h += '<div class="__mc-m-sec"><div class="__mc-m-h">另有 ' + (s.framework || fw.length) + ' 处框架内部碰撞</div>'
+        + '<div class="__mc-m-txt" style="font-size:11.5px">不影响游戏逻辑，未计入上面的数字。</div>'
+        + '<div class="__mc-scan-grp">';
+      for (var fi = 0; fi < fw.length; fi++) {
+        var fit = fw[fi] || {};
+        h += '<div class="__mc-scan-m">' + esc(fit.method || '?') + '</div>'
+          + '<div class="__mc-scan-o">' + esc((fit.owners || []).map(patchOwnerName).join('、')) + '</div>';
+      }
+      h += '</div></div>';
+    }
+  }
+  h += '<div class="__mc-m-acts"><button type="button" class="__mc-btn __mc-btn-mini" data-pact="rescan"'
+    + (ST.scanWait ? ' disabled' : '') + '>' + (ST.scanWait ? '扫描中…' : '重新扫描') + '</button>'
+    + '<button type="button" class="__mc-btn __mc-btn-mini" data-mact="close">关闭</button></div>';
+  return h;
+}
+
+function repoVerbOf(r) {
+  if (r.status === 'downgrade') return '降级';
+  if (r.local == null || r.status === 'install') return '安装';
+  return '更新';
+}
+
+/* 更新确认弹窗（v3 精简）：版本对比一行 + 告警（仅异常时出现）+ 一句生效说明。 */
+function updModalRealHtml(r) {
+  var isDown = r.status === 'downgrade', isWarn = r.status === 'warn';
+  var isInst = r.local == null || r.status === 'install';
+  var chip = isDown ? chipHtml('orange', '↓') : chipHtml('blue', '↑');
+  var verb = repoVerbOf(r);
+  var h = '<h3>' + chip + verb + ' · ' + esc(r.name) + '</h3>'
+    + '<div class="__mc-kv" style="padding:2px 0 0"><span class="__mc-kvv">' + esc(r.local || '未安装') + '</span>'
+    + '<span style="color:#6b7180">→</span>'
+    + '<span class="__mc-kvv" style="color:' + (isDown ? '#fbbf24' : '#60a5fa') + ';font-size:14px">' + esc(r.remote) + '</span></div>';
+  if (isDown) h += '<div class="__mc-risk">⚠ 本地 ' + esc(r.local) + ' 比远端新。旧版可能和存档、其他 mod 不匹配，确定要降级吗？</div>';
+  else if (isWarn) h += '<div class="__mc-risk">⚠ ' + esc(r.why || '该版本可能不适配当前游戏') + '，有闪退风险，确定要继续吗？</div>';
+  else if (r.kbw && r.kbwhy) h += '<div class="__mc-risk">⚠ ' + esc(r.kbwhy) + '，有闪退风险，确定要继续吗？</div>';
+  if (r.verNote) h += '<div class="__mc-m-sec"><div class="__mc-m-txt" style="font-size:11px;color:#8a90a0">ⓘ 未能校验游戏版本</div></div>';
+  h += '<div class="__mc-m-sec"><div class="__mc-m-txt">下载并校验后暂存，<b style="color:#e8e6e0">重启游戏</b>时自动替换（不保留旧版）。</div></div>'
+    + '<div class="__mc-m-acts"><button type="button" class="__mc-btn __mc-btn-mini" data-mact="close">取消</button>'
+    + '<button type="button" class="__mc-btn ' + (isDown ? '__mc-btn-org' : (isInst ? '__mc-btn-blue' : '__mc-btn-pri'))
+    + '" data-mact="doupd" data-repo="' + esc(r.repoKey) + '">' + esc(verb === '安装' ? '安装 ' : verb + '到 ') + esc(r.remote) + '</button></div>';
+  return h;
+}
+
+/* 确认后的进度弹窗（就地更新，不重建） */
+function updModalDlHtml(r, dl) {
+  var chip = r.status === 'downgrade' ? chipHtml('orange', '↓') : chipHtml('blue', '↑');
+  var st = dl ? dl.stage : 'down';
+  var pct = dl && typeof dl.pct === 'number' ? dl.pct : 0;
+  return '<h3>' + chip + repoVerbOf(r) + ' · ' + esc(r.name) + '</h3>'
+    + '<div class="__mc-m-sec"><div class="__mc-m-h">进行中</div>'
+    + '<div class="__mc-m-txt" id="__mc_dltx">' + esc(dlStageText(st, pct)) + '</div>'
+    + '<div class="__mc-dlbar"><i id="__mc_dlfill" style="width:' + (st === 'down' ? pct : 100) + '%"></i></div></div>'
+    + '<div class="__mc-m-acts"><button type="button" class="__mc-btn __mc-btn-mini" data-mact="close">隐藏</button></div>';
+}
+
+function updModalDoneHtml(r) {
+  return '<h3>' + chipHtml('amber', '⟳') + '已就绪 · ' + esc(r.name) + '</h3>'
+    + '<div class="__mc-m-sec"><div class="__mc-m-txt">已下载并校验。<b style="color:#e8e6e0">重启游戏</b>后自动替换。</div></div>'
+    + '<div class="__mc-m-acts"><button type="button" class="__mc-btn __mc-btn-pri __mc-btn-mini" data-mact="close">关闭</button></div>';
+}
+
+function updModalErrHtml(r, err) {
+  return '<h3>' + chipHtml('red', '⚠') + repoVerbOf(r) + '失败 · ' + esc(r.name) + '</h3>'
+    + '<div class="__mc-risk">' + esc(err || '未知错误') + '</div>'
+    + '<div class="__mc-m-sec"><div class="__mc-m-txt">没有做任何更改，稍后可重试。</div></div>'
+    + '<div class="__mc-m-acts"><button type="button" class="__mc-btn __mc-btn-mini" data-mact="close">关闭</button></div>';
+}
+
+function uninstModalHtml(d) {
+  var h = '<h3>' + chipHtml('red', '⚠') + '卸载 · ' + esc(d.name) + '</h3>'
+    + '<div class="__mc-m-sub">将删除以下内容，重启游戏后执行。存档和其他 mod 不受影响。</div>'
+    + '<div class="__mc-files">';
+  var fs = d.files || [];
+  for (var i = 0; i < fs.length; i++)
+    h += '<div class="__mc-file-del">BepInEx\\' + esc(String(fs[i]).replace(/\//g, '\\')) + '</div>';
+  h += '<div class="__mc-file-del">停用 / 排序记录（如有）</div></div>';
+  if (d.note) h += '<div class="__mc-m-sec"><div class="__mc-m-txt" style="font-size:11px;color:#8a90a0">ⓘ ' + esc(d.note) + '</div></div>';
+  if (d.self) h += '<div class="__mc-risk">⚠ 这是面板自己：要重启两次才能删干净（第一次打标记，第二次删文件、入口消失）。引导壳属基座组件会保留。</div>';
+  h += '<div class="__mc-m-acts"><button type="button" class="__mc-btn __mc-btn-mini" data-mact="close">取消</button>'
+    + '<button type="button" class="__mc-btn __mc-btn-danger" data-mact="douninst" data-guid="' + esc(d.guid) + '">确认卸载</button></div>';
+  return h;
+}
+
+function setModal(html) {
+  if (!S.mdl || !S.mbg) return false;
+  S.mdl.innerHTML = html;
+  var closes = S.mdl.querySelectorAll('[data-mact="close"]');
+  for (var i = 0; i < closes.length; i++)
+    closes[i].addEventListener('click', function (e) { e.stopPropagation(); closeModal(); });
+  return true;
+}
+function openModal(html) {
+  if (!setModal(html)) return;
+  S.mdlRepoKey = null;
+  S.mbg.className = '__mc-modal-bg __mc-show';
+}
+function closeModal() {
+  if (S.mbg) S.mbg.className = '__mc-modal-bg';
+  ST.cfGuid = null;
+  ST.patchOpen = false; ST.scanWait = false;
+  if (demoDlTimer) { clearInterval(demoDlTimer); demoDlTimer = null; }
+}
+function modalOpen() {
+  return !!(S.mbg && S.mbg.className.indexOf('__mc-show') !== -1);
+}
+
+function renderPending() {
+  if (!S.pendEl) return;
+  var p = ST.pend;
+  var labels = p && p.labels ? p.labels : [];
+  var applied = p && p.applied ? p.applied : null;
+  if (!labels.length && !applied) {
+    S.pendEl.className = '__mc-pending';
+    return;
+  }
+  S.pendEl.className = '__mc-pending __mc-show' + (labels.length ? '' : ' __mc-weak');
+  var h = '';
+  if (labels.length)
+    h += esc('待生效 ' + labels.length + ' 项（' + labels.join(' · ') + '）· 重启游戏后应用');
+  if (applied)
+    h += (h ? ' · ' : '') + '<span style="color:#8a90a0">' + esc(applied) + '</span>';
+  S.pendTx.innerHTML = h;
+}
+
+function openRebootModal() {
+  var n = ST.pend && ST.pend.n ? ST.pend.n : 0;
+  openModal('<h3>' + chipHtml('amber', '↻') + '立即重启</h3>'
+    + '<div class="__mc-m-sub">退出游戏，约 10 秒后自动回来。</div>'
+    + '<div class="__mc-risk">⚠ 未保存的对局进度会丢失。</div>'
+    + (n > 0 ? '<div class="__mc-m-sec"><div class="__mc-m-txt">重启后自动应用 ' + n + ' 项待生效操作。</div></div>' : '')
+    + '<div class="__mc-m-acts"><button type="button" class="__mc-btn __mc-btn-mini" data-mact="close">取消</button>'
+    + '<button type="button" class="__mc-btn __mc-btn-pri" data-mact="doreboot">确认重启</button></div>');
+  var go = S.mdl.querySelector('[data-mact="doreboot"]');
+  if (!go) return;
+  go.addEventListener('click', function (e) {
+    e.stopPropagation();
+    send({ type: 'MC_RESTART' });
+    closeModal();
+    toastRaw('正在重启游戏…', '本进程退出后经 Steam 自动重拉');
+  });
+}
+
+/* ---- 交互接线（panel.js wireSide/wireCfg 移植） ---- */
+
+function toggleMod(guid) {
+  if (guid === '__self') return;
+  var m = findMod(guid);
+  if (!m) return;
+  m.enabled = !m.enabled;
+  renderSide(); renderCfg();
+  send({ type: 'MC_TOGGLE_MOD', guid: guid, enabled: m.enabled });
+  var tp = isTpMod(m);
+  if (tp) {
+    if (m.enabled) {
+      toastRaw(m.name + ' 已启用', '下次启动加载');
+    } else {
+      toastRaw(m.name + ' 已停用',
+        m.soft ? '行为已停止 · 下次启动不再加载' : '本次仍在运行 · 下次启动不再加载');
+    }
+    return;
+  }
+  toastRaw(m.name + (m.enabled ? ' 已启用' : ' 已停用'),
+    m.enabled ? '已生效' : '已还原 · 下次启动不再加载');
+}
+
+function syncSibling(el, v) {
+  var ctl = el.closest('.__mc-ctl');
+  if (!ctl) return;
+  var all = ctl.querySelectorAll('input');
+  for (var i = 0; i < all.length; i++) if (all[i] !== el) all[i].value = fmt(v);
+}
+
+function routeOf(k) {
+  var i = String(k).indexOf('.');
+  return i === -1 ? ['', k] : [String(k).slice(0, i), String(k).slice(i + 1)];
+}
+function sendSet(m, it, value) {
+  var r = routeOf(it.k);
+  send({ type: 'MC_SET', guid: m.guid, section: r[0], key: it.k, value: value });
+}
+function serializeOvr(m) {
+  return (m.ovr || []).slice().sort(function (a, b) { return a.id - b.id; })
+    .map(function (o) { return o.id + ':' + o.ms; }).join(',');
+}
+function ovrCommit(m) { send({ type: 'MC_SET', guid: m.guid, section: OVR_SECTION, key: OVR_KEY, value: serializeOvr(m) }); }
+function serializeBov(m) {
+  return (m.bagOvr || []).slice().sort(function (a, b) { return a.id - b.id; })
+    .map(function (o) { return o.id + ':' + o.w + 'x' + o.h; }).join(',');
+}
+function bovCommit(m) { send({ type: 'MC_SET', guid: m.guid, section: BOV_SECTION, key: BOV_SECTION + '.' + BOV_KEY, value: serializeBov(m) }); }
+
+/* 100ms 节流（滑条连发合并） */
+function throttleSend(id, fn) {
+  var now = Date.now();
+  var t = TH[id] || (TH[id] = { last: 0, timer: null, pending: null });
+  if (now - t.last >= 100) {
+    t.last = now; t.pending = null; fn();
+  } else {
+    t.pending = fn;
+    if (t.timer == null) {
+      t.timer = setTimeout(function () {
+        var p = TH[id]; if (!p) return;
+        p.timer = null; p.last = Date.now();
+        var f = p.pending; p.pending = null;
+        if (f) f();
+      }, 100 - (now - t.last));
+    }
+  }
+}
+
+/* ---- 排序模式 ---- */
+function ordToggle() {
+  if (ST.ord) {
+    ST.ord = false; ST.order = null; ST.ordSaving = false; ORD.src = null;
+    renderSide(); renderCfg();
+    return;
+  }
+  ST.ord = true; ST.order = null; ST.ordSaving = false; ORD.src = null;
+  renderSide(); renderCfg();
+  /* 原型直接给数据（游戏内走 MC_ORDER_GET/MC_ORDER_DATA） */
+  ST.ordRows = MOCK.order;
+  ST.order = MOCK.order.guids.slice();
+  renderSide();
+}
+function ordReset() {
+  if (!ST.ordRows || !ST.ordRows.def || !ST.ordRows.def.length) return;
+  ST.order = ST.ordRows.def.slice();
+  renderSide();
+  toastRaw('已恢复默认顺序', '尚未保存——点「保存顺序」后生效');
+}
+function ordSave() {
+  if (!ST.order || !ST.order.length || ST.ordSaving) return;
+  ST.ordSaving = true;
+  send({ type: 'MC_ORDER_SAVE', guids: ST.order.slice() });
+  setTimeout(function () {
+    ST.ordSaving = false;
+    if (ST.ord) { ST.ord = false; ST.order = null; renderSide(); renderCfg(); }
+    toastRaw('顺序已保存', '重启游戏后生效');
+    ST.pend = { n: 3, labels: ['更新 动作加速', '卸载 角色解锁', '加载顺序调整'] };
+    renderPending();
+  }, 500);
+}
+function ordIndexOf(guid) {
+  if (!ST.order) return -1;
+  for (var i = 0; i < ST.order.length; i++) if (ST.order[i] === guid) return i;
+  return -1;
+}
+function ordReorderLocal(from, to) {
+  if (!ST.order) return;
+  if (from === to || from < 0 || to < 0 || from >= ST.order.length) return;
+  var g = ST.order.splice(from, 1)[0];
+  if (to > ST.order.length) to = ST.order.length;
+  ST.order.splice(to, 0, g);
+  renderSide();
+}
+function ordClearDrops() {
+  if (!S.side) return;
+  var rows = S.side.querySelectorAll('.__mc-ord-row');
+  for (var i = 0; i < rows.length; i++) {
+    rows[i].classList.remove('__mc-drop-above');
+    rows[i].classList.remove('__mc-drop-below');
+  }
+}
+function ordFocusRow(i) {
+  if (!S.side) return;
+  var rows = S.side.querySelectorAll('.__mc-ord-row');
+  if (rows[i]) rows[i].focus();
+}
+
+function wireSide(side) {
+  side.addEventListener('click', function (e) {
+    var oa = e.target.closest
+      ? e.target.closest('[data-act="ordtoggle"],[data-act="ordreset"],[data-act="ordsave"]') : null;
+    if (oa) {
+      e.stopPropagation();
+      var a = oa.getAttribute('data-act');
+      if (a === 'ordtoggle') ordToggle();
+      else if (a === 'ordreset') ordReset();
+      else if (a === 'ordsave') ordSave();
+      return;
+    }
+    var ent = e.target.closest ? e.target.closest('[data-act="repo-open"]') : null;
+    if (ent) { e.stopPropagation(); return; } /* v3：侧栏无仓库入口（兼容残留点击） */
+    var sw = e.target.closest ? e.target.closest('[data-act="toggle"]') : null;
+    if (sw) { e.stopPropagation(); toggleMod(sw.getAttribute('data-guid')); return; }
+    var ic = e.target.closest ? e.target.closest('.__mc-ic') : null;
+    if (ic) {
+      e.stopPropagation();
+      var click = ic.getAttribute('data-click');
+      if (!click) return;
+      var m = findMod(ic.getAttribute('data-guid'));
+      if (!m) return;
+      if (click === 'cf') openCfModal(m);
+      else if (click === 'upd') openUpdModal(m);
+      return;
+    }
+    var row = e.target.closest ? e.target.closest('.__mc-mod-row') : null;
+    if (row) {
+      if (ST.ord) return;
+      ST.sel = row.getAttribute('data-guid'); renderSide(); renderCfg();
+    }
+  });
+
+  side.addEventListener('dragstart', function (e) {
+    if (!ST.ord || !ST.order) return;
+    var row = e.target.closest ? e.target.closest('.__mc-ord-row') : null;
+    if (!row) return;
+    ORD.src = row.getAttribute('data-guid');
+    if (e.dataTransfer) {
+      try { e.dataTransfer.setData('text/plain', String(ORD.src)); } catch (_) {}
+      e.dataTransfer.effectAllowed = 'move';
+    }
+    row.classList.add('__mc-dragging');
+  });
+  side.addEventListener('dragend', function (e) {
+    var row = e.target.closest ? e.target.closest('.__mc-ord-row') : null;
+    if (row) row.classList.remove('__mc-dragging');
+    ordClearDrops();
+    ORD.src = null;
+  });
+  side.addEventListener('dragover', function (e) {
+    if (!ST.ord || ORD.src == null || !ST.order) return;
+    var row = e.target.closest ? e.target.closest('.__mc-ord-row') : null;
+    if (!row) return;
+    e.preventDefault();
+    if (e.dataTransfer) e.dataTransfer.dropEffect = 'move';
+    ordClearDrops();
+    var r = row.getBoundingClientRect();
+    row.classList.add(e.clientY < r.top + r.height / 2 ? '__mc-drop-above' : '__mc-drop-below');
+  });
+  side.addEventListener('dragleave', function (e) {
+    var row = e.target.closest ? e.target.closest('.__mc-ord-row') : null;
+    if (row) { row.classList.remove('__mc-drop-above'); row.classList.remove('__mc-drop-below'); }
+  });
+  side.addEventListener('drop', function (e) {
+    if (!ST.ord || ORD.src == null || !ST.order) return;
+    e.preventDefault();
+    ordClearDrops();
+    var row = e.target.closest ? e.target.closest('.__mc-ord-row') : null;
+    var srcGuid = ORD.src;
+    ORD.src = null;
+    if (!row || srcGuid == null) return;
+    var src = ordIndexOf(srcGuid);
+    if (src < 0) return;
+    var r = row.getBoundingClientRect();
+    var below = e.clientY >= r.top + r.height / 2;
+    var to = ordIndexOf(row.getAttribute('data-guid')) + (below ? 1 : 0);
+    if (to > src) to--;
+    ordReorderLocal(src, to);
+  });
+  side.addEventListener('keydown', function (e) {
+    if (!ST.ord || !ST.order) return;
+    if (e.key !== 'ArrowUp' && e.key !== 'ArrowDown') return;
+    var row = e.target.closest ? e.target.closest('.__mc-ord-row') : null;
+    if (!row) return;
+    e.preventDefault();
+    var i = ordIndexOf(row.getAttribute('data-guid'));
+    if (i < 0) return;
+    var to = e.key === 'ArrowUp' ? i - 1 : i + 1;
+    ordReorderLocal(i, to);
+    ordFocusRow(to);
+  });
+}
+
+function openRepoView() { /* v3：独立仓库页已移除，保留空实现防残留调用 */ }
+
+/* ---- 右区交互 ---- */
+
+function wireCfg(cfg) {
+  cfg.addEventListener('click', function (e) {
+    var t = e.target;
+    if (!t.closest) return;
+    var ra = t.closest('[data-ract]');
+    if (ra) {
+      var ract = ra.getAttribute('data-ract');
+      if (ract === 'upd' || ract === 'inst') {
+        var rr = repoRowOf(ra.getAttribute('data-repo'));
+        if (rr) openRepoModal(rr);
+      }
+      return;
+    }
+    var un = t.closest('[data-act="uninst"]');
+    if (un) { e.stopPropagation(); openUninstDemo(un.getAttribute('data-guid')); return; }
+    var m = curMod();
+    if (!m) return;
+    var sw = t.closest('.__mc-mini-sw[data-act="set"]');
+    if (sw) {
+      var it = itemOf(m, +sw.getAttribute('data-g'), +sw.getAttribute('data-i'));
+      if (!it) return;
+      it.v = !it.v;
+      sw.className = '__mc-mini-sw __mc-big' + (it.v ? ' __mc-on' : '');
+      sw.setAttribute('aria-checked', String(!!it.v));
+      sendSet(m, it, it.v);
+      toast(m.name + ' · ' + it.l + ' → ' + (it.v ? '开' : '关'), it.b);
+      return;
+    }
+    var add = t.closest('[data-act="ovr-add"]');
+    if (add) {
+      if (!m.ovr) return;
+      var inp = S.cfg.querySelector('#__mc_ovr_new');
+      var id = inp ? parseInt(inp.value, 10) : NaN;
+      if (!isNaN(id) && id > 0 && !m.ovr.some(function (o) { return o.id === id; })) {
+        m.ovr.push({ id: id, ms: 1000 });
+        renderCfg();
+        ovrCommit(m);
+        toast(m.name + ' · 新增覆写 #' + id + '（默认 1000ms）', 'now');
+      }
+      return;
+    }
+    var del = t.closest('[data-act="ovr-del"]');
+    if (del) {
+      if (!m.ovr) return;
+      var idx = +del.getAttribute('data-idx');
+      if (idx >= 0 && idx < m.ovr.length) {
+        var gone = m.ovr[idx].id;
+        m.ovr.splice(idx, 1);
+        renderCfg();
+        ovrCommit(m);
+        toast(m.name + ' · 已删除覆写 #' + gone, 'now');
+      }
+      return;
+    }
+    var badd = t.closest('[data-act="bov-add"]');
+    if (badd) {
+      if (!m.bagOvr) return;
+      var binp = S.cfg.querySelector('#__mc_bov_new');
+      var bid = binp ? parseInt(binp.value, 10) : NaN;
+      if (!isNaN(bid) && bid > 0 && !(m.bagOvr).some(function (o) { return o.id === bid; })) {
+        m.bagOvr.push({ id: bid, w: 16, h: 12 });
+        renderCfg();
+        bovCommit(m);
+        toast(m.name + ' · 新增柜子 #' + bid + '（默认 16x12，优先级最高）', 'now');
+      }
+      return;
+    }
+    var bdel = t.closest('[data-act="bov-del"]');
+    if (bdel) {
+      if (!m.bagOvr) return;
+      var bidx = +bdel.getAttribute('data-idx');
+      if (bidx >= 0 && bidx < m.bagOvr.length) {
+        var bgone = m.bagOvr[bidx].id;
+        m.bagOvr.splice(bidx, 1);
+        renderCfg();
+        bovCommit(m);
+        toast(m.name + ' · 已删除柜子 #' + bgone + '（回落到专属/通用）', 'now');
+      }
+    }
+  });
+
+  cfg.addEventListener('input', function (e) {
+    var el = e.target;
+    if (!el.getAttribute) return;
+    var dnum = el.getAttribute('data-num');
+    if (dnum) {
+      var sv = (el.value || '').replace(/[^\d.]/g, '');
+      if (dnum === 'int') sv = sv.replace(/\./g, '');
+      else { var sp = sv.split('.'); sv = sp.length > 1 ? sp[0] + '.' + sp.slice(1).join('') : sv; }
+      if (sv !== el.value) el.value = sv;
+    }
+    var act = el.getAttribute('data-act');
+    if (!act) return;
+    var m = curMod();
+    if (!m) return;
+    if (act === 'ovr-set') {
+      if (!m.ovr) return;
+      var o = m.ovr[+el.getAttribute('data-idx')];
+      if (!o) return;
+      var ov = parseFloat(el.value);
+      if (isNaN(ov)) return;
+      o.ms = Math.round(Math.max(0, Math.min(5000, ov)));
+      syncSibling(el, o.ms);
+      var ck = el.closest('.__mc-item');
+      if (ck) {
+        var ckEl = ck.querySelector('.__mc-ck');
+        if (ckEl) ckEl.textContent = OVR_SECTION + '.' + OVR_KEY + ' · ' + o.id + ':' + o.ms;
+      }
+      throttleSend('ovr' + el.getAttribute('data-idx'), function () { ovrCommit(m); });
+      toast(m.name + ' · 覆写 #' + o.id + ' → ' + o.ms + 'ms', 'now');
+      return;
+    }
+    if (act === 'bov-set') {
+      if (!m.bagOvr) return;
+      var bo = m.bagOvr[+el.getAttribute('data-idx')];
+      if (!bo) return;
+      var bk = el.getAttribute('data-k');
+      var bv = parseFloat(el.value);
+      if (isNaN(bv)) return;
+      bv = Math.round(Math.max(0, Math.min(bk === 'w' ? 40 : 30, bv)));
+      bo[bk] = bv;
+      var bck = el.closest('.__mc-item');
+      if (bck) {
+        var bckEl = bck.querySelector('.__mc-ck');
+        if (bckEl) bckEl.textContent = BOV_SECTION + '.' + BOV_KEY + ' · ' + bo.id + ':' + bo.w + 'x' + bo.h;
+      }
+      if (String(bv) !== el.value) el.value = String(bv);
+      throttleSend('bov' + el.getAttribute('data-idx') + bk, function () { bovCommit(m); });
+      toast(m.name + ' · 柜子 #' + bo.id + ' ' + (bk === 'w' ? '宽' : '高') + ' → ' + bv, 'now');
+      return;
+    }
+    if (act !== 'set') return;
+    if (el.tagName === 'SELECT') return;
+    if (el.type !== 'range' && !el.getAttribute('data-num')) return;
+    var it = itemOf(m, +el.getAttribute('data-g'), +el.getAttribute('data-i'));
+    if (!it) return;
+    var v = parseFloat(el.value);
+    if (isNaN(v)) return;
+    v = clampItem(it, v);
+    if (it.t === 'int') v = Math.round(v);
+    it.v = v;
+    syncSibling(el, v);
+    throttleSend('g' + el.getAttribute('data-g') + 'i' + el.getAttribute('data-i'), function () { sendSet(m, it, it.v); });
+    toast(m.name + ' · ' + it.l + ' → ' + fmt(v), it.b);
+  });
+
+  cfg.addEventListener('change', function (e) {
+    var el = e.target;
+    if (!el.getAttribute) return;
+    var act = el.getAttribute('data-act');
+    if (act !== 'set') return;
+    var m = curMod();
+    if (!m) return;
+    var it = itemOf(m, +el.getAttribute('data-g'), +el.getAttribute('data-i'));
+    if (!it) return;
+    if (el.tagName === 'SELECT') {
+      it.v = el.value;
+      sendSet(m, it, it.v);
+      toast(m.name + ' · ' + it.l + ' → ' + el.value, it.b);
+    } else if (el.getAttribute('data-num')) {
+      el.value = fmt(it.v);
+    } else if (el.tagName === 'INPUT' && el.type === 'text') {
+      it.v = el.value;
+      sendSet(m, it, it.v);
+      toast(m.name + ' · ' + it.l + ' → ' + el.value, it.b);
+    }
+  });
+}
+
+/* ---- 冲突 / 更新 / 扫描 / 卸载 弹窗打开器（原型：模拟数据直出） ---- */
+
+function openCfModal(m) {
+  var cards;
+  if (m.guid === 'com.local.survivallog.cabinetsize') {
+    cards = [
+      { lv: 'red', tag: '严重冲突',
+        title: '和第三方「储物扩容」只能留一个：同时开启会互相覆盖柜子和背包的容量数值。',
+        who: ['柜子容量', '背包扩容', '更好的储物柜'],
+        reason: '「储物扩容」改写 73 件柜子的内部数据并强改数值，与套件的修改相乘叠加（×1.5 ×1.5 = ×2.25）。',
+        tips: ['停用或卸载「储物扩容」（推荐）', '或者停用上面任意一个套件 mod', '调加载顺序没有用'] },
+      { lv: 'orange', g: '◎', tag: '功能叠加',
+        title: '这几个 mod 都在改储物数值，效果会叠加，可能超出预期。',
+        who: ['柜子容量', '柜子负重解放', '保鲜增强'],
+        tips: ['介意叠加就只留一个'] },
+    ];
+  } else if (isTpMod(m)) {
+    cards = [
+      { lv: 'orange', tag: '脚本碰撞',
+        title: '和「智能交易」改了同一处游戏逻辑（3 处），后加载的生效，行为可能异常。',
+        who: [m.name, '智能交易'],
+        tips: ['一般不用管', '出现异常就停用其中一个，或试试「去调序」'] },
+    ];
+  } else {
+    cards = [
+      { lv: 'orange', tag: '脚本碰撞',
+        title: '和「自选生存规划」改了同一处游戏逻辑（2 处），后加载的生效，行为可能异常。',
+        who: [m.name, '自选生存规划'],
+        tips: ['一般不用管', '出现异常就停用其中一个，或试试「去调序」'] },
+    ];
+  }
+  openModal(cfModalHtml({ guid: m.guid, name: m.name }, cards));
+  bindCfActions({ guid: m.guid, name: m.name });
+}
+function bindCfActions(m) {
+  var off = S.mdl.querySelector('[data-mact="cfoff"]');
+  if (off) off.addEventListener('click', function (e) {
+    e.stopPropagation();
+    var mod = findMod(m.guid);
+    if (mod && mod.enabled) { mod.enabled = false; renderSide(); renderCfg(); }
+    closeModal();
+    toastRaw(m.name + ' 已停用', '下次启动不再加载');
+  });
+  var ord = S.mdl.querySelector('[data-mact="cforder"]');
+  if (ord) ord.addEventListener('click', function (e) {
+    e.stopPropagation();
+    closeModal();
+    if (!ST.ord) ordToggle();
+  });
+  var del = S.mdl.querySelector('[data-mact="cfdel"]');
+  if (del) del.addEventListener('click', function (e) {
+    e.stopPropagation();
+    openUninstDemo(m.guid);
+  });
+}
+
+function openPatchModal() {
+  ST.patchOpen = true;
+  openModal(patchModalHtml());
+  bindPatchModal();
+}
+function bindPatchModal() {
+  if (!S.mdl) return;
+  var rs = S.mdl.querySelector('[data-pact="rescan"]');
+  if (rs) rs.addEventListener('click', function (e) {
+    e.stopPropagation();
+    if (ST.scanWait) return;
+    ST.scanWait = true;
+    setModal(patchModalHtml());
+    bindPatchModal();
+    setTimeout(function () {
+      ST.scanWait = false; ST.scan = MOCK.scan;
+      if (ST.patchOpen) { setModal(patchModalHtml()); bindPatchModal(); }
+      renderPatchBtn();
+      toastRaw('扫描完成：碰撞 ' + MOCK.scan.total + ' 处', '');
+    }, 600);
+  });
+}
+
+/* 列表图标（↑/↓/⊘）→ 确认弹窗；无数据时提示先检查更新（v3：无独立仓库页） */
+function openUpdModal(m) {
+  var r = m ? repoRowOfGuid(m.guid) : null;
+  if (r && r.remote != null && !r.pending) openRepoModal(r);
+  else toastRaw('暂无更新信息', '点右上「检查更新」先查一次');
+}
+
+function openRepoModal(r) {
+  openModal(updModalRealHtml(r));
+  S.mdlRepoKey = r.repoKey;
+  var go = S.mdl.querySelector('[data-mact="doupd"]');
+  if (!go) return;
+  go.addEventListener('click', function (e) {
+    e.stopPropagation();
+    var row = repoRowOf(S.mdlRepoKey);
+    if (!row) return;
+    send({ type: (row.local == null || row.status === 'install') ? 'MC_INST' : 'MC_UPD', repoKey: row.repoKey });
+    if (setModal(updModalDlHtml(row, null))) {
+      var tx = S.mdl.querySelector('#__mc_dltx');
+      if (tx) tx.textContent = '准备下载…';
+    }
+    demoSimulateDl(row);
+  });
+}
+
+/* 原型专用：模拟 MC_DL 进度链（down→check→unzip→write→ok） */
+var demoDlTimer = null;
+function demoSimulateDl(row) {
+  if (demoDlTimer) clearInterval(demoDlTimer);
+  var stages = [
+    { stage: 'down', pct: 18 }, { stage: 'down', pct: 47 }, { stage: 'down', pct: 76 },
+    { stage: 'down', pct: 100 }, { stage: 'check', pct: 100 }, { stage: 'unzip', pct: 100 },
+    { stage: 'write', pct: 100 }, { stage: 'ok', pct: 100 },
+  ];
+  var i = 0;
+  demoDlTimer = setInterval(function () {
+    var ev = stages[i++];
+    if (!ev || !modalOpen()) { clearInterval(demoDlTimer); demoDlTimer = null; return; }
+    onDlEvent({ repoKey: row.repoKey, pct: ev.pct, stage: ev.stage });
+    if (ev.stage === 'ok') {
+      clearInterval(demoDlTimer); demoDlTimer = null;
+      row.pending = true;
+      ST.pend = { n: 3, labels: ['更新 ' + row.name, '卸载 角色解锁', '加载顺序调整'] };
+      renderSide(); renderCfg(); renderPending();
+    }
+  }, 550);
+}
+
+function onDlEvent(ev) {
+  ST.dl = { repoKey: ev.repoKey, pct: ev.pct, stage: ev.stage };
+  if (S.mdlRepoKey === ev.repoKey && modalOpen() && S.mdl) {
+    if (ev.stage === 'ok') {
+      setModal(updModalDoneHtml(repoRowOf(ev.repoKey) || { name: ev.repoKey, repoKey: ev.repoKey }));
+    } else if (ev.stage === 'err') {
+      setModal(updModalErrHtml(repoRowOf(ev.repoKey) || { name: ev.repoKey, repoKey: ev.repoKey }, ev.err));
+    } else {
+      var fill = S.mdl.querySelector('#__mc_dlfill');
+      var tx = S.mdl.querySelector('#__mc_dltx');
+      if (fill) fill.style.width = (ev.stage === 'down' ? ev.pct : 100) + '%';
+      if (tx) tx.textContent = dlStageText(ev.stage, ev.pct);
+    }
+  }
+}
+
+function uninstNameOf(guid) {
+  if (guid === SELF_GUID) return SELF_NAME;
+  var m = findMod(guid);
+  return m ? m.name : (guid || '');
+}
+
+function openUninstDemo(guid) {
+  var d;
+  if (guid === SELF_GUID) {
+    d = {
+      guid: guid, name: SELF_NAME, self: true,
+      files: ['plugins\\SurvivalLog.ModCenter.dll', 'config\\com.local.survivallog.modcenter.cfg'],
+    };
+  } else {
+    var m = findMod(guid);
+    var isTp = m && isTpMod(m);
+    d = {
+      guid: guid, name: m ? m.name : guid,
+      files: isTp
+        ? ['plugins\\' + (m.en || 'ThirdParty') + '.dll']
+        : ['plugins\\SurvivalLog.' + (m ? m.en : '?') + '.dll', 'config\\com.local.survivallog.' + (m ? m.en.toLowerCase() : '?') + '.cfg'],
+      note: isTp ? '第三方 dll：一并清理面板内的停用标记。' : null,
+    };
+  }
+  openModal(uninstModalHtml(d));
+  var go = S.mdl.querySelector('[data-mact="douninst"]');
+  if (!go) return;
+  go.addEventListener('click', function (e) {
+    e.stopPropagation();
+    send({ type: 'MC_UNINST_DO', guid: d.guid });
+    closeModal();
+    var labels = ['卸载 ' + d.name];
+    if (ST.pend && ST.pend.labels) labels = labels.concat(ST.pend.labels);
+    ST.pend = { n: labels.length, labels: labels };
+    renderSide(); renderPending();
+    toastRaw('已加入待生效：卸载 ' + d.name, '重启游戏后执行');
+  });
+}
+
+/* ---- 待生效条两钮（panel.js 同款委托） ---- */
+S.pendEl.addEventListener('click', function (e) {
+  var b = e.target && e.target.closest ? e.target.closest('[data-x]') : null;
+  if (!b) return;
+  var x = b.getAttribute('data-x');
+  if (x === 'undo') {
+    send({ type: 'MC_PENDING_UNDO' });
+    ST.pend = null; renderSide(); renderPending();
+    toastRaw('已撤销待生效操作', '加载顺序也恢复默认');
+    return;
+  }
+  if (x === 'reboot') openRebootModal();
+});
+
+/* ---- ESC / 关闭（原型：面板常驻，只关弹窗） ---- */
+S.mbg.addEventListener('click', function (e) { if (e.target === S.mbg) closeModal(); });
+document.addEventListener('keydown', function (e) {
+  if (e && e.key !== 'Escape') return;
+  if (modalOpen()) { closeModal(); return; }
+  toastRaw('（原型）此处将关闭面板', '游戏内由 __mcClose 拆面板并发 MC_CLOSE');
+});
+
+/* ============================================================================
+ * demo 区：场景切换条（原型专用）
+ * ========================================================================== */
+function demoView(v) {
+  if (v === 'ord') { if (!ST.ord) ordToggle(); return; }
+  if (ST.ord) ordToggle();
+  renderSide(); renderCfg();
+}
+
+function demoOpen(name) {
+  if (ST.ord) ordToggle();
+  renderSide(); renderCfg();
+  switch (name) {
+    case 'm-cf': openCfModal(findMod('com.local.survivallog.cabinetsize')); break;
+    case 'm-upd': openRepoModal(repoRowOf('fridgechill')); break;
+    case 'm-down': openRepoModal(repoRowOf('quickaction')); break;
+    case 'm-warn': openRepoModal(repoRowOf('cabinetsize')); break;
+    case 'm-inst': openRepoModal(repoRowOf('roleunlock')); break;
+    case 'm-dl': {
+      var r = repoRowOf('endlessguard');
+      openModal(updModalDlHtml(r, null));
+      S.mdlRepoKey = r.repoKey;
+      demoSimulateDl(r);
+      break;
+    }
+    case 'm-done': openModal(updModalDoneHtml(repoRowOf('robotspeed'))); break;
+    case 'm-uninst': openUninstDemo('com.local.survivallog.fridgechill'); break;
+    case 'm-uninst-self': openUninstDemo(SELF_GUID); break;
+    case 'm-scan': openPatchModal(); break;
+    case 'm-reboot': openRebootModal(); break;
+  }
+}
+
+/* demo 动作统一委托到 document：demo 条、面板头「检查更新」、底部碰撞按钮、✕ 都带 data-demo */
+document.addEventListener('click', function (e) {
+  var b = e.target.closest ? e.target.closest('[data-demo]') : null;
+  if (!b) return;
+  var d = b.getAttribute('data-demo');
+  if (d === 'view-cfg') demoView('cfg');
+  else if (d === 'view-ord') demoView('ord');
+  else if (d === 'check-upd') {
+    toastRaw('正在检查更新…', '');
+    setTimeout(function () {
+      var c = repoCounts(), parts = [];
+      if (c.upd) parts.push(c.upd + ' 个可更新');
+      if (c.inst) parts.push(c.inst + ' 个可安装');
+      if (c.warn) parts.push(c.warn + ' 个版本待确认');
+      toastRaw(parts.length ? '检查完成：' + parts.join('、') : '检查完成：都是最新版',
+        parts.length ? '列表里已用图标标出，点图标或进详情处理' : '');
+      renderPatchBtn();
+    }, 700);
+  }
+  else if (d === 'pend-on') { ST.pend = { n: 3, labels: ['更新 动作加速', '卸载 角色解锁', '加载顺序调整'] }; renderPending(); }
+  else if (d === 'pend-applied') { ST.pend = { n: 0, labels: [], applied: '自定义加载序生效中' }; renderPending(); }
+  else if (d === 'pend-off') { ST.pend = null; renderPending(); }
+  else if (d === 'toast-ok') toast('保鲜增强 · 保鲜时长倍率 → 2.5', 'now');
+  else if (d === 'toast-err') toast('✕ 保鲜时长倍率', null, true, '值超出范围 0.1~10');
+  else if (d === 'panel-close') toastRaw('（原型）此处将关闭面板', '游戏内由 __mcClose 拆面板并发 MC_CLOSE');
+  else demoOpen(d);
+});
+
+/* 底部「补丁碰撞 N 组」按钮（有碰撞才显示） */
+function renderPatchBtn() {
+  var b = document.getElementById('__mc_patch_btn');
+  if (!b) return;
+  var s = ST.scan, n = s && !s.error ? (s.total || 0) : 0;
+  b.style.display = n > 0 ? '' : 'none';
+  b.textContent = '补丁碰撞 ' + n + ' 组';
+}
+
+/* ---- 启动 ---- */
+wireSide(S.side);
+wireCfg(S.cfg);
+renderSide();
+renderCfg();
+renderPending();
+renderPatchBtn();
+</script>
+</body>
+</html>
