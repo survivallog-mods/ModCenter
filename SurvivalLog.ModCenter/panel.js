@@ -2,9 +2,11 @@
  * 任务 7 = 完整面板（原型 v4 移植：docs/superpowers/specs/2026-10-24-modcenter-prototype.html
  * 的 <style> 面板段 + renderSide/renderCfg/ctl/toast/toggle/ovr 逻辑；场景模拟与 demo-bar 不迁）。
  * v2 生命周期任务 7 = 图标徽标系统 + 待生效条（原型 2026-10-28-modcenter-v2-prototype.html
- * 移植，样式值照抄）：mod 行内 ics 容器（mod.ics=[{k,tip,click?,g?}]，k=red|orange|gray|
- * blue|amber 18px 圆片七形，悬停 title 全文，click 路由 cf=冲突详情弹窗/upd=更新确认弹窗壳，
- * 无 click=纯状态如 ⟳ 待生效）；底部待生效条（__mcEvent MC_PENDING_SUMMARY{n,labels}，n>0
+ * 移植）：mod 行内 ics 容器（mod.ics=[{k,tip,click?,g?}]，k=red|orange|gray|
+ * blue|amber，悬停 title 全文，click 路由 cf=冲突详情弹窗/upd=更新确认弹窗壳，
+ * 无 click=纯状态；v3.2 起为**裸 SVG 图标**（作者拍板去圆片描边/底色；内嵌 Lucide 路径
+ * 离线渲染：三角=冲突/告警、圆箭头=更新/降级、⊘=版本告警、循环=待生效；告警小一号）；
+ * 底部待生效条（__mcEvent MC_PENDING_SUMMARY{n,labels}，n>0
  * 显示；v2 任务 13 撤销/立即重启两钮接真）；弹窗=面板内浮层（.mc-modal-bg/.mc-modal 同款，
  * ESC/点底关闭，弹窗开着时 ESC 先关弹窗再关面板）。ics 缺省时行渲染与 v1 完全一致
  * （快照协议向后兼容）。
@@ -30,15 +32,18 @@
  * （ORD.src 改存 guid / ordbar 两钮未加载禁用 / HandleOrderSave 兜底在 C# 侧）+ 待生效条
  * 中性档（MC_PENDING_SUMMARY.applied="自定义加载序生效中"——不计入计数、弱化样式）。
  * v2 生命周期任务 11 = 冲突详情弹窗（原型 cfHtml 照抄）：行内 ics 的 click:"cf"（⚠红冲突 /
- * ⇄橙碰撞 / ◎灰同域）点击 → 占位壳 + MC_CF{guid} → MC_CF_DATA{guid,cards:[{lv,tag,title,
- * who[],reason,tips[]}]} → 每条冲突一卡片（h3 图标+"mod名 · 标签" / 副标题 / 冲突对象·原因·
- * 处置建议三 sec；多卡片间分隔线）+ 固定风险文案 + 关闭/停用此 mod/卸载此 mod… 三钮
- * （停用走 MC_TOGGLE_MOD 既有启停链、卸载…转 T10 卸载确认弹窗）；C# 未回包 5s 超时兜底。
- * v2 生命周期任务 12 = L2 补丁碰撞实测：侧栏仓库卡下方"补丁碰撞 N 组"汇总行（MC_SCAN_DATA
+ * 橙告警小黄叹号）点击 → 占位壳 + MC_CF{guid} → MC_CF_DATA{guid,cards:[{lv,tag,title,
+ * who[],reason,tips[]}]} → 每条冲突一卡片（h3 图标+"mod名 · 标签" / 副标题 / 涉及 mod（脚本
+ * 碰撞卡省略——标题已点名对方）·原因·处置建议 sec；多卡片间分隔线）+ 关闭/去调序（仅碰撞卡）
+ * 两钮（v3.1：停用/卸载按钮退役——入口在左列开关与详情页维护区）；C# 未回包 5s 超时兜底。
+ * v2 生命周期任务 12 = L2 补丁碰撞实测：底部"补丁碰撞 N 组"汇总按钮（MC_SCAN_DATA
  * 驱动；点击弹汇总窗，列出全部碰撞组含未知来源；框架侧多 owner 组标注"框架侧 N 组未计入"
- * 单独披露、不铺行——Ruling 14②；含"重新扫描"→ MC_SCAN）＋ 行内聚合橙标 ⇄
+ * 单独披露、不铺行——Ruling 14②；含"重新扫描"→ MC_SCAN）＋ 行内聚合橙标（小黄叹号）
  * （C# 每 mod 一枚，click:"cf" 复用冲突详情弹窗的橙卡片；停用行 w:true → __mc-weak 弱化）；
  * 灰卡（lv=gray）标题用"同域 mod"（T11 M4）；T11 M2/M3/M5/M6 为 C# 侧表/文案修正。
+ * v3.1（2026-10-30 二次反馈）：普通告警字形统一（⇄/◎ 退役）；L2 碰撞卡在 C# 侧合并。
+ * v3.2（2026-10-31 作者拍板）：①裸 SVG 图标（无圆片描边/底色，方案 A 形状语言）；②L2 碰撞
+ * 进一步合并为**每 mod 一张卡**（对方=全组去重短名，不再按 owner 组铺卡），标题去 GUID 括注。
  * v2 生命周期任务 13 = 立即重启助手：底部待生效条两钮接真——"撤销"→ MC_PENDING_UNDO
  * （C# 移除 pending.json：ops 与 order 一并清，回到默认加载序）→ 快照+摘要+toast 由 C# 回推；
  * "立即重启"→ 确认弹窗（面板内浮层，文案含"将退出游戏并在约 10 秒后自动重启以应用 N 项
@@ -107,6 +112,7 @@
   var TH = Object.create(null); // 滑条 100ms 节流句柄表
   var uninstTimer = null;       // v2 任务 10：MC_UNINST_DATA 等待超时句柄
   var cfTimer = null;           // v2 任务 11：MC_CF_DATA 等待超时句柄
+  var chkTimer = null;          // v3.3：MC_CHK 检查超时兜底句柄（busy 复位）
   var SELF_GUID = 'com.local.survivallog.modcenter'; // __self 页卸载按钮的目标 guid（C# ModCenterPlugin.Guid 同源）
 
   var CSS = ''
@@ -202,19 +208,21 @@
     + '#__mc_overlay .__mc-toast.__mc-err{border-color:#f87171;}'
     + '#__mc_overlay .__mc-toast small{color:#9aa0ad;display:block;font-size:11.5px;}'
     + '#__mc_overlay .__mc-loading{padding:40px 0;text-align:center;color:#6b7180;font-size:13px;letter-spacing:1px;}'
-    /* ---- v2 任务 7：行内图标徽标（原型 .mc-ics/.mc-ic 及色级，样式值照抄） ----
-     * 18px 圆片：⚠红冲突/⇄橙碰撞/◎灰同域/↑蓝可更新/↓橙可降级/⊘橙版本告警/⟳琥珀待生效。
+    /* ---- v2 任务 7：行内图标徽标（原型 .mc-ics/.mc-ic 及色级；v3.2 起裸 SVG 图标） ----
+     * 裸图标（作者拍板：不要圆片描边/底色）：色随级、形随义、尺寸分级（告警小一号）。
      * span 非 button：图标落在 mod 行（div+data-interactive）矩形内，点击可达性由行承载。 */
     + '#__mc_overlay .__mc-ics{display:flex;align-items:center;gap:3px;flex-shrink:0;}'
-    + '#__mc_overlay .__mc-ic{width:18px;height:18px;border-radius:50%;display:inline-flex;align-items:center;justify-content:center;font-size:9.5px;line-height:1;border:1px solid;cursor:pointer;font-family:"Segoe UI Symbol",inherit;position:relative;}'
+    + '#__mc_overlay .__mc-ic{display:inline-flex;align-items:center;justify-content:center;line-height:1;cursor:pointer;position:relative;}'
     + '#__mc_overlay .__mc-ic:hover{filter:brightness(1.25);}'
-    + '#__mc_overlay .__mc-ic.__mc-red{color:#f87171;border-color:rgba(248,113,113,.45);background:rgba(248,113,113,.1);}'
-    + '#__mc_overlay .__mc-ic.__mc-orange{color:#fbbf24;border-color:rgba(251,191,36,.45);background:rgba(251,191,36,.08);}'
-    + '#__mc_overlay .__mc-ic.__mc-gray{color:#8a90a0;border-color:rgba(138,144,160,.4);background:rgba(138,144,160,.08);}'
-    + '#__mc_overlay .__mc-ic.__mc-blue{color:#60a5fa;border-color:rgba(96,165,250,.5);background:rgba(96,165,250,.1);}'
-    + '#__mc_overlay .__mc-ic.__mc-amber{color:#e8a33d;border-color:rgba(232,163,61,.5);background:rgba(232,163,61,.1);cursor:default;}'
+    + '#__mc_overlay .__mc-ic svg{display:block;width:18px;height:18px;}'
+    + '#__mc_overlay .__mc-ic.__mc-red{color:#f87171;}'
+    + '#__mc_overlay .__mc-ic.__mc-orange{color:#fbbf24;}'
+    + '#__mc_overlay .__mc-ic.__mc-gray{color:#8a90a0;}'
+    + '#__mc_overlay .__mc-ic.__mc-blue{color:#60a5fa;}'
+    + '#__mc_overlay .__mc-ic.__mc-amber{color:#e8a33d;cursor:default;}'
     /* v2 任务 12（T11 M7）：停用行的冲突/碰撞/同域徽标保留信息量但弱化（透明度降低，tip 已带"（已停用）"） */
     + '#__mc_overlay .__mc-ic.__mc-weak{opacity:.45;}'
+    + '#__mc_overlay .__mc-ic.__mc-sm svg{width:15px;height:15px;}' /* 普通告警小一号（严重红保持 18px） */
     /* ---- v2 任务 7：通用按钮（原型 .btn/.pri/.mini；弹窗与待生效条共用，T8 仓库页复用） ---- */
     + '#__mc_overlay .__mc-btn{background:#0f1219;border:1px solid #2a2f3d;color:#9aa0ad;border-radius:7px;padding:6px 14px;font-size:12.5px;cursor:pointer;font-family:inherit;}'
     + '#__mc_overlay .__mc-btn:hover{border-color:#e8a33d;color:#e8a33d;}'
@@ -222,6 +230,11 @@
     + '#__mc_overlay .__mc-btn.__mc-btn-pri:hover{background:rgba(232,163,61,.18);}'
     + '#__mc_overlay .__mc-btn:disabled{opacity:.4;cursor:not-allowed;}'
     + '#__mc_overlay .__mc-btn.__mc-btn-mini{padding:3px 10px;font-size:11.5px;}'
+    /* v3.3：检查更新 busy 态——图标旋转 + 禁点（__mc-busy 由 setChkBusy 挂） */
+    + '#__mc_overlay .__mc-btn svg{display:inline-block;width:13px;height:13px;vertical-align:-2.5px;margin-right:5px;}'
+    + '#__mc_overlay .__mc-btn.__mc-busy svg{animation:__mc-rot .9s linear infinite;}'
+    + '#__mc_overlay .__mc-btn.__mc-busy{opacity:.6;cursor:wait;}'
+    + '@keyframes __mc-rot{from{transform:rotate(0deg)}to{transform:rotate(360deg)}}'
     /* ---- v2 任务 7：底部待生效条（原型 .mc-pending；面板内绝对定位，压在底栏图例上） ---- */
     + '#__mc_overlay .__mc-pending{position:absolute;left:0;right:0;bottom:0;display:none;align-items:center;gap:12px;padding:9px 18px;background:#1d212c;border-top:1px solid rgba(232,163,61,.4);font-size:12.5px;z-index:5;}'
     + '#__mc_overlay .__mc-pending.__mc-show{display:flex;}'
@@ -301,6 +314,7 @@
     + '#__mc_overlay .__mc-mod-row.__mc-ord-row.__mc-drop-above{box-shadow:0 -2px 0 0 #e8a33d;}'
     + '#__mc_overlay .__mc-mod-row.__mc-ord-row.__mc-drop-below{box-shadow:0 2px 0 0 #e8a33d;}'
     + '#__mc_overlay .__mc-ver{font-size:10.5px;color:#6b7180;font-family:Consolas,monospace;flex-shrink:0;}' /* 序号+版本两用（原型 .ver） */
+    + '#__mc_overlay .__mc-mod-row.__mc-ord-row .__mc-nm{white-space:normal;display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:2;line-height:1.3;word-break:break-word;}' /* v3.3：排序行 mod 名换行显示完整（最多两行，悬停 title 兜底） */
     + '#__mc_overlay .__mc-side::-webkit-scrollbar,#__mc_overlay .__mc-cfg::-webkit-scrollbar{width:8px;}'
     + '#__mc_overlay .__mc-side::-webkit-scrollbar-thumb,#__mc_overlay .__mc-cfg::-webkit-scrollbar-thumb{background:#2a2f3d;border-radius:4px;}';
 
@@ -337,17 +351,20 @@
     var x = doc.createElement('button');
     x.type = 'button'; x.className = '__mc-close'; x.setAttribute('aria-label', '\u5173\u95ed\u9762\u677f'); x.textContent = '\u2715';
     x.addEventListener('click', function (e) { e.stopPropagation(); window.__mcClose(); });
-    /* v3：头部「检查更新」= 全局唯一检查入口（60 秒冷却在 C#）。点击置 chkWaiting，
-     * MC_REPO_DATA 到达时在 __mcEvent 拼汇总 toast；冷却内 C# 只推数据（自己再补 toast）。 */
+    /* v3：头部「检查更新」= 全局唯一检查入口（60 秒冷却在 C#）。点击置 busy（图标旋转、
+     * 禁点——作者拍板：未检查完成前不可重复点击），MC_REPO_DATA 到达或 20s 兜底复位。 */
     var chk = doc.createElement('button');
-    chk.type = 'button'; chk.className = '__mc-btn'; chk.textContent = '\u68c0\u67e5\u66f4\u65b0';
+    chk.type = 'button'; chk.className = '__mc-btn';
+    chk.innerHTML = icSvg('pend') + '<span>\u68c0\u67e5\u66f4\u65b0</span>';
     chk.style.marginLeft = 'auto';
     chk.addEventListener('click', function (e) {
       e.stopPropagation();
       if (ST.chkWaiting) return;
-      ST.chkWaiting = true;
+      setChkBusy(true);
       window.__mcOutbox.push({ type: 'MC_CHK' });
       toastRaw('\u6b63\u5728\u68c0\u67e5\u66f4\u65b0\u2026', '');
+      clearTimeout(chkTimer);
+      chkTimer = setTimeout(function () { chkTimer = null; setChkBusy(false); }, 20000); // C# 未回包兜底
     });
     x.style.marginLeft = '0';
     head.appendChild(t); head.appendChild(sub); head.appendChild(chk); head.appendChild(x);
@@ -409,9 +426,20 @@
     wireSide(side);
     wireCfg(cfg);
 
-    S.side = side; S.cfg = cfg; S.sub = sub; S.toastEl = toastEl; S.patchBtn = patchBtn;
+    S.side = side; S.cfg = cfg; S.sub = sub; S.toastEl = toastEl; S.patchBtn = patchBtn; S.chkBtn = chk;
     S.pendEl = pendEl; S.pendTx = pendEl.querySelector('#__mc_pend_tx'); S.mbg = mbg; S.mdl = mdl;
     return ov;
+  }
+
+  /* 检查更新 busy 态（v3.3 作者拍板：未检查完成前不可重复点击）：禁点 + 循环箭头旋转。
+   * 复位路径=MC_REPO_DATA（checking 全轮结束）/ 20s 超时兜底（C# 未回包，如缺壳场景）。 */
+  function setChkBusy(on) {
+    ST.chkWaiting = on;
+    if (!S.chkBtn) return;
+    S.chkBtn.disabled = on;
+    S.chkBtn.classList.toggle('__mc-busy', on);
+    var t = S.chkBtn.querySelector('span');
+    if (t) t.textContent = on ? '\u68c0\u67e5\u4e2d\u2026' : '\u68c0\u67e5\u66f4\u65b0';
   }
 
   /* ================= 数据访问 ================= */
@@ -447,17 +475,37 @@
 
   /* ================= v2 任务 7：行内图标徽标 ================= */
 
-  /* 字形推断：g 显式优先；orange 需 click 消歧（cf=⇄碰撞 / upd=↓降级）；其余按色级。
-   * （↓ 与 ⊘ 同为 orange+upd——喂 ⊘ 时 DTO 带 g:"kbw"（T8 裁定 4 的消歧别名，此处映射为
-   * ⊘ 字形；也兼容直接给字形符的旧口径），见 Payload.IcInfo） */
-  function icGlyph(ic) {
-    if (ic.g) return ic.g === 'kbw' ? '\u2298' : ic.g; // kbw → ⊘ 版本告警
-    if (ic.k === 'orange') return ic.click === 'cf' ? '\u21c4' : '\u2193'; // ⇄ / ↓
-    if (ic.k === 'red') return '\u26a0';       // ⚠ 严重冲突
-    if (ic.k === 'gray') return '\u25ce';      // ◎ 同域（legacy：仅旧 C# 快照兼容，v3 不再产出 gray）
-    if (ic.k === 'blue') return '\u2191';      // ↑ 可更新
-    if (ic.k === 'amber') return '\u27f3';     // ⟳ 待生效（纯状态，无 click）
-    return '\u26a0';
+  /* ---- v3.2 裸 SVG 图标（作者拍板：去圆片描边/底色；形状=方案 A 行业惯例）----
+   * 三角=冲突/告警、圆箭头=更新/降级、圆斜杠⊘=版本告警（v3.3 由八角换⊘——八角带叹号
+   * 与冲突三角撞脸，作者实机反馈"怎么有两种叹号"；圆斜杠沿用 v3.1 前 ⊘ 语义）、
+   * 循环箭头=待生效。
+   * 路径取自 Lucide 0.469（MIT），内嵌离线渲染（游戏 WebView 无外网）。 */
+  var ICON_PATHS = {
+    warn: '<path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3"/><path d="M12 9v4"/><path d="M12 17h.01"/>',
+    up: '<circle cx="12" cy="12" r="10"/><path d="m16 12-4-4-4 4"/><path d="M12 16V8"/>',
+    down: '<circle cx="12" cy="12" r="10"/><path d="M12 8v8"/><path d="m8 12 4 4 4-4"/>',
+    ver: '<circle cx="12" cy="12" r="10"/><path d="m4.9 4.9 14.2 14.2"/>',
+    pend: '<path d="M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8"/><path d="M21 3v5h-5"/><path d="M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16"/><path d="M8 16H3v5"/>'
+  };
+  function icSvg(name) {
+    return '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' + ICON_PATHS[name] + '</svg>';
+  }
+
+  /* ics 条目 → 图标键：g 仅 kbw（⊘→版本告警）参与映射；旧协议 g="!"/"◎" 不再使用
+   * （k+click 已足够；新 C# 不再产出 gray，保留分支仅 legacy 快照兼容）。 */
+  function icIcon(ic) {
+    if (ic.g === 'kbw') return 'ver';
+    if (ic.k === 'orange') return ic.click === 'cf' ? 'warn' : 'down';
+    if (ic.k === 'red') return 'warn';
+    if (ic.k === 'gray') return 'warn';
+    if (ic.k === 'blue') return 'up';
+    if (ic.k === 'amber') return 'pend';
+    return 'warn';
+  }
+
+  /* 普通告警族（橙/灰 cf 徽标）→ 小号（15px）；红严重冲突保持 18px。 */
+  function icSm(ic) {
+    return !!ic && ic.click === 'cf' && ic.k !== 'red';
   }
 
   /* mod 行 ics 容器（原型 appendRow 的 '<span class="mc-ics">' 段）：空/缺省 ics 返回 ''
@@ -469,10 +517,10 @@
     for (var i = 0; i < ics.length; i++) {
       var ic = ics[i];
       if (!ic || !ic.k || !ic.tip) continue;
-      h += '<span class="__mc-ic __mc-' + esc(ic.k) + (ic.w ? ' __mc-weak' : '') + '" data-guid="' + esc(m.guid) + '"'
+      h += '<span class="__mc-ic __mc-' + esc(ic.k) + (ic.w ? ' __mc-weak' : '') + (icSm(ic) ? ' __mc-sm' : '') + '" data-guid="' + esc(m.guid) + '"'
         + (ic.click ? ' data-click="' + esc(ic.click) + '"' : '')
         + ' title="' + esc(ic.tip) + '" aria-label="' + esc(ic.tip) + '">'
-        + esc(icGlyph(ic)) + '</span>';
+        + icSvg(icIcon(ic)) + '</span>';
     }
     return h + '</span>';
   }
@@ -563,8 +611,8 @@
     return { m: m, name: name, ver: ver, enabled: enabled };
   }
 
-  /* 排序行 ics：只留冲突 chip（click==="cf"：⚠红/⇄橙/◎灰），显示但无 click（裁定 4——
-   * cursor:default、不弹窗不选行）；⟳/↑/↓/⊘ 一律不显示（order 是全局意图，不挂行）。 */
+  /* 排序行 ics：只留冲突 chip（click==="cf"：⚠红 18px / 橙告警小黄叹号），显示但无 click
+   * （裁定 4——cursor:default、不弹窗不选行）；⟳/↑/↓/⊘ 一律不显示（order 是全局意图，不挂行）。 */
   function ordIcsHtml(info) {
     var ics = info.m && info.m.ics;
     if (!ics || !ics.length) return '';
@@ -572,8 +620,8 @@
     for (var i = 0; i < ics.length; i++) {
       var ic = ics[i];
       if (!ic || !ic.k || !ic.tip || ic.click !== 'cf') continue;
-      h += '<span class="__mc-ic __mc-' + esc(ic.k) + (ic.w ? ' __mc-weak' : '') + '" style="cursor:default" title="' + esc(ic.tip)
-        + '" aria-label="' + esc(ic.tip) + '">' + esc(icGlyph(ic)) + '</span>';
+      h += '<span class="__mc-ic __mc-' + esc(ic.k) + (ic.w ? ' __mc-weak' : '') + (icSm(ic) ? ' __mc-sm' : '') + '" style="cursor:default" title="' + esc(ic.tip)
+        + '" aria-label="' + esc(ic.tip) + '">' + icSvg(icIcon(ic)) + '</span>';
     }
     return h ? '<span class="__mc-ics">' + h + '</span>' : '';
   }
@@ -623,7 +671,7 @@
           + '" data-interactive data-guid="' + esc(guid) + '" tabindex="0" draggable="true">'
           + '<span class="__mc-grip" aria-hidden="true">\u22ee\u22ee</span>'
           + '<span class="__mc-ver">' + (n < 10 ? '0' : '') + n + '</span>'
-          + '<span class="__mc-nm">' + esc(info.name) + '</span>'
+          + '<span class="__mc-nm" title="' + esc(info.name) + '">' + esc(info.name) + '</span>'
           + '<span class="__mc-ver">' + esc(info.ver) + '</span>'
           + '<span class="__mc-sp"></span>'
           + ordIcsHtml(info)
@@ -966,7 +1014,7 @@
    * "将删除".files 真值明细红字（BepInEx\ 前缀反斜杠呈现）+ 固定行"停用 / 排序记录（如有）"/
    * note 补充可省 / self 特别红字（两靴 + 引导壳保留）/ 取消 + danger"确认卸载"。 */
   function uninstModalHtml(d) {
-    var h = '<h3>' + chipHtml('red', '\u26a0') + '\u5378\u8f7d \u00b7 ' + esc(d.name) + '</h3>'
+    var h = '<h3>' + chipHtml('red', icSvg('warn')) + '\u5378\u8f7d \u00b7 ' + esc(d.name) + '</h3>'
       + '<div class="__mc-m-sub">\u5c06\u5220\u9664\u4ee5\u4e0b\u5185\u5bb9\uff0c\u91cd\u542f\u6e38\u620f\u540e\u6267\u884c\u3002\u5b58\u6863\u548c\u5176\u4ed6 mod \u4e0d\u53d7\u5f71\u54cd\u3002</div>'
       + '<div class="__mc-files">';
     var fs = d.files || [];
@@ -982,7 +1030,7 @@
 
   /* 明细等待壳（MC_UNINST → MC_UNINST_DATA 一拍 drain 周期内的占位） */
   function uninstLoadingHtml(name) {
-    return '<h3>' + chipHtml('red', '\u26a0') + '\u5378\u8f7d \u00b7 ' + esc(name || '') + '</h3>'
+    return '<h3>' + chipHtml('red', icSvg('warn')) + '\u5378\u8f7d \u00b7 ' + esc(name || '') + '</h3>'
       + '<div class="__mc-m-sub">\u6b63\u5728\u8bfb\u53d6\u5378\u8f7d\u660e\u7ec6\u2026</div>'
       + '<div class="__mc-m-acts"><button type="button" class="__mc-btn __mc-btn-mini" data-mact="close">\u53d6\u6d88</button></div>';
   }
@@ -1009,7 +1057,7 @@
       uninstTimer = null;
       if (ST.uninstGuid !== guid) return;
       ST.uninstGuid = null;
-      if (modalOpen() && S.mdl) setModal('<h3>' + chipHtml('red', '\u26a0') + '\u5378\u8f7d \u00b7 ' + esc(uninstNameOf(guid)) + '</h3>'
+      if (modalOpen() && S.mdl) setModal('<h3>' + chipHtml('red', icSvg('warn')) + '\u5378\u8f7d \u00b7 ' + esc(uninstNameOf(guid)) + '</h3>'
         + '<div class="__mc-m-sub">\u660e\u7ec6\u8bfb\u53d6\u8d85\u65f6\uff08C# \u672a\u56de\u5305\uff0c\u8be6\u89c1 LogOutput\uff09\u3002</div>'
         + '<div class="__mc-m-acts"><button type="button" class="__mc-btn __mc-btn-mini" data-mact="close">\u5173\u95ed</button></div>');
     }, 5000);
@@ -1133,23 +1181,26 @@
 
   /* ================= v2 任务 7：浮层弹窗 + 底部待生效条 ================= */
 
-  /* 弹窗头装饰图标（原型 h3 内联款：cursor:default 不可点） */
-  function chipHtml(k, glyph) {
-    return '<span class="__mc-ic __mc-' + k + '" style="cursor:default" aria-hidden="true">' + glyph + '</span>';
+  /* 弹窗头装饰图标（原型 h3 内联款：cursor:default 不可点；glyph=icSvg(...) 裸 SVG；
+   * sm=true 小号——普通告警三角用） */
+  function chipHtml(k, glyph, sm) {
+    return '<span class="__mc-ic __mc-' + k + (sm ? ' __mc-sm' : '') + '" style="cursor:default" aria-hidden="true">' + glyph + '</span>';
   }
 
-  /* ---- 冲突详情弹窗（v3 两级卡片：红=严重（只能二选一）/ 橙=普通告警（⇄碰撞/◎叠加））----
-   * h3={tag} · {mod名}；sub=一句话结论；sec：涉及 mod / 原因（reason 空不渲染）/ 怎么办；
-   * 多卡片间 border-top 分隔线；底部固定风险行删除（各卡自含）。 */
+  /* ---- 冲突详情弹窗（v3 两级卡片：红=严重（只能二选一，18px 三角）/ 橙=普通告警（15px 三角））----
+   * h3={tag} · {mod名}；sub=一句话结论；sec：涉及 mod（脚本碰撞卡省略——标题已点名对方）/
+   * 原因（reason 空不渲染）/ 怎么办；多卡片间 border-top 分隔线；底部固定风险行删除（各卡自含）。 */
   function cfCardHtml(m, c, i) {
     var lv = c.lv === 'red' ? 'red' : 'orange';
-    var glyph = c.g || (c.tag === '\u529f\u80fd\u53e0\u52a0' ? '\u25ce' : icGlyph({ k: lv, click: 'cf' })); // 终审 F4：叠加卡按 tag 推断 ◎
+    var sm = lv !== 'red';
+    var glyph = icSvg(icIcon({ k: lv, click: 'cf' })); // v3.2：形状只随色级（红/橙三角），协议 g 不再参与
     var h = '';
     if (i > 0) h += '<div style="border-top:1px solid #2a2f3d;margin-top:14px"></div>';
-    h += '<h3>' + chipHtml(lv, glyph) + esc((c.tag || '\u63d0\u793a') + ' \u00b7 ' + m.name) + '</h3>'
-      + '<div class="__mc-m-sub">' + esc(c.title || '') + '</div>'
-      + '<div class="__mc-m-sec"><div class="__mc-m-h">\u6d89\u53ca mod</div>'
-      + '<div class="__mc-m-txt"><b style="color:#e8e6e0">' + esc((c.who || []).join('\u3001')) + '</b></div></div>';
+    h += '<h3>' + chipHtml(lv, glyph, sm) + esc((c.tag || '\u63d0\u793a') + ' \u00b7 ' + m.name) + '</h3>'
+      + '<div class="__mc-m-sub">' + esc(c.title || '') + '</div>';
+    if ((c.who || []).length && c.tag !== '\u811a\u672c\u78b0\u649e')
+      h += '<div class="__mc-m-sec"><div class="__mc-m-h">\u6d89\u53ca mod</div>'
+        + '<div class="__mc-m-txt"><b style="color:#e8e6e0">' + esc((c.who || []).join('\u3001')) + '</b></div></div>';
     if (c.reason)
       h += '<div class="__mc-m-sec"><div class="__mc-m-h">\u539f\u56e0</div>'
         + '<div class="__mc-m-txt">' + esc(c.reason) + '</div></div>';
@@ -1164,26 +1215,29 @@
   }
 
   function cfModalHtml(m, cards) {
-    var h = '';
-    for (var i = 0; i < cards.length; i++) h += cfCardHtml(m, cards[i], i);
+    var h = '', hasPatch = false;
+    for (var i = 0; i < cards.length; i++) {
+      h += cfCardHtml(m, cards[i], i);
+      if (cards[i] && cards[i].tag === '\u811a\u672c\u78b0\u649e') hasPatch = true;
+    }
+    /* v3.1 两钮收口：停用/卸载入口在左列开关与详情页维护区，告警弹窗不摆破坏性按钮；
+     * "去调序"仅碰撞卡出现（Ruling 20：关闭弹窗 → 进排序模式）。 */
     h += '<div class="__mc-m-acts"><button type="button" class="__mc-btn __mc-btn-mini" data-mact="close">\u5173\u95ed</button>'
-      + '<button type="button" class="__mc-btn __mc-btn-mini" data-mact="cfoff" data-guid="' + esc(m.guid) + '">\u505c\u7528\u6b64 mod</button>'
-      /* Ruling 20：冲突/碰撞详情弹窗的"去调序"入口——关闭弹窗 → 进排序模式 */
-      + '<button type="button" class="__mc-btn __mc-btn-pri __mc-btn-mini" data-mact="cforder">\u53bb\u8c03\u5e8f</button>'
-      + '<button type="button" class="__mc-btn __mc-btn-danger __mc-btn-mini" data-mact="cfdel" data-guid="' + esc(m.guid) + '">\u5378\u8f7d\u6b64 mod\u2026</button></div>';
+      + (hasPatch ? '<button type="button" class="__mc-btn __mc-btn-pri __mc-btn-mini" data-mact="cforder">\u53bb\u8c03\u5e8f</button>' : '')
+      + '</div>';
     return h;
   }
 
-  /* 等待壳（MC_CF → MC_CF_DATA 一拍 drain 周期内的占位；v3 等待/空态片改橙 ◎） */
+  /* 等待壳（MC_CF → MC_CF_DATA 一拍 drain 周期内的占位；橙告警小黄叹号） */
   function cfLoadingHtml(name) {
-    return '<h3>' + chipHtml('orange', '\u25ce') + '\u51b2\u7a81\u8be6\u60c5 \u00b7 ' + esc(name) + '</h3>'
+    return '<h3>' + chipHtml('orange', icSvg('warn'), true) + '\u51b2\u7a81\u8be6\u60c5 \u00b7 ' + esc(name) + '</h3>'
       + '<div class="__mc-m-sub">\u6b63\u5728\u8bfb\u53d6\u51b2\u7a81\u8be6\u60c5\u2026</div>'
       + '<div class="__mc-m-acts"><button type="button" class="__mc-btn __mc-btn-mini" data-mact="close">\u5173\u95ed</button></div>';
   }
 
   /* 空态壳（C# 回 cards:[] —— 一般不会到达：ics 由同一数据源产出） */
   function cfEmptyHtml(name) {
-    return '<h3>' + chipHtml('orange', '\u25ce') + '\u51b2\u7a81\u8be6\u60c5 \u00b7 ' + esc(name) + '</h3>'
+    return '<h3>' + chipHtml('orange', icSvg('warn'), true) + '\u51b2\u7a81\u8be6\u60c5 \u00b7 ' + esc(name) + '</h3>'
       + '<div class="__mc-m-sub">\u672a\u53d1\u73b0\u51b2\u7a81\u8be6\u60c5\u3002</div>'
       + '<div class="__mc-m-acts"><button type="button" class="__mc-btn __mc-btn-mini" data-mact="close">\u5173\u95ed</button></div>';
   }
@@ -1203,28 +1257,14 @@
       if (ST.cfGuid !== m.guid) return;
       ST.cfGuid = null;
       if (!modalOpen() || !S.mdl) return;
-      setModal('<h3>' + chipHtml('red', '\u26a0') + '\u51b2\u7a81\u8be6\u60c5 \u00b7 ' + esc(m.name) + '</h3>'
+      setModal('<h3>' + chipHtml('red', icSvg('warn')) + '\u51b2\u7a81\u8be6\u60c5 \u00b7 ' + esc(m.name) + '</h3>'
         + '<div class="__mc-m-sub">\u8be6\u60c5\u8bfb\u53d6\u8d85\u65f6\uff08C# \u672a\u56de\u5305\uff0c\u8be6\u89c1 LogOutput\uff09\u3002</div>'
         + '<div class="__mc-m-acts"><button type="button" class="__mc-btn __mc-btn-mini" data-mact="close">\u5173\u95ed</button></div>');
     }, 5000);
   }
 
-  /* "停用此 mod"（弹窗内）：复用既有启停链 MC_TOGGLE_MOD（SetModEnabled 同一条路；
-   * MC_SET 只写 Meta 登记配置项，General.Enabled 不在 Meta 表内）。 */
-  function cfDisable(guid) {
-    var m = findMod(guid);
-    if (m && m.enabled) { m.enabled = false; renderSide(); renderCfg(); }
-    window.__mcOutbox.push({ type: 'MC_TOGGLE_MOD', guid: guid, enabled: false });
-    closeModal();
-    var name = m ? m.name : guid;
-    if (m && isTpMod(m))
-      toastRaw(name + ' \u5df2\u6807\u8bb0\u505c\u7528\uff08\u91cd\u542f\u7ea7\uff09',
-        '\u672c\u6b21\u4f1a\u8bdd\u4ecd\u5728\u8fd0\u884c \u00b7 \u4e0b\u6b21\u542f\u52a8\u540e\u4e0d\u518d\u52a0\u8f7d');
-    else
-      toast(name + ' \u5df2\u505c\u7528\uff1a\u884c\u4e3a\u7acb\u5373\u8fd8\u539f\uff0c\u4e0b\u6b21\u542f\u52a8\u4e0d\u518d\u52a0\u8f7d', 'now');
-  }
-
-  /* MC_CF_DATA 到达：占位壳换真卡片 + 挂停用/卸载动作（陈旧包/已关弹窗只清状态）。 */
+  /* MC_CF_DATA 到达：占位壳换真卡片 + 挂"去调序"（陈旧包/已关弹窗只清状态）。
+   * v3.1：停用/卸载按钮退役（入口在左列开关与详情页维护区），无 cfoff/cfdel 绑定。 */
   function onCfData(ev) {
     if (ST.cfGuid == null || ev.guid !== ST.cfGuid) return;
     ST.cfGuid = null;
@@ -1235,10 +1275,6 @@
     var cards = ev.cards || [];
     if (!cards.length) { setModal(cfEmptyHtml(name)); return; }
     setModal(cfModalHtml({ guid: ev.guid, name: name }, cards));
-    var off = S.mdl.querySelector('[data-mact="cfoff"]');
-    if (off) off.addEventListener('click', function (e) { e.stopPropagation(); cfDisable(ev.guid); });
-    var del = S.mdl.querySelector('[data-mact="cfdel"]');
-    if (del) del.addEventListener('click', function (e) { e.stopPropagation(); openUninstModal(ev.guid); });
     /* Ruling 20："去调序"——关闭弹窗并进入排序模式（未在排序模式才拉取） */
     var ord = S.mdl.querySelector('[data-mact="cforder"]');
     if (ord) ord.addEventListener('click', function (e) {
@@ -1274,7 +1310,7 @@
    * owners 由 C# 给显示名，面板只拼接。数字噪音/风险长文/范围行删除。） */
   function patchModalHtml() {
     var s = ST.scan;
-    var h = '<h3>' + chipHtml('orange', '\u21c4') + '\u8865\u4e01\u78b0\u649e</h3>';
+    var h = '<h3>' + chipHtml('orange', icSvg('warn'), true) + '\u8865\u4e01\u78b0\u649e</h3>';
     if (!s) {
       return h + '<div class="__mc-m-sub">\u6b63\u5728\u8bfb\u53d6\u626b\u63cf\u7ed3\u679c\u2026</div>'
         + '<div class="__mc-m-acts"><button type="button" class="__mc-btn __mc-btn-mini" data-mact="close">\u5173\u95ed</button></div>';
@@ -1325,7 +1361,7 @@
   function updModalRealHtml(r) {
     var isDown = r.status === 'downgrade', isWarn = r.status === 'warn';
     var isInst = r.local == null || r.status === 'install';
-    var chip = isDown ? chipHtml('orange', '\u2193') : chipHtml('blue', '\u2191');
+    var chip = isDown ? chipHtml('orange', icSvg('down')) : chipHtml('blue', icSvg('up'));
     var verb = repoVerbOf(r);
     var h = '<h3>' + chip + verb + ' \u00b7 ' + esc(r.name) + '</h3>'
       + '<div class="__mc-kv" style="padding:2px 0 0"><span class="__mc-kvv">' + esc(r.local || '\u672a\u5b89\u88c5') + '</span>'
@@ -1345,7 +1381,7 @@
 
   /* 确认后的进度态弹窗（MC_DL 就地更新，不重建弹窗；v3 精简） */
   function updModalDlHtml(r, dl) {
-    var chip = r.status === 'downgrade' ? chipHtml('orange', '\u2193') : chipHtml('blue', '\u2191');
+    var chip = r.status === 'downgrade' ? chipHtml('orange', icSvg('down')) : chipHtml('blue', icSvg('up'));
     var st = dl ? dl.stage : 'down';
     var pct = dl && typeof dl.pct === 'number' ? dl.pct : 0;
     return '<h3>' + chip + repoVerbOf(r) + ' \u00b7 ' + esc(r.name) + '</h3>'
@@ -1356,13 +1392,13 @@
   }
 
   function updModalDoneHtml(r) {
-    return '<h3>' + chipHtml('amber', '\u27f3') + '\u5df2\u5c31\u7eea \u00b7 ' + esc(r.name) + '</h3>'
+    return '<h3>' + chipHtml('amber', icSvg('pend')) + '\u5df2\u5c31\u7eea \u00b7 ' + esc(r.name) + '</h3>'
       + '<div class="__mc-m-sec"><div class="__mc-m-txt">\u5df2\u4e0b\u8f7d\u5e76\u6821\u9a8c\u3002<b style="color:#e8e6e0">\u91cd\u542f\u6e38\u620f</b>\u540e\u81ea\u52a8\u66ff\u6362\u3002</div></div>'
       + '<div class="__mc-m-acts"><button type="button" class="__mc-btn __mc-btn-pri __mc-btn-mini" data-mact="close">\u5173\u95ed</button></div>';
   }
 
   function updModalErrHtml(r, err) {
-    return '<h3>' + chipHtml('red', '\u26a0') + repoVerbOf(r) + '\u5931\u8d25 \u00b7 ' + esc(r.name) + '</h3>'
+    return '<h3>' + chipHtml('red', icSvg('warn')) + repoVerbOf(r) + '\u5931\u8d25 \u00b7 ' + esc(r.name) + '</h3>'
       + '<div class="__mc-risk">' + esc(err || '\u672a\u77e5\u9519\u8bef') + '</div>'
       + '<div class="__mc-m-sec"><div class="__mc-m-txt">\u6ca1\u6709\u505a\u4efb\u4f55\u66f4\u6539\uff0c\u7a0d\u540e\u53ef\u91cd\u8bd5\u3002</div></div>'
       + '<div class="__mc-m-acts"><button type="button" class="__mc-btn __mc-btn-mini" data-mact="close">\u5173\u95ed</button></div>';
@@ -1451,7 +1487,7 @@
    * 仍允许重启（应用加载序/重置现场）。 */
   function openRebootModal() {
     var n = ST.pend && ST.pend.n ? ST.pend.n : 0;
-    openModal('<h3>' + chipHtml('amber', '\u21bb') + '\u7acb\u5373\u91cd\u542f</h3>'
+    openModal('<h3>' + chipHtml('amber', icSvg('pend')) + '\u7acb\u5373\u91cd\u542f</h3>'
       + '<div class="__mc-m-sub">\u9000\u51fa\u6e38\u620f\uff0c\u7ea6 10 \u79d2\u540e\u81ea\u52a8\u56de\u6765\u3002</div>'
       + '<div class="__mc-risk">\u26a0 \u672a\u4fdd\u5b58\u7684\u5bf9\u5c40\u8fdb\u5ea6\u4f1a\u4e22\u5931\u3002</div>'
       + (n > 0 ? '<div class="__mc-m-sec"><div class="__mc-m-txt">\u91cd\u542f\u540e\u81ea\u52a8\u5e94\u7528 ' + n + ' \u9879\u5f85\u751f\u6548\u64cd\u4f5c\u3002</div></div>' : '')
@@ -1804,7 +1840,8 @@
        * 终审 F3：checking=本轮未完（等完成拍，不消费标记）；全失败/限流不得报"都是最新版"
        * （403 已有 C# 专门 toast；全失败在此补一句）。 */
       if (ST.chkWaiting && !event.checking) {
-        ST.chkWaiting = false;
+        if (chkTimer != null) { clearTimeout(chkTimer); chkTimer = null; }
+        setChkBusy(false);
         if (event.failAll) {
           toastRaw('\u68c0\u67e5\u5931\u8d25\uff0c\u7a0d\u540e\u518d\u8bd5', '');
         } else if (!event.rateLimited) {

@@ -18,12 +18,21 @@
 
   v3 方向（2026-10-30 作者拍板，本文件已先行实施，panel.js 待回写）：
     ① 提示信息全面精简——短句、白话、无内部术语；冲突分两级：
-       **严重**（红 ⚠，明确冲突只能二选一/多选一）与**普通告警**（橙，可能有问题；
-       ⇄脚本碰撞 / ◎功能叠加，靠字形区分）。原 L1/L2/L3 三级灰标退役（gray 色级废除）。
+       **严重**（红，明确冲突只能二选一/多选一）与**普通告警**（橙黄，可能有问题）。
+       原 L1/L2/L3 三级灰标退役（gray 色级废除）。
     ② 取消独立「套件仓库」页——顶部一个「检查更新」按钮即可；更新入口 =
        列表行内图标（点击直接进确认弹窗）+ 详情页「维护」区按钮（更新到 X / 安装 X）；
        **按钮一律不进左侧 mod 列表**。侧栏仓库入口卡与补丁碰撞行删除；
        碰撞汇总挪到底部图例栏（有碰撞才显示）。
+    ③ 冲突详情弹窗再精简（2026-10-30 二次反馈）：脚本碰撞卡省略「涉及 mod」段（标题已
+       点名对方）；底部按钮收敛为 关闭 + 去调序（仅碰撞卡时出现）——停用/卸载入口留在
+       左列开关与详情页维护区，弹窗不再重复摆破坏性按钮。
+  v3.2（2026-10-31 作者拍板，本文件已先行实施，panel.js 已同步回写）：
+    ④ 图标裸化：**不要圆片描边/底色**（图标周围那一圈去掉），改裸 SVG 图标（内嵌 Lucide
+       0.469 路径离线渲染）：红三角=严重冲突（18px）、黄三角=普通告警（15px 小一号）、
+       蓝圆箭头=可更新、黄圆箭头=可降级、黄圆斜杠⊘=版本告警、琥珀循环=待生效。
+    ⑤ L2 碰撞进一步合并为**每 mod 一张卡**（不再按对方组铺卡）：对方=全部组去重后的短名
+       （标题不带 GUID 括注），单处保留方法名、多处给总数。
 
   分区导览（与 panel.js 对照）：
     <style> 第一段      = panel.js CSS 字符串原样（仅把 JS 拼串展开为普通 CSS，值未动）
@@ -128,14 +137,16 @@
 #__mc_overlay .__mc-loading{padding:40px 0;text-align:center;color:#6b7180;font-size:13px;letter-spacing:1px;}
 /* 行内图标徽标（18px 圆片七形） */
 #__mc_overlay .__mc-ics{display:flex;align-items:center;gap:3px;flex-shrink:0;}
-#__mc_overlay .__mc-ic{width:18px;height:18px;border-radius:50%;display:inline-flex;align-items:center;justify-content:center;font-size:9.5px;line-height:1;border:1px solid;cursor:pointer;font-family:"Segoe UI Symbol",inherit;position:relative;}
+#__mc_overlay .__mc-ic{display:inline-flex;align-items:center;justify-content:center;line-height:1;cursor:pointer;position:relative;}
 #__mc_overlay .__mc-ic:hover{filter:brightness(1.25);}
-#__mc_overlay .__mc-ic.__mc-red{color:#f87171;border-color:rgba(248,113,113,.45);background:rgba(248,113,113,.1);}
-#__mc_overlay .__mc-ic.__mc-orange{color:#fbbf24;border-color:rgba(251,191,36,.45);background:rgba(251,191,36,.08);}
-#__mc_overlay .__mc-ic.__mc-gray{color:#8a90a0;border-color:rgba(138,144,160,.4);background:rgba(138,144,160,.08);}
-#__mc_overlay .__mc-ic.__mc-blue{color:#60a5fa;border-color:rgba(96,165,250,.5);background:rgba(96,165,250,.1);}
-#__mc_overlay .__mc-ic.__mc-amber{color:#e8a33d;border-color:rgba(232,163,61,.5);background:rgba(232,163,61,.1);cursor:default;}
+#__mc_overlay .__mc-ic svg{display:block;width:18px;height:18px;}
+#__mc_overlay .__mc-ic.__mc-red{color:#f87171;}
+#__mc_overlay .__mc-ic.__mc-orange{color:#fbbf24;}
+#__mc_overlay .__mc-ic.__mc-gray{color:#8a90a0;}
+#__mc_overlay .__mc-ic.__mc-blue{color:#60a5fa;}
+#__mc_overlay .__mc-ic.__mc-amber{color:#e8a33d;cursor:default;}
 #__mc_overlay .__mc-ic.__mc-weak{opacity:.45;}
+#__mc_overlay .__mc-ic.__mc-sm svg{width:15px;height:15px;} /* 普通告警小一号（严重红保持 18px） */
 /* 通用按钮 */
 #__mc_overlay .__mc-btn{background:#0f1219;border:1px solid #2a2f3d;color:#9aa0ad;border-radius:7px;padding:6px 14px;font-size:12.5px;cursor:pointer;font-family:inherit;}
 #__mc_overlay .__mc-btn:hover{border-color:#e8a33d;color:#e8a33d;}
@@ -143,6 +154,10 @@
 #__mc_overlay .__mc-btn.__mc-btn-pri:hover{background:rgba(232,163,61,.18);}
 #__mc_overlay .__mc-btn:disabled{opacity:.4;cursor:not-allowed;}
 #__mc_overlay .__mc-btn.__mc-btn-mini{padding:3px 10px;font-size:11.5px;}
+#__mc_overlay .__mc-btn svg{display:inline-block;width:13px;height:13px;vertical-align:-2.5px;margin-right:5px;}
+#__mc_overlay .__mc-btn.__mc-busy svg{animation:__mc-rot .9s linear infinite;}
+#__mc_overlay .__mc-btn.__mc-busy{opacity:.6;cursor:wait;}
+@keyframes __mc-rot{from{transform:rotate(0deg)}to{transform:rotate(360deg)}}
 /* 底部待生效条 */
 #__mc_overlay .__mc-pending{position:absolute;left:0;right:0;bottom:0;display:none;align-items:center;gap:12px;padding:9px 18px;background:#1d212c;border-top:1px solid rgba(232,163,61,.4);font-size:12.5px;z-index:5;}
 #__mc_overlay .__mc-pending.__mc-show{display:flex;}
@@ -216,6 +231,7 @@
 #__mc_overlay .__mc-mod-row.__mc-ord-row.__mc-drop-above{box-shadow:0 -2px 0 0 #e8a33d;}
 #__mc_overlay .__mc-mod-row.__mc-ord-row.__mc-drop-below{box-shadow:0 2px 0 0 #e8a33d;}
 #__mc_overlay .__mc-ver{font-size:10.5px;color:#6b7180;font-family:Consolas,monospace;flex-shrink:0;}
+#__mc_overlay .__mc-mod-row.__mc-ord-row .__mc-nm{white-space:normal;display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:2;line-height:1.3;word-break:break-word;} /* v3.3：排序行 mod 名换行显示完整 */
 #__mc_overlay .__mc-side::-webkit-scrollbar,#__mc_overlay .__mc-cfg::-webkit-scrollbar{width:8px;}
 #__mc_overlay .__mc-side::-webkit-scrollbar-thumb,#__mc_overlay .__mc-cfg::-webkit-scrollbar-thumb{background:#2a2f3d;border-radius:4px;}
 
@@ -265,7 +281,7 @@
     <div class="__mc-head">
       <div class="__mc-title">MOD 管理中心</div>
       <div class="__mc-sub" id="__mc_sub">v1.7.0 · 多数改动即时生效</div>
-      <button type="button" class="__mc-btn __mc-btn-mini" data-demo="check-upd" style="margin-left:auto">检查更新</button>
+      <button type="button" class="__mc-btn __mc-btn-mini" data-demo="check-upd" style="margin-left:auto"><span id="__mc_chk_tx" style="pointer-events:none">检查更新</span></button>
       <button type="button" class="__mc-close" aria-label="关闭面板" data-demo="panel-close" style="margin-left:0">✕</button>
     </div>
     <div class="__mc-body">
@@ -330,7 +346,7 @@ var MOCK = {
     {
       guid: 'com.local.survivallog.backpackexpand', name: '背包扩容', en: 'BackpackExpand', enabled: true,
       desc: '宽度/基础高度/负重三个明确数值统一应用全部背包（0=恢复官方原值）；天赋『背包加一行』照常每级+1；热改即时生效。',
-      ics: [{ k: 'orange', g: '◎', tip: '功能叠加：与储物类 mod 效果叠加，点看详情', click: 'cf' }],
+      ics: [{ k: 'orange', g: '!', tip: '功能叠加：与储物类 mod 效果叠加，点看详情', click: 'cf' }],
       groups: [
         { title: '扩容数值（0=恢复官方原值）', items: [
           { k: 'Expand.Width',  l: '背包宽度', t: 'int', v: 11, min: 0, max: 30, st: 1, b: 'now', note: '全部背包统一列数（原生最大 10）' },
@@ -402,7 +418,7 @@ var MOCK = {
     {
       guid: 'com.local.survivallog.roleunlock', name: '角色解锁', en: 'RoleUnlock', enabled: false,
       desc: '角色专属内容逐项解锁；关闭即还原官方门槛。',
-      ics: [{ k: 'orange', g: '◎', tip: '（已停用）功能叠加：与角色类 mod', click: 'cf', w: true }],
+      ics: [{ k: 'orange', g: '!', tip: '（已停用）功能叠加：与角色类 mod', click: 'cf', w: true }],
       groups: [
         { title: '藤蔓与花种子', items: [
           { k: 'Plant.Vine', l: '藤蔓种子', t: 'bool', v: true, b: 'now' },
@@ -431,7 +447,7 @@ var MOCK = {
       desc: '生存规划改自选：解锁日全表候选 + 搜索 + 键盘；整数百分比加成。',
       ics: [
         { k: 'orange', tip: '脚本碰撞 ×2：与动作加速，点看详情', click: 'cf' },
-        { k: 'orange', g: '◎', tip: '功能叠加：与囤鼠桃园（规划类）', click: 'cf' },
+        { k: 'orange', g: '!', tip: '功能叠加：与囤鼠桃园（规划类）', click: 'cf' },
       ],
       groups: [
         { title: '花费', items: [
@@ -638,14 +654,36 @@ function swBtn(on, attrs, big) {
     + attrs + ' aria-checked="' + !!on + '"></button>';
 }
 
-function icGlyph(ic) {
-  if (ic.g) return ic.g === 'kbw' ? '⊘' : ic.g;
-  if (ic.k === 'orange') return ic.click === 'cf' ? '⇄' : '↓';
-  if (ic.k === 'red') return '⚠';
-  if (ic.k === 'gray') return '◎';
-  if (ic.k === 'blue') return '↑';
-  if (ic.k === 'amber') return '⟳';
-  return '⚠';
+/* ---- v3.2 裸 SVG 图标（作者拍板：去圆片描边/底色；形状=方案 A 行业惯例）----
+ * 三角=冲突/告警、圆箭头=更新/降级、圆斜杠⊘=版本告警（v3.3 由八角换⊘——八角带叹号
+ * 与冲突三角撞脸，作者实机反馈"怎么有两种叹号"；圆斜杠沿用 v3.1 前 ⊘ 语义）、
+ * 循环箭头=待生效。
+ * 路径取自 Lucide 0.469（MIT），与 panel.js ICON_PATHS 逐字一致。 */
+var ICON_PATHS = {
+  warn: '<path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3"/><path d="M12 9v4"/><path d="M12 17h.01"/>',
+  up: '<circle cx="12" cy="12" r="10"/><path d="m16 12-4-4-4 4"/><path d="M12 16V8"/>',
+  down: '<circle cx="12" cy="12" r="10"/><path d="M12 8v8"/><path d="m8 12 4 4 4-4"/>',
+  ver: '<circle cx="12" cy="12" r="10"/><path d="m4.9 4.9 14.2 14.2"/>',
+  pend: '<path d="M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8"/><path d="M21 3v5h-5"/><path d="M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16"/><path d="M8 16H3v5"/>'
+};
+function icSvg(name) {
+  return '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' + ICON_PATHS[name] + '</svg>';
+}
+
+/* ics 条目 → 图标键：g 仅 kbw 参与映射（⊘→版本告警）；旧 g 字形不再使用。 */
+function icIcon(ic) {
+  if (ic.g === 'kbw') return 'ver';
+  if (ic.k === 'orange') return ic.click === 'cf' ? 'warn' : 'down';
+  if (ic.k === 'red') return 'warn';
+  if (ic.k === 'gray') return 'warn';
+  if (ic.k === 'blue') return 'up';
+  if (ic.k === 'amber') return 'pend';
+  return 'warn';
+}
+
+/* 普通告警族（橙/灰 cf 徽标）→ 小号（15px）；红严重冲突保持 18px。 */
+function icSm(ic) {
+  return ic && ic.click === 'cf' && ic.k !== 'red';
 }
 
 function icsHtml(m) {
@@ -655,10 +693,10 @@ function icsHtml(m) {
   for (var i = 0; i < ics.length; i++) {
     var ic = ics[i];
     if (!ic || !ic.k || !ic.tip) continue;
-    h += '<span class="__mc-ic __mc-' + esc(ic.k) + (ic.w ? ' __mc-weak' : '') + '" data-guid="' + esc(m.guid) + '"'
+    h += '<span class="__mc-ic __mc-' + esc(ic.k) + (ic.w ? ' __mc-weak' : '') + (icSm(ic) ? ' __mc-sm' : '') + '" data-guid="' + esc(m.guid) + '"'
       + (ic.click ? ' data-click="' + esc(ic.click) + '"' : '')
       + ' title="' + esc(ic.tip) + '" aria-label="' + esc(ic.tip) + '">'
-      + esc(icGlyph(ic)) + '</span>';
+      + icSvg(icIcon(ic)) + '</span>';
   }
   return h + '</span>';
 }
@@ -699,8 +737,8 @@ function ordIcsHtml(info) {
   for (var i = 0; i < ics.length; i++) {
     var ic = ics[i];
     if (!ic || !ic.k || !ic.tip || ic.click !== 'cf') continue;
-    h += '<span class="__mc-ic __mc-' + esc(ic.k) + (ic.w ? ' __mc-weak' : '') + '" style="cursor:default" title="' + esc(ic.tip)
-      + '" aria-label="' + esc(ic.tip) + '">' + esc(icGlyph(ic)) + '</span>';
+      h += '<span class="__mc-ic __mc-' + esc(ic.k) + (ic.w ? ' __mc-weak' : '') + (icSm(ic) ? ' __mc-sm' : '') + '" style="cursor:default" title="' + esc(ic.tip)
+      + '" aria-label="' + esc(ic.tip) + '">' + icSvg(icIcon(ic)) + '</span>';
   }
   return h ? '<span class="__mc-ics">' + h + '</span>' : '';
 }
@@ -745,7 +783,7 @@ function renderSideOrder() {
         + '" data-guid="' + esc(guid) + '" tabindex="0" draggable="true">'
         + '<span class="__mc-grip" aria-hidden="true">⋮⋮</span>'
         + '<span class="__mc-ver">' + (n < 10 ? '0' : '') + n + '</span>'
-        + '<span class="__mc-nm">' + esc(info.name) + '</span>'
+        + '<span class="__mc-nm" title="' + esc(info.name) + '">' + esc(info.name) + '</span>'
         + '<span class="__mc-ver">' + esc(info.ver) + '</span>'
         + '<span class="__mc-sp"></span>'
         + ordIcsHtml(info)
@@ -1015,19 +1053,19 @@ function toastRaw(main, small) {
 
 /* ---- 浮层弹窗 + 待生效条 ---- */
 
-function chipHtml(k, glyph) {
-  return '<span class="__mc-ic __mc-' + k + '" style="cursor:default" aria-hidden="true">' + glyph + '</span>';
+function chipHtml(k, glyph, sm) {
+  return '<span class="__mc-ic __mc-' + k + (sm ? ' __mc-sm' : '') + '" style="cursor:default" aria-hidden="true">' + glyph + '</span>';
 }
 
-/* 冲突卡片（v3 两级）：红=严重（只能二选一）/ 橙=普通告警（可能有问题）。
- * 一张卡三句话：title=结论一句；涉及 mod；怎么办。reason 可省。 */
+/* 冲突卡片（v3 两级）：红=严重（只能二选一）/ 橙=普通告警（可能有问题，小号黄叹号）。
+ * 一张卡三句话：title=结论一句；涉及 mod（脚本碰撞卡省略——标题已点名对方）；怎么办。reason 可省。 */
 function cfCardHtml(m, c, i) {
   var lv = c.lv === 'red' ? 'red' : 'orange';
   var h = '';
   if (i > 0) h += '<div style="border-top:1px solid #2a2f3d;margin-top:14px"></div>';
-  h += '<h3>' + chipHtml(lv, c.g || icGlyph({ k: lv, click: 'cf' })) + esc((c.tag || '提示') + ' · ' + m.name) + '</h3>'
+  h += '<h3>' + chipHtml(lv, icSvg(icIcon({ k: lv, click: 'cf' })), lv !== 'red') + esc((c.tag || '提示') + ' · ' + m.name) + '</h3>'
     + '<div class="__mc-m-sub">' + esc(c.title || '') + '</div>';
-  if ((c.who || []).length)
+  if ((c.who || []).length && c.tag !== '脚本碰撞')
     h += '<div class="__mc-m-sec"><div class="__mc-m-h">涉及 mod</div>'
       + '<div class="__mc-m-txt"><b style="color:#e8e6e0">' + esc(c.who.join('、')) + '</b></div></div>';
   if (c.reason)
@@ -1043,11 +1081,15 @@ function cfCardHtml(m, c, i) {
 
 function cfModalHtml(m, cards) {
   var h = '';
-  for (var i = 0; i < cards.length; i++) h += cfCardHtml(m, cards[i], i);
+  var hasPatch = false;
+  for (var i = 0; i < cards.length; i++) {
+    h += cfCardHtml(m, cards[i], i);
+    if (cards[i] && cards[i].tag === '脚本碰撞') hasPatch = true;
+  }
+  /* 两钮收口：停用/卸载入口在左列开关与详情页维护区，告警弹窗不摆破坏性按钮。 */
   h += '<div class="__mc-m-acts"><button type="button" class="__mc-btn __mc-btn-mini" data-mact="close">关闭</button>'
-    + '<button type="button" class="__mc-btn __mc-btn-mini" data-mact="cfoff" data-guid="' + esc(m.guid) + '">停用此 mod</button>'
-    + '<button type="button" class="__mc-btn __mc-btn-pri __mc-btn-mini" data-mact="cforder">去调序</button>'
-    + '<button type="button" class="__mc-btn __mc-btn-danger __mc-btn-mini" data-mact="cfdel" data-guid="' + esc(m.guid) + '">卸载此 mod…</button></div>';
+    + (hasPatch ? '<button type="button" class="__mc-btn __mc-btn-pri __mc-btn-mini" data-mact="cforder">去调序</button>' : '')
+    + '</div>';
   return h;
 }
 
@@ -1058,7 +1100,7 @@ function patchOwnerName(g) {
 
 function patchModalHtml() {
   var s = ST.scan;
-  var h = '<h3>' + chipHtml('orange', '⇄') + '补丁碰撞</h3>';
+  var h = '<h3>' + chipHtml('orange', icSvg('warn'), true) + '补丁碰撞</h3>';
   if (!s) {
     return h + '<div class="__mc-m-sub">正在读取扫描结果…</div>'
       + '<div class="__mc-m-acts"><button type="button" class="__mc-btn __mc-btn-mini" data-mact="close">关闭</button></div>';
@@ -1105,7 +1147,7 @@ function repoVerbOf(r) {
 function updModalRealHtml(r) {
   var isDown = r.status === 'downgrade', isWarn = r.status === 'warn';
   var isInst = r.local == null || r.status === 'install';
-  var chip = isDown ? chipHtml('orange', '↓') : chipHtml('blue', '↑');
+  var chip = isDown ? chipHtml('orange', icSvg('down')) : chipHtml('blue', icSvg('up'));
   var verb = repoVerbOf(r);
   var h = '<h3>' + chip + verb + ' · ' + esc(r.name) + '</h3>'
     + '<div class="__mc-kv" style="padding:2px 0 0"><span class="__mc-kvv">' + esc(r.local || '未安装') + '</span>'
@@ -1124,7 +1166,7 @@ function updModalRealHtml(r) {
 
 /* 确认后的进度弹窗（就地更新，不重建） */
 function updModalDlHtml(r, dl) {
-  var chip = r.status === 'downgrade' ? chipHtml('orange', '↓') : chipHtml('blue', '↑');
+  var chip = r.status === 'downgrade' ? chipHtml('orange', icSvg('down')) : chipHtml('blue', icSvg('up'));
   var st = dl ? dl.stage : 'down';
   var pct = dl && typeof dl.pct === 'number' ? dl.pct : 0;
   return '<h3>' + chip + repoVerbOf(r) + ' · ' + esc(r.name) + '</h3>'
@@ -1135,20 +1177,20 @@ function updModalDlHtml(r, dl) {
 }
 
 function updModalDoneHtml(r) {
-  return '<h3>' + chipHtml('amber', '⟳') + '已就绪 · ' + esc(r.name) + '</h3>'
+  return '<h3>' + chipHtml('amber', icSvg('pend')) + '已就绪 · ' + esc(r.name) + '</h3>'
     + '<div class="__mc-m-sec"><div class="__mc-m-txt">已下载并校验。<b style="color:#e8e6e0">重启游戏</b>后自动替换。</div></div>'
     + '<div class="__mc-m-acts"><button type="button" class="__mc-btn __mc-btn-pri __mc-btn-mini" data-mact="close">关闭</button></div>';
 }
 
 function updModalErrHtml(r, err) {
-  return '<h3>' + chipHtml('red', '⚠') + repoVerbOf(r) + '失败 · ' + esc(r.name) + '</h3>'
+  return '<h3>' + chipHtml('red', icSvg('warn')) + repoVerbOf(r) + '失败 · ' + esc(r.name) + '</h3>'
     + '<div class="__mc-risk">' + esc(err || '未知错误') + '</div>'
     + '<div class="__mc-m-sec"><div class="__mc-m-txt">没有做任何更改，稍后可重试。</div></div>'
     + '<div class="__mc-m-acts"><button type="button" class="__mc-btn __mc-btn-mini" data-mact="close">关闭</button></div>';
 }
 
 function uninstModalHtml(d) {
-  var h = '<h3>' + chipHtml('red', '⚠') + '卸载 · ' + esc(d.name) + '</h3>'
+  var h = '<h3>' + chipHtml('red', icSvg('warn')) + '卸载 · ' + esc(d.name) + '</h3>'
     + '<div class="__mc-m-sub">将删除以下内容，重启游戏后执行。存档和其他 mod 不受影响。</div>'
     + '<div class="__mc-files">';
   var fs = d.files || [];
@@ -1205,7 +1247,7 @@ function renderPending() {
 
 function openRebootModal() {
   var n = ST.pend && ST.pend.n ? ST.pend.n : 0;
-  openModal('<h3>' + chipHtml('amber', '↻') + '立即重启</h3>'
+  openModal('<h3>' + chipHtml('amber', icSvg('pend')) + '立即重启</h3>'
     + '<div class="__mc-m-sub">退出游戏，约 10 秒后自动回来。</div>'
     + '<div class="__mc-risk">⚠ 未保存的对局进度会丢失。</div>'
     + (n > 0 ? '<div class="__mc-m-sec"><div class="__mc-m-txt">重启后自动应用 ' + n + ' 项待生效操作。</div></div>' : '')
@@ -1627,7 +1669,7 @@ function openCfModal(m) {
         who: ['柜子容量', '背包扩容', '更好的储物柜'],
         reason: '「储物扩容」改写 73 件柜子的内部数据并强改数值，与套件的修改相乘叠加（×1.5 ×1.5 = ×2.25）。',
         tips: ['停用或卸载「储物扩容」（推荐）', '或者停用上面任意一个套件 mod', '调加载顺序没有用'] },
-      { lv: 'orange', g: '◎', tag: '功能叠加',
+      { lv: 'orange', g: '!', tag: '功能叠加',
         title: '这几个 mod 都在改储物数值，效果会叠加，可能超出预期。',
         who: ['柜子容量', '柜子负重解放', '保鲜增强'],
         tips: ['介意叠加就只留一个'] },
@@ -1635,15 +1677,15 @@ function openCfModal(m) {
   } else if (isTpMod(m)) {
     cards = [
       { lv: 'orange', tag: '脚本碰撞',
-        title: '和「智能交易」改了同一处游戏逻辑（3 处），后加载的生效，行为可能异常。',
-        who: [m.name, '智能交易'],
+        title: '和「状态栏增强、智能交易」有 3 处改了同一段游戏逻辑，后加载的生效，行为可能异常。',
+        who: ['状态栏增强', '智能交易'],
         tips: ['一般不用管', '出现异常就停用其中一个，或试试「去调序」'] },
     ];
   } else {
     cards = [
       { lv: 'orange', tag: '脚本碰撞',
-        title: '和「自选生存规划」改了同一处游戏逻辑（2 处），后加载的生效，行为可能异常。',
-        who: [m.name, '自选生存规划'],
+        title: '和「自选生存规划、动作加速」有 2 处改了同一段游戏逻辑，后加载的生效，行为可能异常。',
+        who: ['自选生存规划', '动作加速'],
         tips: ['一般不用管', '出现异常就停用其中一个，或试试「去调序」'] },
     ];
   }
@@ -1651,24 +1693,11 @@ function openCfModal(m) {
   bindCfActions({ guid: m.guid, name: m.name });
 }
 function bindCfActions(m) {
-  var off = S.mdl.querySelector('[data-mact="cfoff"]');
-  if (off) off.addEventListener('click', function (e) {
-    e.stopPropagation();
-    var mod = findMod(m.guid);
-    if (mod && mod.enabled) { mod.enabled = false; renderSide(); renderCfg(); }
-    closeModal();
-    toastRaw(m.name + ' 已停用', '下次启动不再加载');
-  });
   var ord = S.mdl.querySelector('[data-mact="cforder"]');
   if (ord) ord.addEventListener('click', function (e) {
     e.stopPropagation();
     closeModal();
     if (!ST.ord) ordToggle();
-  });
-  var del = S.mdl.querySelector('[data-mact="cfdel"]');
-  if (del) del.addEventListener('click', function (e) {
-    e.stopPropagation();
-    openUninstDemo(m.guid);
   });
 }
 
@@ -1861,7 +1890,22 @@ document.addEventListener('click', function (e) {
   if (d === 'view-cfg') demoView('cfg');
   else if (d === 'view-ord') demoView('ord');
   else if (d === 'check-upd') {
-    toastRaw('正在检查更新…', '');
+    /* v3.3 busy 态镜像 panel.js：禁点 + 循环箭头旋转，demo 2s 后复位（真机由 MC_REPO_DATA/20s 兜底复位） */
+    var cb = document.querySelector('[data-demo="check-upd"]');
+    if (cb && !cb.disabled) {
+      cb.disabled = true;
+      cb.classList.add('__mc-busy');
+      cb.insertAdjacentHTML('afterbegin', icSvg('pend'));
+      var ctx = document.getElementById('__mc_chk_tx');
+      if (ctx) ctx.textContent = '检查中…';
+      toastRaw('正在检查更新…', '');
+      setTimeout(function () {
+        cb.disabled = false;
+        cb.classList.remove('__mc-busy');
+        var s = cb.querySelector('svg'); if (s) s.remove();
+        if (ctx) ctx.textContent = '检查更新';
+      }, 2000);
+    }
     setTimeout(function () {
       var c = repoCounts(), parts = [];
       if (c.upd) parts.push(c.upd + ' 个可更新');

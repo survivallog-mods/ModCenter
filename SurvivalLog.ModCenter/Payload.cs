@@ -206,10 +206,11 @@ public sealed class BagOvrInfo
 }
 
 /// <summary>
-/// 行内图标徽标（v2 生命周期任务 7，七形：⚠红冲突/⇄橙碰撞/◎灰同域/↑蓝可更新/↓橙可降级/⊘橙版本告警/⟳琥珀待生效）。
+/// 行内图标徽标（v2 生命周期任务 7；v3.1 字形：⚠红冲突 18px / !橙告警 14px 小号黄叹号（碰撞/叠加
+/// 同形，⇄/◎ 退役）/↑蓝可更新/↓橙可降级/⊘橙版本告警/⟳琥珀待生效）。
 /// k=色级（小写 red|orange|gray|blue|amber）；tip=悬停 title 全文；click=点击路由
 /// （cf=冲突详情弹窗 / upd=更新确认弹窗；null/空=纯状态不输出，如 ⟳）；g=可选字形符——
-/// ↓与⊘同为 orange+upd，无 g 无法消歧（缺省按 k+click 推断：red→⚠ / orange+cf→⇄ / gray→◎ /
+/// ↓与⊘同为 orange+upd，无 g 无法消歧（缺省按 k+click 推断：red→⚠ / orange+cf→! / gray→! /
 /// blue→↑ / orange+upd→↓ / amber→⟳；T8 喂 ⊘ 时带 g:"kbw"，panel.js 将其映射为 ⊘ 字形）。
 /// T7 只接真数据 ⟳ 待生效（pending.json）；冲突形由 T11 喂，更新/降级/告警三形由 T8 喂。
 /// </summary>

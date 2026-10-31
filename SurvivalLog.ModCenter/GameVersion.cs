@@ -218,17 +218,22 @@ public static class GameVersion
     }
 
     /// <summary>gamekb 快照名 ↔ 本地基线比对。返回 null=匹配；非 null=不匹配原因文案
-    /// （决策层放 Why，D8 告警不拦截）。前提：local.Baseline 非空（null 由决策层先行降级）。</summary>
+    /// （决策层放 Why，D8 告警不拦截）。前提：local.Baseline 非空（null 由决策层先行降级）。
+    /// v3.3 文案白话化（作者"这是什么意思"反馈）：gamekb/基线/适配构建等术语清零——快照名
+    /// 只取日期给玩家看，构建号是开发者信息不再进提示。</summary>
     public static string GamekbMismatchReason(string gamekbName, Local local)
     {
         if (string.IsNullOrEmpty(gamekbName))
-            return "远端未携带 gamekb 快照名（update.json 契约异常）";
+            return "更新包缺少游戏版本标记（发布包异常）";
         var i = gamekbName.LastIndexOf('_');
         var suffix = i >= 0 && i + 1 < gamekbName.Length ? gamekbName[(i + 1)..] : null;
         if (suffix == null || suffix.Length == 0 || !IsAllDigits(suffix))
-            return $"gamekb 快照名「{gamekbName}」形态异常（期望 YYYY-MM-DD_<buildid>，后缀应全数字）";
+            return "更新包的游戏版本标记异常（发布包异常）";
         if (!string.Equals(suffix, local.Baseline, StringComparison.Ordinal))
-            return $"远端构建依据 gamekb {gamekbName} ≠ 本地游戏基线 build {local.Baseline}（适配构建不一致，可能不兼容；告警不拦截）";
+        {
+            var date = i > 0 ? gamekbName[..i] : gamekbName; // YYYY-MM-DD
+            return "这个更新按 " + date + " 的游戏版本制作，和你现在的游戏版本不一致，可能不兼容";
+        }
         return null;
     }
 

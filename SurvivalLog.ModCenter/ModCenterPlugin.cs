@@ -31,7 +31,7 @@ public sealed class ModCenterPlugin : BasePlugin
 {
     public const string Guid = "com.local.survivallog.modcenter";
     public const string Name = "ModCenter";
-    public const string Version = "1.7.0"; // 版本号 csproj 单源（<Version>），此处与 csproj 同步
+    public const string Version = "2.0.1"; // 版本号 csproj 单源（<Version>），此处与 csproj 同步
 
     public static ModCenterPlugin Instance { get; private set; }
 

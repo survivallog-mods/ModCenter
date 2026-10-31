@@ -2000,10 +2000,11 @@ internal static class ConfigBridge
         return mates.OrderBy(x => x.Name, StringComparer.OrdinalIgnoreCase).ToList();
     }
 
-    /// <summary>行内冲突 ics（BuildSnapshot/BuildTp 共用）：L1 每条一图标（红=严重 / 橙=叠加◎，
-    /// click=cf），随后 L2 碰撞橙标（每 mod 聚合一枚，click=cf），末尾 L3 叠加橙标 ◎（域内已装
+    /// <summary>行内冲突 ics（BuildSnapshot/BuildTp 共用）：L1 每条一图标（红=严重 ⚠ / 橙=叠加
+    /// 小黄叹号 !，click=cf），随后 L2 碰撞橙标（每 mod 聚合一枚小黄叹号，click=cf），末尾 L3
+    /// 叠加橙标 !（域内已装
     /// ≥2 且均为域表登记项——第三方未登记不计入，防盲目误报）。
-    /// T11 M3：L1 已有卡片的 mod 跳过 L3 叠加标——避免"红+◎/双◎"噪音（expandedstorage
+    /// T11 M3：L1 已有卡片的 mod 跳过 L3 叠加标——避免"红+!/双!"噪音（expandedstorage
     /// 只出 L1 橙卡）。未加载行（套件 dll 缺失/缺席行）不产冲突标。无命中=空表。</summary>
     private static List<IcInfo> CfIcsFor(List<CfRow> all, string guid)
     {
@@ -2021,9 +2022,18 @@ internal static class ConfigBridge
         if (row.Domain != null && entries.Count == 0) // T11 M3：L1 已有卡片 → 不再叠 L3 灰标
         {
             var mates = DomainMates(row, all);
-            if (mates.Count >= 2) list.Add(DomainIc(row, mates));
+            if (mates.Count >= 2 && HasExternalMate(mates)) list.Add(DomainIc(row, mates)); // v3.3：域内涉套件外才标
         }
         return list;
+    }
+
+    /// <summary>L3 外部门槛（v3.3 冲突裁定）：域内存在套件外成员才标注——套件同域叠加=
+    /// 组织内协同设计，默认兼容不报告。</summary>
+    private static bool HasExternalMate(List<CfRow> mates)
+    {
+        foreach (var m in mates)
+            if (!Meta.IsSuiteGuid(m.Guid)) return true;
+        return false;
     }
 
     /// <summary>T11 M7：停用套件行的冲突/碰撞/同域徽标保留但弱化（面板降透明度）+ tip 前缀
@@ -2040,8 +2050,8 @@ internal static class ConfigBridge
     }
 
     /// <summary>行内 L1 图标：tip=表内 TipShort 逐字（v3 精简；完整结论在弹窗卡片）。
-    /// 功能叠加条目（orange+Tag=功能叠加）带显式 G="◎"——否则面板按 orange+cf 推断成 ⇄
-    /// （终审 F1：新旧面板同错，spec §5.2 字形◎ / §2 反目标）。</summary>
+    /// 功能叠加条目（orange+Tag=功能叠加）带显式 G="!"——否则旧面板按 orange+cf 推断成
+    /// ⇄（终审 F1 同理：显式字形对旧面板也生效；v3.1 普通告警族统一小号黄叹号 !）。</summary>
     private static IcInfo EntryIc(ConflictEntry e)
     {
         return new IcInfo
@@ -2049,26 +2059,26 @@ internal static class ConfigBridge
             K = e.Level,
             Click = "cf",
             Tip = e.TipShort,
-            G = e.Tag == "功能叠加" ? "◎" : null,
+            G = e.Tag == "功能叠加" ? "!" : null,
         };
     }
 
-    /// <summary>行内 L3 叠加图标（v3：并入橙色级 + ◎ 显式字形——旧面板 icGlyph 先认 g，兼容；
-    /// tip 一句话，不再列名单）。</summary>
+    /// <summary>行内 L3 叠加图标（v3 并入橙色级 + 显式字形——旧面板 icGlyph 先认 g，兼容；
+    /// v3.1 字形=小号黄叹号 !（⇄/◎ 退役）；tip 一句话，不再列名单）。</summary>
     private static IcInfo DomainIc(CfRow row, List<CfRow> mates)
     {
         return new IcInfo
         {
             K = "orange",
-            G = "◎",
+            G = "!",
             Click = "cf",
             Tip = "功能叠加：" + row.Domain + "类 mod 效果会叠加，点看详情",
         };
     }
 
     /// <summary>MC_CF {guid} → MC_CF_DATA {guid,cards[]}：卡片顺序与行内 ics 同源（L1 色级序 →
-    /// L2 碰撞卡（v2 任务 12）→ L3 同域卡；T11 M3：L1 已有卡片则不出 L3 卡）。未在链上/缺席行 →
-    /// 空 cards（面板给空态壳，不误报）。</summary>
+    /// L2 碰撞卡（v2 任务 12；v3.2 起全部碰撞一张卡）→ L3 同域卡；T11 M3：L1 已有卡片则不出
+    /// L3 卡）。未在链上/缺席行 → 空 cards（面板给空态壳，不误报）。</summary>
     private static void HandleCf(string guid)
     {
         var rows = InstalledCfRows();
@@ -2081,11 +2091,12 @@ internal static class ConfigBridge
         {
             var entries = EntriesFor(row, rows);
             foreach (var e in entries) data.Cards.Add(EntryCard(e));
-            foreach (var c in PatchScan.CollisionsFor(row.Guid)) data.Cards.Add(PatchCard(c, row.Guid)); // T12 L2
+            var cols = PatchScan.CollisionsFor(row.Guid);
+            if (cols.Count > 0) data.Cards.Add(PatchCard(cols, row.Guid)); // T12 L2（v3.2：全部碰撞一张卡）
             if (row.Domain != null && entries.Count == 0) // T11 M3：L1 已有卡片 → 不再叠 L3 灰卡
             {
                 var mates = DomainMates(row, rows);
-                if (mates.Count >= 2) data.Cards.Add(DomainCard(row, mates));
+                if (mates.Count >= 2 && HasExternalMate(mates)) data.Cards.Add(DomainCard(row, mates)); // v3.3：域内涉套件外才出卡
             }
         }
         PushEvent(data.ToJson());
@@ -2106,23 +2117,28 @@ internal static class ConfigBridge
         return c;
     }
 
-    /// <summary>L2 碰撞卡（v3 精简）：lv=orange / tag=脚本碰撞；title=一句话结论（对方=组内
-    /// 其他 owner 显示名，括号带方法名）；reason 空（面板不渲染该段）；tips 两条白话。
-    /// who=owner 显示串（未知来源带标注，OwnerDisplay）。</summary>
-    private static CfCardInfo PatchCard(PatchCollision c, string selfGuid)
+    /// <summary>L2 碰撞卡（v3.2 二次合并）：该 mod 的**全部碰撞一张卡**——按组/按方法铺卡都会
+    /// 让标题与「怎么办」成串重复（玩家两次投诉的噪音源）。对方=各组 owner 去重后的短名；
+    /// 单处保留方法名，多处只给总数（精确位置在「补丁碰撞」汇总弹窗）。</summary>
+    private static CfCardInfo PatchCard(List<PatchCollision> cols, string selfGuid)
     {
         var others = new List<string>();
-        foreach (var o in c.Owners)
-            if (o.Guid == null || !string.Equals(o.Guid, selfGuid, StringComparison.OrdinalIgnoreCase))
-                others.Add(o.Display);
+        foreach (var c in cols)
+            foreach (var o in c.Owners)
+            {
+                if (o.Guid != null && string.Equals(o.Guid, selfGuid, StringComparison.OrdinalIgnoreCase)) continue;
+                if (others.IndexOf(o.DisplayShort) < 0) others.Add(o.DisplayShort);
+            }
         var card = new CfCardInfo
         {
             Lv = "orange",
             Tag = "脚本碰撞",
-            Title = "和「" + string.Join("、", others) + "」改了同一处游戏逻辑（" + c.Method + "），后加载的生效，行为可能异常。",
+            Title = cols.Count == 1
+                ? "和「" + string.Join("、", others.ToArray()) + "」改了同一处游戏逻辑（" + cols[0].Method + "），后加载的生效，行为可能异常。"
+                : "和「" + string.Join("、", others.ToArray()) + "」有 " + cols.Count + " 处改了同一段游戏逻辑，后加载的生效，行为可能异常。",
             Reason = "",
         };
-        card.Who.AddRange(c.Who());
+        card.Who.AddRange(others);
         card.Tips.Add("一般不用管");
         card.Tips.Add("出现异常就停用其中一个，或试试「去调序」");
         return card;

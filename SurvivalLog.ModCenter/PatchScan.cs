@@ -19,6 +19,7 @@ internal sealed class PatchOwnerInfo
     public string Id;      // Harmony instance id（原样）
     public string Guid;    // 归属到的已装插件 GUID；null=未知来源
     public string Display; // 面板显示串（套件中文名（En） / 第三方插件名（GUID） / 未知来源（id））
+    public string DisplayShort; // 冲突卡标题用短名（已知归属只出名，去 GUID 括注；未知来源仍带 id）
 }
 
 /// <summary>
@@ -103,18 +104,31 @@ internal static class PatchScan
         return _last;
     }
 
-    /// <summary>该 mod 的碰撞组（owner 归属到该 GUID 的组；无归属=空表）。</summary>
+    /// <summary>该组是否涉及套件外 mod（v3.3 冲突裁定：套件↔套件默认兼容不报告；未知来源
+    /// 视为套件外——身份不明宁可提示）。套件内冲突=组织内协同设计，后加载生效即可。</summary>
+    private static bool HasExternalOwner(PatchCollision c)
+    {
+        foreach (var o in c.Owners)
+            if (o.Guid == null || !Meta.IsSuiteGuid(o.Guid)) return true;
+        return false;
+    }
+
+    /// <summary>该 mod 的碰撞组（owner 归属到该 GUID 的组；无归属=空表）。只返回涉及套件外
+    /// owner 的组（v3.3 裁定，套件内组不进行内标与详情卡）。</summary>
     internal static List<PatchCollision> CollisionsFor(string guid)
     {
         var list = new List<PatchCollision>();
         if (string.IsNullOrEmpty(guid)) return list;
         foreach (var c in Current.Items)
+        {
+            if (!HasExternalOwner(c)) continue;
             foreach (var o in c.Owners)
                 if (o.Guid != null && string.Equals(o.Guid, guid, StringComparison.OrdinalIgnoreCase))
                 {
                     list.Add(c);
                     break;
                 }
+        }
         return list;
     }
 
@@ -141,20 +155,24 @@ internal static class PatchScan
         };
     }
 
-    /// <summary>面板摘要事件体（MC_SCAN_DATA；游戏侧碰撞全量汇总 + 框架侧未计入披露）。</summary>
+    /// <summary>面板摘要事件体（MC_SCAN_DATA；游戏侧碰撞全量汇总 + 框架侧未计入披露）。
+    /// v3.3 裁定：套件↔套件组默认兼容——不进 items、不计入 total/routed（日志仍记全量口径）。</summary>
     internal static PatchScanData BuildData()
     {
         var r = Current;
         var d = new PatchScanData
         {
             At = r.At, Patched = r.PatchedMethods, Game = r.InScope,
-            Total = r.Total, Routed = r.Items.Count, Unknown = r.Unknown.Count,
             Framework = r.MultiOwnerFramework,
             Ms = r.Ms, Scope = r.Scope, Error = r.Error,
         };
-        foreach (var c in r.Items) d.Items.Add(ToItem(c));
+        foreach (var c in r.Items)
+            if (HasExternalOwner(c)) d.Items.Add(ToItem(c));
         foreach (var c in r.Unknown) d.Items.Add(ToItem(c));
         foreach (var c in r.Framework) d.FrameworkItems.Add(ToItem(c));
+        d.Routed = d.Items.Count(i => !i.Unknown);
+        d.Unknown = d.Items.Count(i => i.Unknown);
+        d.Total = d.Items.Count;
         return d;
     }
 
@@ -233,6 +251,7 @@ internal static class PatchScan
                         Id = oid,
                         Guid = guid,
                         Display = DisplayOf(oid, guid, name),
+                        DisplayShort = DisplayShortOf(oid, guid, name),
                     });
                 }
                 col.HasAttributed = col.Owners.Any(o => o.Guid != null);
@@ -367,6 +386,19 @@ internal static class PatchScan
             return meta;
         if (!string.IsNullOrEmpty(pluginName) && !string.Equals(pluginName, guid, StringComparison.OrdinalIgnoreCase))
             return pluginName + "（" + guid + "）";
+        return guid;
+    }
+
+    /// <summary>冲突卡标题用短名：已知归属只出名（去 GUID 括注——弹窗标题里带 GUID 是开发者
+    /// 噪音，精确身份在汇总弹窗仍有）；未知来源保持「未知来源（id）」。</summary>
+    private static string DisplayShortOf(string ownerId, string guid, string pluginName)
+    {
+        if (guid == null) return "未知来源（" + ownerId + "）";
+        var meta = Meta.DisplayNameOf(guid);
+        if (!string.IsNullOrEmpty(meta) && !string.Equals(meta, guid, StringComparison.OrdinalIgnoreCase))
+            return meta;
+        if (!string.IsNullOrEmpty(pluginName) && !string.Equals(pluginName, guid, StringComparison.OrdinalIgnoreCase))
+            return pluginName;
         return guid;
     }
 
