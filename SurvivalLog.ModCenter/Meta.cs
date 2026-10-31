@@ -423,7 +423,7 @@ internal static class Meta
         {
             Guid = "com.local.survivallog.savemgr",
             Name = "存档管理", En = "SaveMgr",
-            Desc = "每日结算自动备份 + 局内 HUD「立即存档/读取存档」按钮（读取存档=存当前并弹官方存档列表，备份档在列表里直接挑）。备份在 BepInEx/plugins-data/SaveMgr/。",
+            Desc = "每日结算自动存档点（间隔可设）+ 局内 ESC 菜单「立即存档/读取存档」。存档点与官方存档同列同管（× 删除），零隐藏副本。",
             Groups =
             {
                 new MetaGroup
@@ -442,12 +442,7 @@ internal static class Meta
                             Badge = "now", Type = "int", Def = 5, Min = 0, Max = 30, St = 1,
                             Note = "0=关闭；1=每天；N=每 N 天的结算各备一份"
                         },
-                        new MetaItem
-                        {
-                            Section = "Manual", Key = "KeepPerSave", Label = "每档保留上限",
-                            Badge = "now", Type = "int", Def = 30, Min = 1, Max = 999, St = 1,
-                            Note = "超限按天数升序删最老"
-                        }
+
                     }
                 }
             }
