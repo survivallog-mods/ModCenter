@@ -56,7 +56,7 @@ internal sealed class MetaItem
 /// L1 已知冲突库条目（v2 任务 11；spec 2026-10-28-lifecycle-v2 §4.4 首批逐字照用）。
 /// 匹配键=GUID 优先、dll 文件名兜底（大小写不敏感、仅比较文件名、.dll 后缀可省）；
 /// 匹配逻辑纯函数见 <see cref="Meta.MatchL1"/>。Level=red|orange（v3 两级：gray 退役，功能叠加
-/// 并入 orange + ◎ 显式字形）。TipShort=行内图标短提示（逐字）；Tag=弹窗卡级标签（逐字：
+/// 并入 orange + 显式字形；v3.1 字形统一小号黄叹号 !）。TipShort=行内图标短提示（逐字）；Tag=弹窗卡级标签（逐字：
 /// 严重冲突/功能叠加）。Who=冲突对象（Meta.En 内部名；卡片渲染时转"中文名（En）"）。
 /// 表驱动：新增/撤收录只动表，不动逻辑。
 /// </summary>
@@ -421,6 +421,79 @@ internal static class Meta
         },
         new MetaMod
         {
+            Guid = "com.local.survivallog.savemgr",
+            Name = "存档管理", En = "SaveMgr",
+            Desc = "每日结算自动备份（间隔可设）+ 手动备份 + 一键回档（注入成新档，原档不动）。备份在 BepInEx/plugins-data/SaveMgr/，资源管理器可直管。",
+            Groups =
+            {
+                new MetaGroup
+                {
+                    Title = "自动备份",
+                    Items =
+                    {
+                        new MetaItem
+                        {
+                            Section = "AutoBackup", Key = "AutoBackup", Label = "结算自动备份",
+                            Badge = "now", Type = "bool", Def = true
+                        },
+                        new MetaItem
+                        {
+                            Section = "AutoBackup", Key = "IntervalDays", Label = "间隔天数",
+                            Badge = "now", Type = "int", Def = 5, Min = 0, Max = 30, St = 1,
+                            Note = "0=关闭；1=每天；N=每 N 天的结算各备一份"
+                        },
+                        new MetaItem
+                        {
+                            Section = "AutoBackup", Key = "FallbackWatcher", Label = "兜底日翻检测",
+                            Badge = "now", Type = "bool", Def = true,
+                            Note = "结算补丁静默失败时的保险"
+                        }
+                    }
+                },
+                new MetaGroup
+                {
+                    Title = "动作（点击开关=执行一次，自动复位）",
+                    Items =
+                    {
+                        new MetaItem
+                        {
+                            Section = "Action", Key = "BackupNow", Label = "▶ 立即备份当前档",
+                            Badge = "now", Type = "bool", Def = false,
+                            Note = "等价热键 F9；随时可用"
+                        },
+                        new MetaItem
+                        {
+                            Section = "Action", Key = "RestoreNow", Label = "▶ 一键回档（主菜单）",
+                            Badge = "now", Type = "bool", Def = false,
+                            Note = "等价热键 F10：把最新备份注入为读档列表顶部的新档，原档不动；仅主菜单生效"
+                        }
+                    }
+                },
+                new MetaGroup
+                {
+                    Title = "管理",
+                    Items =
+                    {
+                        new MetaItem
+                        {
+                            Section = "Manual", Key = "KeepPerSave", Label = "每档保留上限",
+                            Badge = "now", Type = "int", Def = 30, Min = 1, Max = 999, St = 1,
+                            Note = "超限按天数升序删最老（自动+手动共用额度）"
+                        },
+                        new MetaItem
+                        {
+                            Section = "Restore", Key = "RestoreEnabled", Label = "允许一键回档",
+                            Badge = "now", Type = "bool", Def = true
+                        }
+                    }
+                }
+            }
+            // 2026-10-31 作者反馈落地：①面板可见按钮（Action 组 cfg 即 RPC——ModCenter 写 bool 位，
+            // SaveMgr Ticker 轮询执行后复位）②IntervalDays 默认 5。热键 F9/F10 与 Debug.CmdChannel
+            // 保留在 cfg 但不上面板（CmdChannel 属本机自动化）。Bind 面 11 键，面板暴露 7 键。
+        },
+        new MetaMod
+        {
             Guid = "com.local.survivallog.predisasterspeed",
             Name = "灾前加速", En = "PreDisasterSpeed",
             Desc = "灾变倒计时前的官方速度条增强（热键变档 + 真三倍校正）。仅支持启用/停用。",
@@ -531,6 +604,36 @@ internal static class Meta
     };
 
     // ============ L3 功能域标注（v2 任务 11；Guid → 域） ============
+
+    /// <summary>
+    /// 套件成员 GUID 集（= 组织 12 仓，与 Domains 表"12 套件 mod"注释块同源）。
+    /// v3.3 冲突裁定：套件↔套件默认兼容（同组织协同设计），只有涉及套件外 mod 的
+    /// 碰撞/叠加才报告——判定入口 <see cref="IsSuiteGuid"/>。
+    /// </summary>
+    internal static readonly string[] SuiteGuids =
+    {
+        "com.local.survivallog.backpackexpand",
+        "com.local.survivallog.cabinetburden",
+        "com.local.survivallog.cabineteverywhere",
+        "com.local.survivallog.cabinetsize",
+        "com.local.survivallog.endlessguard",
+        "com.local.survivallog.fridgechill",
+        "com.local.survivallog.modcenter",
+        "com.local.survivallog.planpick",
+        "com.local.survivallog.predisasterspeed",
+        "com.local.survivallog.quickaction",
+        "com.local.survivallog.robotspeed",
+        "com.local.survivallog.roleunlock",
+    };
+
+    /// <summary>是否套件成员（OrdinalIgnoreCase；空值=false）。未知来源（guid=null）不算套件。</summary>
+    internal static bool IsSuiteGuid(string guid)
+    {
+        if (string.IsNullOrEmpty(guid)) return false;
+        foreach (var g in SuiteGuids)
+            if (string.Equals(g, guid, StringComparison.OrdinalIgnoreCase)) return true;
+        return false;
+    }
 
     /// <summary>
     /// 功能域标注表：12 套件 mod 全覆盖 + 已收录第三方（进 L1 名录后才有类型；其余第三方不登记，

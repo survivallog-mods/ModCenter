@@ -50,13 +50,13 @@ public sealed class RepoRow
 /// </summary>
 public static class RepoDecision
 {
-    /// <summary>12 仓清单（Ruling 5：仓键 = 组织仓名；GUID 映射见 <see cref="GuidOf"/>，
-    /// 已对照 Meta.cs 九表 + config 目录实表核对）。</summary>
+    /// <summary>13 仓清单（Ruling 5：仓键 = 组织仓名；GUID 映射见 <see cref="GuidOf"/>）。
+    /// 2026-10-31 +SaveMgr（第 13 仓，GUID 符合约定；Release 未发 → 面板显示未发版）。</summary>
     public static readonly string[] RepoKeys =
     {
         "BackpackExpand", "CabinetBurden", "CabinetEverywhere", "CabinetSize",
         "EndlessGuard", "FridgeChill", "ModCenter", "PlanPick",
-        "PreDisasterSpeed", "QuickAction", "RobotSpeed", "RoleUnlock",
+        "PreDisasterSpeed", "QuickAction", "RobotSpeed", "RoleUnlock", "SaveMgr",
     };
 
     /// <summary>仓键 → 套件插件 GUID（com.local.survivallog.&lt;小写仓键&gt;）。</summary>
@@ -67,7 +67,7 @@ public static class RepoDecision
 
     /// <summary>
     /// 本地插件快照（**主线程**：IL2CPPChainloader.Instance.Plugins，v1 §4.1①实证 API）：
-    /// 构造 12 行，Local 填 PluginInfo.Metadata.Version（SemanticVersioning.Version），
+    /// 构造 N 行，Local 填 PluginInfo.Metadata.Version（SemanticVersioning.Version），
     /// 未安装 = null。Remote/Gamekb 由调用方 fetch 后附（T8 / 探针）。
     /// </summary>
     public static List<RepoRow> SnapshotLocal()
