@@ -423,74 +423,37 @@ internal static class Meta
         {
             Guid = "com.local.survivallog.savemgr",
             Name = "存档管理", En = "SaveMgr",
-            Desc = "每日结算自动备份（间隔可设）+ 手动备份 + 一键回档（注入成新档，原档不动）。备份在 BepInEx/plugins-data/SaveMgr/，资源管理器可直管。",
+            Desc = "每日结算自动备份 + 局内 HUD「立即存档/读取存档」按钮（读取存档=存当前并弹官方存档列表，备份档在列表里直接挑）。备份在 BepInEx/plugins-data/SaveMgr/。",
             Groups =
             {
                 new MetaGroup
                 {
-                    Title = "自动备份",
+                    Title = "设置",
                     Items =
                     {
                         new MetaItem
                         {
-                            Section = "AutoBackup", Key = "AutoBackup", Label = "结算自动备份",
+                            Section = "AutoBackup", Key = "AutoBackup", Label = "启用自动存档",
                             Badge = "now", Type = "bool", Def = true
                         },
                         new MetaItem
                         {
-                            Section = "AutoBackup", Key = "IntervalDays", Label = "间隔天数",
+                            Section = "AutoBackup", Key = "IntervalDays", Label = "自动存档间隔天数",
                             Badge = "now", Type = "int", Def = 5, Min = 0, Max = 30, St = 1,
                             Note = "0=关闭；1=每天；N=每 N 天的结算各备一份"
                         },
                         new MetaItem
                         {
-                            Section = "AutoBackup", Key = "FallbackWatcher", Label = "兜底日翻检测",
-                            Badge = "now", Type = "bool", Def = true,
-                            Note = "结算补丁静默失败时的保险"
-                        }
-                    }
-                },
-                new MetaGroup
-                {
-                    Title = "动作（点击开关=执行一次，自动复位）",
-                    Items =
-                    {
-                        new MetaItem
-                        {
-                            Section = "Action", Key = "BackupNow", Label = "▶ 立即备份当前档",
-                            Badge = "now", Type = "bool", Def = false,
-                            Note = "等价热键 F9；随时可用"
-                        },
-                        new MetaItem
-                        {
-                            Section = "Action", Key = "RestoreNow", Label = "▶ 一键回档（主菜单）",
-                            Badge = "now", Type = "bool", Def = false,
-                            Note = "等价热键 F10：把最新备份注入为读档列表顶部的新档，原档不动；仅主菜单生效"
-                        }
-                    }
-                },
-                new MetaGroup
-                {
-                    Title = "管理",
-                    Items =
-                    {
-                        new MetaItem
-                        {
                             Section = "Manual", Key = "KeepPerSave", Label = "每档保留上限",
                             Badge = "now", Type = "int", Def = 30, Min = 1, Max = 999, St = 1,
-                            Note = "超限按天数升序删最老（自动+手动共用额度）"
-                        },
-                        new MetaItem
-                        {
-                            Section = "Restore", Key = "RestoreEnabled", Label = "允许一键回档",
-                            Badge = "now", Type = "bool", Def = true
+                            Note = "超限按天数升序删最老"
                         }
                     }
                 }
             }
-            // 2026-10-31 作者反馈落地：①面板可见按钮（Action 组 cfg 即 RPC——ModCenter 写 bool 位，
-            // SaveMgr Ticker 轮询执行后复位）②IntervalDays 默认 5。热键 F9/F10 与 Debug.CmdChannel
-            // 保留在 cfg 但不上面板（CmdChannel 属本机自动化）。Bind 面 11 键，面板暴露 7 键。
+            // 2026-10-31 作者二次拍板：面板只 3 项（启用自动存档/间隔天数/保留上限），其余全删；
+            // 存档/回档改游戏内实体按钮（SaveMgr MenuButtons：主菜单菜单列「一键回档」+ 局内
+            // ESC 菜单「立即存档」，ModCenter MenuEntryInjector 同款注入模式）。
         },
         new MetaMod
         {

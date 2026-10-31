@@ -2,10 +2,10 @@
 
 ## 未发版（2026-10-31，作者定号后归节）
 
-- 新登记第 13 仓 **存档管理 SaveMgr**：Meta 表中文分组页（自动备份/动作/管理），首创**动作按钮**模式
-  （Action.* 布尔位 cfg 即 RPC——面板写 true，目标 mod Ticker 轮询执行后复位；实机闭环验证通过）；
-  RepoDecision.RepoKeys +SaveMgr（GUID 符合 `com.local.survivallog.<仓键小写>` 约定；Release 未发版 →
-  更新卡显示未发版）。侧栏计数标签「套件 MOD（12）」为硬编码文案，随下版改动态或改 13（Minor，作者定）。
+- 新登记第 13 仓 **存档管理 SaveMgr**（作者 UX 拍板终态）：面板**只 3 项设置**（启用自动存档/间隔天数/
+  保留上限）；存档/读取交互走 SaveMgr 自带的**局内 HUD 实体按钮**（立即存档/读取存档——后者弹官方
+  存档列表），面板不放动作位。RepoDecision.RepoKeys +SaveMgr（GUID 符合约定；Release 未发版 →
+  更新卡显示未发版）。侧栏计数标签「套件 MOD（12）」为硬编码文案，随下版改动态（Minor，作者定）。
 
 > 本文件只记本 mod 的更新；套件/安装器版本史见总仓根 CHANGELOG.md。
 > 版本号单源：本仓 csproj `<Version>`（作者定义，硬规则 1）。
