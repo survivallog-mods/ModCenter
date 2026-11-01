@@ -332,9 +332,9 @@ internal static class Meta
         },
         new MetaMod
         {
-            Guid = "com.local.survivallog.roleunlock",
-            Name = "角色解锁", En = "RoleUnlock",
-            Desc = "角色专属内容逐项解锁；关闭即还原官方门槛。",
+            Guid = "com.local.survivallog.unlockhub",
+            Name = "解锁中心", En = "UnlockHub",
+            Desc = "通用解锁合集：角色专属内容逐项解锁 + 交易解锁（货架买后即刷）；关闭即还原官方门槛。v1.8.0 前名「角色解锁 RoleUnlock」。",
             Groups =
             {
                 new MetaGroup
@@ -356,6 +356,15 @@ internal static class Meta
                         // 以下两 entry 任务 8 新增（spec §8-1「RoleUnlock 两项补开关」）；落地前快照按 spec 默认 true 兜底
                         new MetaItem { Section = "Plan", Key = "ClearPool", Label = "解锁角色专属生存规划（46 项功能类）", Badge = "now", Type = "bool", Def = true },
                         new MetaItem { Section = "Plan", Key = "VaseRecipe", Label = "解锁花瓶配方", Badge = "now", Type = "bool", Def = true }
+                    }
+                },
+                new MetaGroup
+                {
+                    Title = "交易解锁",
+                    Items =
+                    {
+                        // v1.8.0 新增（2026-11-02）：postfix 删货架快照，重开交易点走官方 DrawActiveShelf 全新上架
+                        new MetaItem { Section = "Trade", Key = "UnlockTrade", Label = "交易解锁（货架买完即刷新上架）", Badge = "now", Type = "bool", Def = true }
                     }
                 }
             }
@@ -582,6 +591,7 @@ internal static class Meta
         "com.local.survivallog.quickaction",
         "com.local.survivallog.robotspeed",
         "com.local.survivallog.roleunlock",
+        "com.local.survivallog.unlockhub",
     };
 
     /// <summary>是否套件成员（OrdinalIgnoreCase；空值=false）。未知来源（guid=null）不算套件。</summary>
@@ -616,6 +626,8 @@ internal static class Meta
         ["com.local.survivallog.quickaction"] = "速度",
         ["com.local.survivallog.robotspeed"] = "机器人",
         ["com.local.survivallog.roleunlock"] = "角色",
+        // v1.8.0 更名（2026-11-02）：RoleUnlock → UnlockHub；旧 guid 保留登记（旧版玩家未升级期间仍算套件成员）
+        ["com.local.survivallog.unlockhub"] = "解锁",
         // 已收录第三方（L1 名录）
         ["com.jangfullmoon.storagecapacityexpansion"] = "储物",
         ["survivallog.expandedstorage"] = "储物"

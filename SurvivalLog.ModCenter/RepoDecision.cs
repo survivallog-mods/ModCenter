@@ -51,12 +51,13 @@ public sealed class RepoRow
 public static class RepoDecision
 {
     /// <summary>13 仓清单（Ruling 5：仓键 = 组织仓名；GUID 映射见 <see cref="GuidOf"/>）。
-    /// 2026-10-31 +SaveMgr（第 13 仓，GUID 符合约定；Release 未发 → 面板显示未发版）。</summary>
+    /// 2026-10-31 +SaveMgr（第 13 仓，GUID 符合约定；Release 未发 → 面板显示未发版）。
+    /// 2026-11-02 RoleUnlock 更名 UnlockHub（GitHub 仓同步改名，旧名 URL 自动重定向；仓键跟随新名）。</summary>
     public static readonly string[] RepoKeys =
     {
         "BackpackExpand", "CabinetBurden", "CabinetEverywhere", "CabinetSize",
         "EndlessGuard", "FridgeChill", "ModCenter", "PlanPick",
-        "PreDisasterSpeed", "QuickAction", "RobotSpeed", "RoleUnlock", "SaveMgr",
+        "PreDisasterSpeed", "QuickAction", "RobotSpeed", "SaveMgr", "UnlockHub",
     };
 
     /// <summary>仓键 → 套件插件 GUID（com.local.survivallog.&lt;小写仓键&gt;）。</summary>
