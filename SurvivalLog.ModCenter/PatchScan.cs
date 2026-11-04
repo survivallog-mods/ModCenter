@@ -132,7 +132,7 @@ internal static class PatchScan
         return list;
     }
 
-    /// <summary>行内橙标（每个 mod 一枚聚合；v3 tip=脚本碰撞 ×N + 对方显示名前 2 个）。
+    /// <summary>行内 ⚠橙 碰撞标（每个 mod 一枚聚合；v4 白话 tip=撞了 N 处 + 对方显示名前 2 个）。
     /// 无碰撞=null。</summary>
     internal static IcInfo IcsFor(string guid)
     {
@@ -151,7 +151,7 @@ internal static class PatchScan
         {
             K = "orange",
             Click = "cf",
-            Tip = "脚本碰撞 ×" + hits.Count + (names.Length > 0 ? "：与" + names : "") + "，点看详情",
+            Tip = "和其他 mod 撞了（" + hits.Count + " 处）" + (names.Length > 0 ? "：" + names : "") + "，点击查看",
         };
     }
 

@@ -2,10 +2,11 @@
  * 任务 7 = 完整面板（原型 v4 移植：docs/superpowers/specs/2026-10-24-modcenter-prototype.html
  * 的 <style> 面板段 + renderSide/renderCfg/ctl/toast/toggle/ovr 逻辑；场景模拟与 demo-bar 不迁）。
  * v2 生命周期任务 7 = 图标徽标系统 + 待生效条（原型 2026-10-28-modcenter-v2-prototype.html
- * 移植）：mod 行内 ics 容器（mod.ics=[{k,tip,click?,g?}]，k=red|orange|gray|
- * blue|amber，悬停 title 全文，click 路由 cf=冲突详情弹窗/upd=更新确认弹窗壳，
+ * 移植）：mod 行内 ics 容器（mod.ics=[{k,tip,click?}]，k=red|orange|yellow，
+ * 悬停 title 全文，click 路由 cf=冲突详情弹窗/upd=更新确认弹窗壳，
  * 无 click=纯状态；v3.2 起为**裸 SVG 图标**（作者拍板去圆片描边/底色；内嵌 Lucide 路径
- * 离线渲染：三角=冲突/告警、圆箭头=更新/降级、⊘=版本告警、循环=待生效；告警小一号）；
+ * 离线渲染）；v4 三标记体系（作者拍板）：⚠红18px=确定不可用（L1 严重冲突/未安装）、
+ * ⚠橙15px=其余一切告警（碰撞/叠加/版本不符）、↑黄18px=仅有新版本；↓/⊘/⟳/蓝 退役；
  * 底部待生效条（__mcEvent MC_PENDING_SUMMARY{n,labels}，n>0
  * 显示；v2 任务 13 撤销/立即重启两钮接真）；弹窗=面板内浮层（.mc-modal-bg/.mc-modal 同款，
  * ESC/点底关闭，弹窗开着时 ESC 先关弹窗再关面板）。ics 缺省时行渲染与 v1 完全一致
@@ -16,10 +17,10 @@
  * 检查更新 blue/全部更新 pri）；真数据更新确认弹窗（版本对比 kv + 校验/生效说明 +
  * D7 降级红字 + D8 版本告警红字 + 橙"降级到 X"/琥珀"更新到 X"主钮）→ 确认后 MC_UPD/MC_INST
  * → 弹窗内联进度条（__mcEvent MC_DL{repoKey,pct,stage} 就地更新，弹窗不重建）；MC_REPO_DATA
- * （rows+lastCheck+checking+dl）驱动视图与入口卡计数；⊘ 图标消歧 g:"kbw"。
+ * （rows+lastCheck+checking+dl）驱动视图与入口卡计数（v4：⊘ 消歧 g 字段随三标记体系退役）。
  * v2 生命周期任务 9 = 加载排序模式（原型排序段照抄）：侧栏底部按钮切换（ST.ord 面板内状态，
  * 不新开键盘门——与 MC_OPEN/MC_CLOSE 共存）；排序模式侧栏平铺全列表（不分分组，按当前
- * order 序：行=拖柄 ⋮⋮+序号+名+版本+冲突 chip（显示无 click，裁定 4；⟳/↑↓/⊘ 不显示）），
+ * order 序：行=拖柄 ⋮⋮+序号+名+版本+冲突 chip（显示无 click，裁定 4；↑/⚠ 徽标不显示）），
  * HTML5 DnD（dragstart 记源/dragover 上下半区琥珀插入线/drop 重排，事件委托挂 side 免重挂）
  * + 键盘替代（行 tabindex=0 聚焦 ↑↓ 移动，WCAG 2.2 AA）；工具条（说明+恢复默认+保存顺序）；
  * MC_ORDER_GET 拉序（MC_ORDER_DATA{guids[],rows[],def[]}）→ 本地重排 → MC_ORDER_SAVE{guids[]}
@@ -27,7 +28,7 @@
  * v2 生命周期任务 10 = 彻底卸载（原型 delHtml 照抄）：详情页维护动作区"卸载…"按钮 →
  * MC_UNINST{guid} → MC_UNINST_DATA{guid,name,self,files[],note?} 渲染确认弹窗（⚠ 红+名称；
  * "将删除".files 三行红字（dll/cfg/记录说明）；"不受影响"；取消/确认卸载 danger 钮）→ 确认
- * MC_UNINST_DO{guid} → 关弹窗（结果 toast/快照由 C# 回推：行内 ⟳ + 底条"卸载 X"）；ModCenter
+ * MC_UNINST_DO{guid} → 关弹窗（结果 toast/快照由 C# 回推：底条"卸载 X"）；ModCenter
  * 自身（__self 页按钮）走特别文案分支（面板本体消失+清理器保留说明）。带出：T9 三小件
  * （ORD.src 改存 guid / ordbar 两钮未加载禁用 / HandleOrderSave 兜底在 C# 侧）+ 待生效条
  * 中性档（MC_PENDING_SUMMARY.applied="自定义加载序生效中"——不计入计数、弱化样式）。
@@ -87,11 +88,15 @@
     reboot: { t: '\ud83d\udd04 \u91cd\u542f\u540e', cls: '__mc-b-reboot' },   // 🔄 重启后
     cfg:    { t: '\u2699 \u5df2\u5199\u5165 cfg',  cls: '__mc-b-cfg' },       // ⚙ 已写入 cfg
   };
-  var TOAST_SMALL = {
-    now:    '\u7acb\u5373\u751f\u6548',
-    reload: '\u8bfb\u6863\u540e\u751f\u6548',
-    cfg:    '\u5df2\u4fdd\u5b58\uff0c\u751f\u6548\u65f6\u673a\u770b\u8be5 mod',
-    reboot: '\u91cd\u542f\u540e\u751f\u6548',
+  /* toast 生效标识（v4 作者拍板：toast 居中放大，第二行彩色生效标识，每条必带其一；
+   * t=小行文案 cls=配色 ms=停留毫秒；err 独立红框）。cfg=生效时机由该 mod 自述。 */
+  var TOAST_T = {
+    now:    { t: '\u26a1 \u5df2\u7acb\u5373\u751f\u6548', cls: '__mc-t-now', ms: 3000 },
+    reload: { t: '\ud83d\udcc1 \u8bfb\u6863\u540e\u751f\u6548', cls: '__mc-t-reload', ms: 3000 },
+    reboot: { t: '\ud83d\udd04 \u91cd\u542f\u6e38\u620f\u540e\u751f\u6548', cls: '__mc-t-reboot', ms: 4500 },
+    cfg:    { t: '\u2699 \u5df2\u4fdd\u5b58\uff0c\u4f55\u65f6\u89c1\u6548\u770b\u8be5 mod', cls: '__mc-t-now', ms: 3000 },
+    info:   { t: '', cls: '', ms: 3000 },
+    err:    { t: '\u2716 \u6ca1\u6210\u529f', cls: '__mc-t-err', ms: 4500 },
   };
   var SELF_NAME = 'Mod \u7ba1\u7406\u4e2d\u5fc3'; // Mod 管理中心
   var SELF_EN = 'ModCenter\uff08\u672c\u9762\u677f\uff09';
@@ -202,24 +207,29 @@
     + '#__mc_overlay .__mc-foot{display:flex;align-items:center;gap:18px;padding:9px 18px;border-top:1px solid #2a2f3d;background:#1d212c;font-size:12px;color:#6b7180;}'
     + '#__mc_overlay .__mc-foot .__mc-lg{display:flex;gap:14px;}'
     + '#__mc_overlay .__mc-foot .__mc-foot-note{margin-left:auto;}'
-    /* toast（挂在 overlay 内右下角；z-index:10=原型 .mc-toast 层序——浮层弹窗(9)/待生效条(5)之上） */
-    + '#__mc_overlay .__mc-toast{position:absolute;right:18px;bottom:16px;background:rgba(15,18,25,.94);border:1px solid #4ade80;color:#e8e6e0;border-radius:10px;padding:10px 16px;font-size:13px;display:none;box-shadow:0 8px 30px rgba(0,0,0,.63);line-height:1.5;max-width:60%;z-index:10;}'
+    /* toast（作者拍板 v4：居中偏上 40% 放大呈现——右下角易被忽略；第二行彩色生效标识；
+     * z-index:10=原型 .mc-toast 层序——浮层弹窗(9)/待生效条(5)之上） */
+    + '#__mc_overlay .__mc-toast{position:absolute;left:50%;top:40%;transform:translate(-50%,-50%);background:rgba(15,18,25,.95);border:1px solid #4ade80;color:#e8e6e0;border-radius:12px;padding:14px 24px;font-size:15px;font-weight:600;display:none;box-shadow:0 10px 40px rgba(0,0,0,.7);line-height:1.5;max-width:72%;z-index:10;text-align:center;}'
     + '#__mc_overlay .__mc-toast.__mc-show{display:block;}'
-    + '#__mc_overlay .__mc-toast.__mc-err{border-color:#f87171;}'
-    + '#__mc_overlay .__mc-toast small{color:#9aa0ad;display:block;font-size:11.5px;}'
+    + '#__mc_overlay .__mc-toast small{color:#9aa0ad;display:block;font-size:12px;font-weight:400;margin-top:4px;}'
+    + '#__mc_overlay .__mc-toast.__mc-t-now small{color:#4ade80;}'
+    + '#__mc_overlay .__mc-toast.__mc-t-reboot{border-color:#fbbf24;}#__mc_overlay .__mc-toast.__mc-t-reboot small{color:#fbbf24;}'
+    + '#__mc_overlay .__mc-toast.__mc-t-reload small{color:#60a5fa;}'
+    + '#__mc_overlay .__mc-toast.__mc-t-err{border-color:#f87171;}#__mc_overlay .__mc-toast.__mc-t-err small{color:#f87171;}'
     + '#__mc_overlay .__mc-loading{padding:40px 0;text-align:center;color:#6b7180;font-size:13px;letter-spacing:1px;}'
     /* ---- v2 任务 7：行内图标徽标（原型 .mc-ics/.mc-ic 及色级；v3.2 起裸 SVG 图标） ----
      * 裸图标（作者拍板：不要圆片描边/底色）：色随级、形随义、尺寸分级（告警小一号）。
-     * span 非 button：图标落在 mod 行（div+data-interactive）矩形内，点击可达性由行承载。 */
+     * span 非 button：可点徽标自带 data-interactive 进白名单（实机修复：行矩形承载实测到不了
+     * 徽标——白名单矩形命中后点击落在行上，MC_CF/MC_UPD 不发）。 */
     + '#__mc_overlay .__mc-ics{display:flex;align-items:center;gap:3px;flex-shrink:0;}'
     + '#__mc_overlay .__mc-ic{display:inline-flex;align-items:center;justify-content:center;line-height:1;cursor:pointer;position:relative;}'
     + '#__mc_overlay .__mc-ic:hover{filter:brightness(1.25);}'
     + '#__mc_overlay .__mc-ic svg{display:block;width:18px;height:18px;}'
     + '#__mc_overlay .__mc-ic.__mc-red{color:#f87171;}'
-    + '#__mc_overlay .__mc-ic.__mc-orange{color:#fbbf24;}'
+    + '#__mc_overlay .__mc-ic.__mc-orange{color:#fb923c;}'
     + '#__mc_overlay .__mc-ic.__mc-gray{color:#8a90a0;}'
-    + '#__mc_overlay .__mc-ic.__mc-blue{color:#60a5fa;}'
-    + '#__mc_overlay .__mc-ic.__mc-amber{color:#e8a33d;cursor:default;}'
+    + '#__mc_overlay .__mc-ic.__mc-blue{color:#60a5fa;}' /* v4：新 C# 不再产出（legacy 快照兼容） */
+    + '#__mc_overlay .__mc-ic.__mc-yellow{color:#facc15;}' /* v4：↑黄=可更新（亮黄，与橙⚠拉开） */
     /* v2 任务 12（T11 M7）：停用行的冲突/碰撞/同域徽标保留信息量但弱化（透明度降低，tip 已带"（已停用）"） */
     + '#__mc_overlay .__mc-ic.__mc-weak{opacity:.45;}'
     + '#__mc_overlay .__mc-ic.__mc-sm svg{width:15px;height:15px;}' /* 普通告警小一号（严重红保持 18px） */
@@ -362,7 +372,7 @@
       if (ST.chkWaiting) return;
       setChkBusy(true);
       window.__mcOutbox.push({ type: 'MC_CHK' });
-      toastRaw('\u6b63\u5728\u68c0\u67e5\u66f4\u65b0\u2026', '');
+      toast('\u6b63\u5728\u68c0\u67e5\u66f4\u65b0\u2026', 'info');
       clearTimeout(chkTimer);
       chkTimer = setTimeout(function () { chkTimer = null; setChkBusy(false); }, 20000); // C# 未回包兜底
     });
@@ -475,41 +485,38 @@
 
   /* ================= v2 任务 7：行内图标徽标 ================= */
 
-  /* ---- v3.2 裸 SVG 图标（作者拍板：去圆片描边/底色；形状=方案 A 行业惯例）----
-   * 三角=冲突/告警、圆箭头=更新/降级、圆斜杠⊘=版本告警（v3.3 由八角换⊘——八角带叹号
-   * 与冲突三角撞脸，作者实机反馈"怎么有两种叹号"；圆斜杠沿用 v3.1 前 ⊘ 语义）、
-   * 循环箭头=待生效。
+  /* ---- 裸 SVG 图标（作者拍板：去圆片描边/底色）----
+   * v4 三标记体系：三角 ⚠=红（确定不可用 18px）/橙（一切告警 15px 小号）、圆箭头 ↑=
+   * 黄（有新版本 18px）；↓/⊘/⟳ 行内退役（down/pend 路径仅供弹窗装饰 chip）。
    * 路径取自 Lucide 0.469（MIT），内嵌离线渲染（游戏 WebView 无外网）。 */
   var ICON_PATHS = {
     warn: '<path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3"/><path d="M12 9v4"/><path d="M12 17h.01"/>',
     up: '<circle cx="12" cy="12" r="10"/><path d="m16 12-4-4-4 4"/><path d="M12 16V8"/>',
-    down: '<circle cx="12" cy="12" r="10"/><path d="M12 8v8"/><path d="m8 12 4 4 4-4"/>',
-    ver: '<circle cx="12" cy="12" r="10"/><path d="m4.9 4.9 14.2 14.2"/>',
-    pend: '<path d="M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8"/><path d="M21 3v5h-5"/><path d="M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16"/><path d="M8 16H3v5"/>'
+    pend: '<path d="M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8"/><path d="M21 3v5h-5"/><path d="M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16"/><path d="M8 16H3v5"/>' /* v4：仅弹窗装饰 chip 用（行内 ⟳ 已退役） */
   };
   function icSvg(name) {
     return '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' + ICON_PATHS[name] + '</svg>';
   }
 
-  /* ics 条目 → 图标键：g 仅 kbw（⊘→版本告警）参与映射；旧协议 g="!"/"◎" 不再使用
-   * （k+click 已足够；新 C# 不再产出 gray，保留分支仅 legacy 快照兼容）。 */
+  /* v4 三标记（作者拍板）：yellow→↑黄（可更新）red→⚠红（确定不可用）其余（orange/gray/
+   * legacy blue 之外的未知）一律 ⚠橙告警形——形状只看色级，click 仅管弹窗路由不管形状。
+   * blue/gray 分支仅为旧快照兼容保留。 */
   function icIcon(ic) {
-    if (ic.g === 'kbw') return 'ver';
-    if (ic.k === 'orange') return ic.click === 'cf' ? 'warn' : 'down';
-    if (ic.k === 'red') return 'warn';
-    if (ic.k === 'gray') return 'warn';
-    if (ic.k === 'blue') return 'up';
-    if (ic.k === 'amber') return 'pend';
+    if (ic.k === 'yellow' || ic.k === 'blue') return 'up';
     return 'warn';
   }
 
-  /* 普通告警族（橙/灰 cf 徽标）→ 小号（15px）；红严重冲突保持 18px。 */
+  /* v4：⚠橙（一切告警）→ 小号 15px；⚠红/↑黄 保持 18px。 */
   function icSm(ic) {
-    return !!ic && ic.click === 'cf' && ic.k !== 'red';
+    return !!ic && ic.k === 'orange';
   }
 
   /* mod 行 ics 容器（原型 appendRow 的 '<span class="mc-ics">' 段）：空/缺省 ics 返回 ''
-   * —— 行渲染与 v1 完全一致（快照协议向后兼容硬门槛）。v2 任务 12：w:true（停用行）→ __mc-weak。 */
+   * —— 行渲染与 v1 完全一致（快照协议向后兼容硬门槛）。v2 任务 12：w:true（停用行）→ __mc-weak。
+   * 实机修复：可点徽标（cf/upd）必须带 data-interactive——宿主页 clickThrough 白名单只收
+   * button/input/select/a/[data-interactive] 的矩形；裸 span 靠行矩形承载时实机点击到不了
+   * 徽标（v2 起的老坑，实机验证暴露：点 ⚠红 只选中行、MC_CF 不发）。无 click 纯状态徽标
+   * 不进白名单（本就不可点，cursor:default）。 */
   function icsHtml(m) {
     var ics = m && m.ics;
     if (!ics || !ics.length) return '';
@@ -518,7 +525,7 @@
       var ic = ics[i];
       if (!ic || !ic.k || !ic.tip) continue;
       h += '<span class="__mc-ic __mc-' + esc(ic.k) + (ic.w ? ' __mc-weak' : '') + (icSm(ic) ? ' __mc-sm' : '') + '" data-guid="' + esc(m.guid) + '"'
-        + (ic.click ? ' data-click="' + esc(ic.click) + '"' : '')
+        + (ic.click ? ' data-click="' + esc(ic.click) + '" data-interactive' : ' style="cursor:default"')
         + ' title="' + esc(ic.tip) + '" aria-label="' + esc(ic.tip) + '">'
         + icSvg(icIcon(ic)) + '</span>';
     }
@@ -611,8 +618,8 @@
     return { m: m, name: name, ver: ver, enabled: enabled };
   }
 
-  /* 排序行 ics：只留冲突 chip（click==="cf"：⚠红 18px / 橙告警小黄叹号），显示但无 click
-   * （裁定 4——cursor:default、不弹窗不选行）；⟳/↑/↓/⊘ 一律不显示（order 是全局意图，不挂行）。 */
+  /* 排序行 ics：只留冲突 chip（click==="cf"：⚠红 18px / ⚠橙小号），显示但无 click
+   * （裁定 4——cursor:default、不弹窗不选行）；↑/其余 ⚠ 一律不显示（order 是全局意图，不挂行）。 */
   function ordIcsHtml(info) {
     var ics = info.m && info.m.ics;
     if (!ics || !ics.length) return '';
@@ -702,14 +709,14 @@
     ST.order = ST.ordRows.def.slice();
     renderSide();
     toastRaw('\u5df2\u6062\u590d\u9ed8\u8ba4\u987a\u5e8f',
-      '\u5c1a\u672a\u4fdd\u5b58\u2014\u2014\u70b9\u300c\u4fdd\u5b58\u987a\u5e8f\u300d\u540e\u751f\u6548');
+      '\u8fd8\u6ca1\u4fdd\u5b58\uff1a\u70b9\u300c\u4fdd\u5b58\u987a\u5e8f\u300d\u624d\u751f\u6548', 'info');
   }
 
   function ordSave() {
     if (!ST.order || !ST.order.length || ST.ordSaving) return;
     ST.ordSaving = true; // 回执（OK/FAIL）前防连点
     window.__mcOutbox.push({ type: 'MC_ORDER_SAVE', guids: ST.order.slice() });
-    toastRaw('\u6b63\u5728\u4fdd\u5b58\u52a0\u8f7d\u987a\u5e8f\u2026', '');
+    toast('\u6b63\u5728\u4fdd\u5b58\u52a0\u8f7d\u987a\u5e8f\u2026', 'info');
   }
 
   function ordIndexOf(guid) {
@@ -761,7 +768,7 @@
       /* v2 任务 7：图标点击路由（原型 wireSide 同款 stopPropagation——不选行）。
        * cf=冲突详情弹窗（T11 前兜底文案）/ upd=更新确认弹窗（T8 真数据版：按 guid 对照
        * 最近 MC_REPO_DATA；无仓库数据/检查失败回退 T7 兜底壳）；
-       * 无 data-click（⟳ 纯状态，cursor:default）不弹窗不选行（点 ⟳ 无弹窗）。 */
+       * 无 data-click（纯状态，cursor:default）不弹窗不选行。 */
       var ic = e.target.closest ? e.target.closest('.__mc-ic') : null;
       if (ic) {
         e.stopPropagation();
@@ -984,11 +991,12 @@
     if (r && r.pending) {
       h += '<div class="__mc-kv"><span class="__mc-kk">\u66f4\u65b0</span>'
         + '<span style="color:#e8a33d;font-size:12px">\u27f3 \u5f85\u751f\u6548 \u00b7 \u91cd\u542f\u6e38\u620f\u540e\u5e94\u7528</span></div>';
-    } else if (r && r.remote != null && (r.status === 'update' || r.status === 'downgrade' || r.status === 'install' || r.local == null)) {
-      var isDown = r.status === 'downgrade';
+    } else if (r && r.remote != null && (r.status === 'update' || r.status === 'install' || r.local == null)) {
+      /* v4：降级入口退役（↓ 行内标记与详情按钮都撤）；v4.1 起降级态彻底不再产出
+       * （C# 只做 tag 版本比较，本地比 tag 高=静默零标记）。 */
       var isInst = r.local == null || r.status === 'install';
-      var label = isDown ? '\u964d\u7ea7\u5230 ' + r.remote : (isInst ? '\u5b89\u88c5 ' + r.remote : '\u66f4\u65b0\u5230 ' + r.remote);
-      var cls = isDown ? '__mc-btn-org' : (isInst ? '__mc-btn-blue' : '__mc-btn-pri');
+      var label = isInst ? '\u5b89\u88c5 ' + r.remote : '\u66f4\u65b0\u5230 ' + r.remote;
+      var cls = isInst ? '__mc-btn-blue' : '__mc-btn-pri';
       var ver = isInst ? '\u672a\u5b89\u88c5 \u2192 ' + r.remote : r.local + ' \u2192 ' + r.remote;
       h += '<div class="__mc-kv"><span class="__mc-kk">\u66f4\u65b0</span>'
         + '<button type="button" class="__mc-btn ' + cls + ' __mc-btn-mini" data-ract="upd" data-repo="' + esc(r.repoKey) + '">' + esc(label) + '</button>'
@@ -1064,7 +1072,7 @@
   }
 
   /* MC_UNINST_DATA 到达：占位壳换真明细 + 挂"确认卸载"钮（关弹窗并发 MC_UNINST_DO——
-   * 结果 toast/快照由 C# 回推，行内 ⟳ 与底条"卸载 X"随快照出现）。 */
+   * 结果 toast/快照由 C# 回推，底条"卸载 X"随快照出现）。 */
   function onUninstData(ev) {
     if (ST.uninstGuid == null || ev.guid !== ST.uninstGuid) return; // 非当前请求（陈旧包）
     ST.uninstGuid = null;
@@ -1153,30 +1161,35 @@
     S.cfg.innerHTML = h;
   }
 
-  /* ================= toast ================= */
+  /* ================= toast（v4：居中放大 + 彩色生效标识） ================= */
 
+  /* badge=now|reload|reboot|cfg|info|err；err=true 时强制 err 档（小行=没成功：原因）。 */
   function toast(main, badge, err, errDetail) {
     if (!S.toastEl || !S.toastEl.isConnected) return;
+    var b = err ? TOAST_T.err : (TOAST_T[badge] || TOAST_T.info);
     var small = err
-      ? '\u5199\u5165\u88ab\u62d2\u7edd' + (errDetail ? '\uff1a' + errDetail : '') + '\uff08\u8be6\u89c1 LogOutput\uff09'
-      : (TOAST_SMALL[badge] || TOAST_SMALL.reboot);
-    S.toastEl.className = '__mc-toast __mc-show' + (err ? ' __mc-err' : '');
+      ? (TOAST_T.err.t + (errDetail ? '\uff1a' + errDetail : ''))
+      : b.t;
+    S.toastEl.className = '__mc-toast __mc-show' + (b.cls ? ' ' + b.cls : '');
     S.toastEl.innerHTML = '<span>' + esc(main) + '</span><small>' + esc(small) + '</small>';
     clearTimeout(toast._h);
     toast._h = setTimeout(function () {
       if (S.toastEl) S.toastEl.className = '__mc-toast';
-    }, 2600);
+    }, b.ms);
   }
 
-  /* 任务 16：原文 toast（第三方启停两档语义 / C# MC_TOAST 残留提示）——小字直接给文案 */
-  function toastRaw(main, small) {
+  /* 原文 toast（C# MC_TOAST / 两档语义定制小字）：small 给定则覆盖标识默认文案，
+   * 配色/停留仍随 badge（badge=err 红框；缺省 info）。 */
+  function toastRaw(main, small, badge) {
     if (!S.toastEl || !S.toastEl.isConnected) return;
-    S.toastEl.className = '__mc-toast __mc-show';
-    S.toastEl.innerHTML = '<span>' + esc(main) + '</span><small>' + esc(small || '') + '</small>';
+    var b = TOAST_T[badge] || TOAST_T.info;
+    var line = small != null && small !== '' ? small : b.t;
+    S.toastEl.className = '__mc-toast __mc-show' + (b.cls ? ' ' + b.cls : '');
+    S.toastEl.innerHTML = '<span>' + esc(main) + '</span><small>' + esc(line) + '</small>';
     clearTimeout(toast._h);
     toast._h = setTimeout(function () {
       if (S.toastEl) S.toastEl.className = '__mc-toast';
-    }, 3400);
+    }, b.ms);
   }
 
   /* ================= v2 任务 7：浮层弹窗 + 底部待生效条 ================= */
@@ -1350,30 +1363,28 @@
   }
 
   /* ---- v2 任务 8：更新确认弹窗（v3 精简：版本对比一行 + 告警红字（仅异常时）+ 一句生效说明）----
-   * D7 降级红字 / D8 版本告警红字（均不拦截）；主按钮：降级=橙"降级到 X" / 安装=蓝"安装 X" /
-   * 更新=琥珀"更新到 X"。 */
+   * v4.1 作者拍板：降级全面退役（C# 不再产出 downgrade 态；本地比 release tag 高=静默，
+   * 只做 tag 版本比较，tag 大于本地才有更新）。D8 版本告警红字不拦截；主按钮：安装=蓝
+   * "安装 X" / 更新=琥珀"更新到 X"。 */
   function repoVerbOf(r) {
-    if (r.status === 'downgrade') return '\u964d\u7ea7';
     if (r.local == null || r.status === 'install') return '\u5b89\u88c5';
     return '\u66f4\u65b0';
   }
 
   function updModalRealHtml(r) {
-    var isDown = r.status === 'downgrade', isWarn = r.status === 'warn';
+    var isWarn = r.status === 'warn';
     var isInst = r.local == null || r.status === 'install';
-    var chip = isDown ? chipHtml('orange', icSvg('down')) : chipHtml('blue', icSvg('up'));
     var verb = repoVerbOf(r);
-    var h = '<h3>' + chip + verb + ' \u00b7 ' + esc(r.name) + '</h3>'
+    var h = '<h3>' + chipHtml('blue', icSvg('up')) + verb + ' \u00b7 ' + esc(r.name) + '</h3>'
       + '<div class="__mc-kv" style="padding:2px 0 0"><span class="__mc-kvv">' + esc(r.local || '\u672a\u5b89\u88c5') + '</span>'
       + '<span style="color:#6b7180">\u2192</span>'
-      + '<span class="__mc-kvv" style="color:' + (isDown ? '#fbbf24' : '#60a5fa') + ';font-size:14px">' + esc(r.remote) + '</span></div>';
-    if (isDown) h += '<div class="__mc-risk">\u26a0 \u672c\u5730 ' + esc(r.local) + ' \u6bd4\u8fdc\u7aef\u65b0\u3002\u65e7\u7248\u53ef\u80fd\u548c\u5b58\u6863\u3001\u5176\u4ed6 mod \u4e0d\u5339\u914d\uff0c\u786e\u5b9a\u8981\u964d\u7ea7\u5417\uff1f</div>';
-    else if (isWarn) h += '<div class="__mc-risk">\u26a0 ' + esc(r.why || '\u8be5\u7248\u672c\u53ef\u80fd\u4e0d\u9002\u914d\u5f53\u524d\u6e38\u620f') + '\uff0c\u6709\u95ea\u9000\u98ce\u9669\uff0c\u786e\u5b9a\u8981\u7ee7\u7eed\u5417\uff1f</div>';
+      + '<span class="__mc-kvv" style="color:#60a5fa;font-size:14px">' + esc(r.remote) + '</span></div>';
+    if (isWarn) h += '<div class="__mc-risk">\u26a0 ' + esc(r.why || '\u8be5\u7248\u672c\u53ef\u80fd\u4e0d\u9002\u914d\u5f53\u524d\u6e38\u620f') + '\uff0c\u6709\u95ea\u9000\u98ce\u9669\uff0c\u786e\u5b9a\u8981\u7ee7\u7eed\u5417\uff1f</div>';
     else if (r.kbw && r.kbwhy) h += '<div class="__mc-risk">\u26a0 ' + esc(r.kbwhy) + '\uff0c\u6709\u95ea\u9000\u98ce\u9669\uff0c\u786e\u5b9a\u8981\u7ee7\u7eed\u5417\uff1f</div>';
     if (r.verNote) h += '<div class="__mc-m-sec"><div class="__mc-m-txt" style="font-size:11px;color:#8a90a0">\u24d8 \u672a\u80fd\u6821\u9a8c\u6e38\u620f\u7248\u672c</div></div>';
     h += '<div class="__mc-m-sec"><div class="__mc-m-txt">\u4e0b\u8f7d\u5e76\u6821\u9a8c\u540e\u6682\u5b58\uff0c<b style="color:#e8e6e0">\u91cd\u542f\u6e38\u620f</b>\u65f6\u81ea\u52a8\u66ff\u6362\uff08\u4e0d\u4fdd\u7559\u65e7\u7248\uff09\u3002</div></div>'
       + '<div class="__mc-m-acts"><button type="button" class="__mc-btn __mc-btn-mini" data-mact="close">\u53d6\u6d88</button>'
-      + '<button type="button" class="__mc-btn ' + (isDown ? '__mc-btn-org' : (isInst ? '__mc-btn-blue' : '__mc-btn-pri'))
+      + '<button type="button" class="__mc-btn ' + (isInst ? '__mc-btn-blue' : '__mc-btn-pri')
       + '" data-mact="doupd" data-repo="' + esc(r.repoKey) + '">'
       + esc(verb === '\u5b89\u88c5' ? '\u5b89\u88c5 ' : verb + '\u5230 ') + esc(r.remote) + '</button></div>';
     return h;
@@ -1381,7 +1392,7 @@
 
   /* 确认后的进度态弹窗（MC_DL 就地更新，不重建弹窗；v3 精简） */
   function updModalDlHtml(r, dl) {
-    var chip = r.status === 'downgrade' ? chipHtml('orange', icSvg('down')) : chipHtml('blue', icSvg('up'));
+    var chip = chipHtml('blue', icSvg('up'));
     var st = dl ? dl.stage : 'down';
     var pct = dl && typeof dl.pct === 'number' ? dl.pct : 0;
     return '<h3>' + chip + repoVerbOf(r) + ' \u00b7 ' + esc(r.name) + '</h3>'
@@ -1404,11 +1415,11 @@
       + '<div class="__mc-m-acts"><button type="button" class="__mc-btn __mc-btn-mini" data-mact="close">\u5173\u95ed</button></div>';
   }
 
-  /* 侧栏 ↑/↓/⊘ 图标 → 确认弹窗（按 guid 对照最近 MC_REPO_DATA；v3：无数据回退 toast） */
+  /* 侧栏 ↑/⚠橙 图标 → 确认弹窗（按 guid 对照最近 MC_REPO_DATA；无数据回退 toast） */
   function openUpdModal(m) {
     var r = m ? repoRowOfGuid(m.guid) : null;
     if (r && r.remote != null && !r.pending) openRepoModal(r);
-    else toastRaw('\u6682\u65e0\u66f4\u65b0\u4fe1\u606f', '\u70b9\u53f3\u4e0a\u300c\u68c0\u67e5\u66f4\u65b0\u300d\u5148\u67e5\u4e00\u6b21');
+    else toastRaw('\u6682\u65e0\u66f4\u65b0\u4fe1\u606f', '\u5148\u70b9\u53f3\u4e0a\u300c\u68c0\u67e5\u66f4\u65b0\u300d\u67e5\u4e00\u6b21', 'info');
   }
 
   /* 仓库行/图标共用的确认弹窗：确认 → MC_UPD/MC_INST 入 outbox → 弹窗转进度态 */
@@ -1562,18 +1573,23 @@
     window.__mcOutbox.push({ type: 'MC_TOGGLE_MOD', guid: guid, enabled: m.enabled });
     var tp = isTpMod(m);
     if (tp) {
-      /* 停用两档小字（v3 精简）：软停=行为已停止；标记停用=本次仍在运行。缺席行启用同文案。 */
+      /* 停用两档（v4 白话）：软停=现在已经停了；硬停=这次还在运行；重启后都不再加载。 */
       if (m.enabled) {
-        toastRaw(m.name + ' \u5df2\u542f\u7528', '\u4e0b\u6b21\u542f\u52a8\u52a0\u8f7d');
+        toastRaw('\u5df2\u5f00\u542f\uff1a' + m.name, '\u4e0b\u6b21\u542f\u52a8\u624d\u4f1a\u52a0\u8f7d', 'reboot');
       } else {
-        toastRaw(m.name + ' \u5df2\u505c\u7528',
-          m.soft ? '\u884c\u4e3a\u5df2\u505c\u6b62 \u00b7 \u4e0b\u6b21\u542f\u52a8\u4e0d\u518d\u52a0\u8f7d'
-                 : '\u672c\u6b21\u4ecd\u5728\u8fd0\u884c \u00b7 \u4e0b\u6b21\u542f\u52a8\u4e0d\u518d\u52a0\u8f7d');
+        toastRaw('\u5df2\u505c\u7528\uff1a' + m.name,
+          m.soft ? '\u73b0\u5728\u5df2\u7ecf\u505c\u4e86 \u00b7 \u91cd\u542f\u540e\u4e0d\u518d\u52a0\u8f7d'
+                 : '\u8fd9\u6b21\u8fd8\u5728\u8fd0\u884c \u00b7 \u91cd\u542f\u540e\u4e0d\u518d\u52a0\u8f7d',
+          m.soft ? 'now' : 'reboot');
       }
       return;
     }
-    toastRaw(m.name + (m.enabled ? ' \u5df2\u542f\u7528' : ' \u5df2\u505c\u7528'),
-      m.enabled ? '\u5df2\u751f\u6548' : '\u5df2\u8fd8\u539f \u00b7 \u4e0b\u6b21\u542f\u52a8\u4e0d\u518d\u52a0\u8f7d');
+    /* 套件启停：cfg 即时生效（行为当拍停止/恢复），已挂补丁重启后才彻底下线 */
+    if (m.enabled) {
+      toastRaw('\u5df2\u5f00\u542f\uff1a' + m.name, '\u5df2\u7ecf\u751f\u6548', 'now');
+    } else {
+      toastRaw('\u5df2\u505c\u7528\uff1a' + m.name, '\u884c\u4e3a\u5df2\u505c \u00b7 \u91cd\u542f\u540e\u5f7b\u5e95\u4e0b\u7ebf', 'now');
+    }
   }
 
   /* ================= 右区交互 ================= */
@@ -1615,7 +1631,7 @@
         sw.className = '__mc-mini-sw __mc-big' + (it.v ? ' __mc-on' : '');
         sw.setAttribute('aria-checked', String(!!it.v));
         sendSet(m, it, it.v);
-        toast(m.name + ' \u00b7 ' + it.l + ' \u2192 ' + (it.v ? '\u5f00' : '\u5173'), it.b);
+        toast('\u5df2\u4fdd\u5b58\uff1a' + m.name + ' \u00b7 ' + it.l + ' = ' + (it.v ? '\u5f00' : '\u5173'), it.b);
         return;
       }
       /* 覆盖清单：新增 */
@@ -1628,7 +1644,7 @@
           m.ovr.push({ id: id, ms: 1000 });
           renderCfg();
           ovrCommit(m);
-          toast(m.name + ' \u00b7 \u65b0\u589e\u8986\u76d6 #' + id + '\uff08\u9ed8\u8ba4 1000ms\uff09', 'now');
+          toast('\u5df2\u6dfb\u52a0\uff1a' + m.name + ' \u00b7 \u8986\u76d6 #' + id, 'now');
         }
         return;
       }
@@ -1642,7 +1658,7 @@
           m.ovr.splice(idx, 1);
           renderCfg();
           ovrCommit(m);
-          toast(m.name + ' \u00b7 \u5df2\u5220\u9664\u8986\u76d6 #' + gone, 'now');
+          toast('\u5df2\u5220\u9664\uff1a' + m.name + ' \u00b7 \u8986\u76d6 #' + gone, 'now');
         }
         return;
       }
@@ -1656,7 +1672,7 @@
           m.bagOvr.push({ id: bid, w: 16, h: 12 });
           renderCfg();
           bovCommit(m);
-          toast(m.name + ' \u00b7 \u65b0\u589e\u67dc\u5b50 #' + bid + '\uff08\u9ed8\u8ba4 16x12\uff0c\u4f18\u5148\u7ea7\u6700\u9ad8\uff09', 'now');
+          toast('\u5df2\u6dfb\u52a0\uff1a' + m.name + ' \u00b7 \u67dc\u5b50 #' + bid + '\uff0816x12\uff0c\u53ef\u518d\u6539\uff09', 'now');
         }
         return;
       }
@@ -1670,7 +1686,7 @@
           m.bagOvr.splice(bidx, 1);
           renderCfg();
           bovCommit(m);
-          toast(m.name + ' \u00b7 \u5df2\u5220\u9664\u67dc\u5b50 #' + bgone + '\uff08\u56de\u843d\u5230\u4e13\u5c5e/\u901a\u7528\uff09', 'now');
+          toast('\u5df2\u5220\u9664\uff1a' + m.name + ' \u00b7 \u67dc\u5b50 #' + bgone, 'now');
         }
       }
     });
@@ -1706,7 +1722,7 @@
           if (ckEl) ckEl.textContent = OVR_SECTION + '.' + OVR_KEY + ' \u00b7 ' + o.id + ':' + o.ms;
         }
         throttleSend('ovr' + el.getAttribute('data-idx'), function () { ovrCommit(m); });
-        toast(m.name + ' \u00b7 \u8986\u76d6 #' + o.id + ' \u2192 ' + o.ms + 'ms', 'now');
+        toast('\u5df2\u4fdd\u5b58\uff1a' + m.name + ' \u00b7 \u8986\u76d6 #' + o.id + ' = ' + o.ms + 'ms', 'now');
         return;
       }
       /* T20 个性化柜子清单：宽/高纯文本框（int 清洗已在上；0..40/0..30 钳制） */
@@ -1726,7 +1742,7 @@
         }
         if (String(bv) !== el.value) el.value = String(bv); // 钳制值回写显示
         throttleSend('bov' + el.getAttribute('data-idx') + bk, function () { bovCommit(m); });
-        toast(m.name + ' \u00b7 \u67dc\u5b50 #' + bo.id + ' ' + (bk === 'w' ? '\u5bbd' : '\u9ad8') + ' \u2192 ' + bv, 'now');
+        toast('\u5df2\u4fdd\u5b58\uff1a' + m.name + ' \u00b7 \u67dc\u5b50 #' + bo.id + ' ' + (bk === 'w' ? '\u5bbd' : '\u9ad8') + ' = ' + bv, 'now');
         return;
       }
       if (act !== 'set') return;
@@ -1741,7 +1757,7 @@
       it.v = v;
       syncSibling(el, v);
       throttleSend('g' + el.getAttribute('data-g') + 'i' + el.getAttribute('data-i'), function () { sendSet(m, it, it.v); });
-      toast(m.name + ' \u00b7 ' + it.l + ' \u2192 ' + fmt(v), it.b);
+      toast('\u5df2\u4fdd\u5b58\uff1a' + m.name + ' \u00b7 ' + it.l + ' = ' + fmt(v), it.b);
     });
 
     cfg.addEventListener('change', function (e) {
@@ -1756,7 +1772,7 @@
       if (el.tagName === 'SELECT') {
         it.v = el.value;
         sendSet(m, it, it.v);
-        toast(m.name + ' \u00b7 ' + it.l + ' \u2192 ' + el.value, it.b);
+        toast('\u5df2\u4fdd\u5b58\uff1a' + m.name + ' \u00b7 ' + it.l + ' = ' + el.value, it.b);
       } else if (el.getAttribute('data-num')) {
         // T20 numbox（纯文本数值框）：提交时归位显示值（input 阶段已按钳制值发送）
         el.value = fmt(it.v);
@@ -1764,7 +1780,7 @@
         // 任务 14：str 文本框——change（失焦/回车）提交整串，不在逐键 input 发送
         it.v = el.value;
         sendSet(m, it, it.v);
-        toast(m.name + ' \u00b7 ' + it.l + ' \u2192 ' + el.value, it.b);
+        toast('\u5df2\u4fdd\u5b58\uff1a' + m.name + ' \u00b7 ' + it.l + ' = ' + el.value, it.b);
       }
     });
   }
@@ -1808,12 +1824,12 @@
   window.__mcEvent = function (event) {
     window.__mcLastEvent = event;
     if (event && event.type === 'MC_SET_FAIL') {
-      toast('\u2715 ' + (event.k || '?'), null, true, event.err);
+      toast('\u4fdd\u5b58\u5931\u8d25\uff1a' + (event.k || '?'), null, true, event.err);
     }
     /* MC_SET_OK 不二次 toast：改值瞬间已按徽标 toast，OK 回执仅落 __mcLastEvent 供断言 */
-    /* 任务 16：C# 推送的原文 toast（强杀残留提示一轮；MC_OPEN 后紧跟到达） */
+    /* C# 推送 toast（v4：带 badge 生效标识；small 给定则作小行，配色/停留随 badge） */
     if (event && event.type === 'MC_TOAST') {
-      toastRaw(event.main || '', event.small || '');
+      toastRaw(event.main || '', event.small || '', event.badge);
       /* v2 任务 10：卸载明细等待期间到达的 toast = C# 拒绝路径（如"不在链上"）——撤掉
        * 等待壳，避免 5s 后显示误导性的"明细读取超时"。 */
       if (ST.uninstGuid != null) {
@@ -1843,14 +1859,14 @@
         if (chkTimer != null) { clearTimeout(chkTimer); chkTimer = null; }
         setChkBusy(false);
         if (event.failAll) {
-          toastRaw('\u68c0\u67e5\u5931\u8d25\uff0c\u7a0d\u540e\u518d\u8bd5', '');
+          toast('\u68c0\u67e5\u5931\u8d25', 'info', true, '\u7f51\u7edc\u6216\u4ed3\u5e93\u95ee\u9898\uff0c\u7a0d\u540e\u518d\u8bd5');
         } else if (!event.rateLimited) {
           var c = repoCounts(), parts = [];
           if (c.upd) parts.push(c.upd + ' \u4e2a\u53ef\u66f4\u65b0');
           if (c.inst) parts.push(c.inst + ' \u4e2a\u53ef\u5b89\u88c5');
           if (c.warn) parts.push(c.warn + ' \u4e2a\u7248\u672c\u5f85\u786e\u8ba4');
           toastRaw(parts.length ? '\u68c0\u67e5\u5b8c\u6210\uff1a' + parts.join('\u3001') : '\u68c0\u67e5\u5b8c\u6210\uff1a\u90fd\u662f\u6700\u65b0\u7248',
-            parts.length ? '\u5217\u8868\u91cc\u5df2\u7528\u56fe\u6807\u6807\u51fa\uff0c\u70b9\u56fe\u6807\u6216\u8fdb\u8be6\u60c5\u5904\u7406' : '');
+            parts.length ? '\u5217\u8868\u91cc\u5df2\u7528\u56fe\u6807\u6807\u51fa\uff0c\u70b9\u56fe\u6807\u5c31\u80fd\u5347\u7ea7' : '', 'info');
         }
       }
     }
@@ -1867,7 +1883,7 @@
       ST.scanWait = false;
       renderPatchBtn();
       if (ST.patchOpen) { setModal(patchModalHtml()); bindPatchModal(); }
-      if (wasWait) toastRaw(event.error ? '\u626b\u63cf\u5931\u8d25' : ('\u626b\u63cf\u5b8c\u6210\uff1a\u78b0\u649e ' + (event.total || 0) + ' \u5904'), '');
+      if (wasWait) toastRaw(event.error ? '\u626b\u63cf\u5931\u8d25' : ('\u626b\u63cf\u5b8c\u6210\uff1a\u78b0\u649e ' + (event.total || 0) + ' \u5904'), '', event.error ? 'err' : 'info');
     }
     /* v2 任务 9：排序数据（MC_ORDER_DATA：guids=生效序 / rows=显示元数据 / def=默认序）。
      * 面板开着且在排序模式才重绘；数据本体存 ST.ordRows（重进排序模式前可参照）。 */
@@ -1880,13 +1896,13 @@
     if (event && event.type === 'MC_ORDER_OK') {
       ST.ordSaving = false;
       if (ST.ord) { ST.ord = false; ST.order = null; renderSide(); renderCfg(); }
-      toastRaw('\u987a\u5e8f\u5df2\u4fdd\u5b58', '\u91cd\u542f\u6e38\u620f\u540e\u751f\u6548');
+      toast('\u5df2\u4fdd\u5b58\u52a0\u8f7d\u987a\u5e8f', 'reboot');
     }
     /* v2 任务 9：整单拒绝（校验失败）——留在排序模式，本地调整不丢可重试 */
     if (event && event.type === 'MC_ORDER_FAIL') {
       ST.ordSaving = false;
-      toastRaw('\u4fdd\u5b58\u987a\u5e8f\u88ab\u62d2\u7edd',
-        (event.err || '\u6821\u9a8c\u5931\u8d25') + '\uff08\u8be6\u89c1 LogOutput\uff09\uff1b\u672a\u5199\u5165\uff0c\u53ef\u91cd\u8bd5');
+      toast('\u4fdd\u5b58\u52a0\u8f7d\u987a\u5e8f\u6ca1\u6210\u529f', 'info', true,
+        (event.err || '\u6821\u9a8c\u5931\u8d25') + '\uff0c\u53ef\u91cd\u8bd5\uff08\u8be6\u89c1 LogOutput\uff09');
     }
   };
 

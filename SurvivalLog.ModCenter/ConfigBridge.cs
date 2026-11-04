@@ -23,12 +23,12 @@ namespace SurvivalLog.ModCenter;
 /// __mcEvent MC_SET_OK；MC_TOGGLE_MOD→回新快照）/ Save 防抖（首写 SaveOnConfigSet=false，
 /// 3s 节流 + MC_CLOSE 立即落盘后恢复原值）。
 /// v2 生命周期任务 7：待生效清单汇总——BuildSnapshot 前主线程读 pending.json（mtime 节流），
-/// 归属到的 mod 行挂 ics ⟳ 徽标；Pump 每 2s 巡检，摘要变化推 MC_PENDING_SUMMARY（底部待生效条）。
+/// v4：行内 ⟳ 徽标退役，待生效只经底条呈现；Pump 每 2s 巡检，摘要变化推 MC_PENDING_SUMMARY。
 /// v2 生命周期任务 8：更新链——MC_REPO_GET{force}（打开自动查：15 分钟会话缓存）/ MC_CHK
 /// （手动刷新：60 秒冷却）→ 后台 12 仓 fetch + RepoDecision.Build（主线程收割推 MC_REPO_DATA +
-/// 快照侧栏 ↑/↓/⊘ 徽标）；MC_UPD/MC_INST 确认后走**串行**下载链（后台：下载（进度
+/// 快照侧栏 ↑黄/⚠橙 徽标）；MC_UPD/MC_INST 确认后走**串行**下载链（后台：下载（进度
 /// 250ms 节流推 MC_DL）→ zip MD5 对 update.json → 解包 BepInEx/plugins/*.dll 暂存 → 主线程
-/// PendingWriter.AddUpdate）→ 快照刷新（行内 ⟳ 出现、↑/↓ 消失）。GitHub 匿名 60 次/h：一轮
+/// PendingWriter.AddUpdate）→ 快照刷新（可动作徽标消失、底条出现该项）。GitHub 匿名 60 次/h：一轮
 /// 12 次，绝不后台轮询。
 /// v2 生命周期任务 9：加载排序模式——MC_ORDER_GET（组装生效序：pending.order 命中项按序
 /// 前置 + 其余 GUID 字母序，与清理器 OrderReorder 语义一致）→ 推 MC_ORDER_DATA
@@ -44,7 +44,7 @@ namespace SurvivalLog.ModCenter;
 /// marker 清除（在链上第三方走 DllDisabler.Enable；缺席行不动 marker——终审必修 2：防
 /// marker=false+.disabled 被清理器翻成 enable 复活）+ 排序记录移除 +
 /// FlushDirty（强杀免疫：意图即时原子落盘）+ 快照/摘要/仓库数据刷新。带出：RepoPendingGuids
-/// 扩含 delete（卸载意图吃掉 ↑/↓ 徽标）；HandleOrderSave 体内兜底异常→MC_ORDER_FAIL（防保存钮
+/// 扩含 delete（卸载意图吃掉 ↑黄/⚠橙 可动作徽标）；HandleOrderSave 体内兜底异常→MC_ORDER_FAIL（防保存钮
 /// 在途卡死）；待生效条 order 覆盖档分"已保存未重启/生效中"（首拍 order 有效序相同或
 /// pending.json mtime 早于本进程启动 = 本靴已应用 → 中性标签不计入计数）。
 /// v2 生命周期任务 11：冲突体检 L1/L3——BuildSnapshot 时把 Chainloader 插件投影为 CfRow
@@ -68,7 +68,7 @@ internal static class ConfigBridge
     private static float _dirtyAge = -1f; // -1 = 空闲
     private const float FlushInterval = 3f;
 
-    // ---- v2 任务 7：待生效清单（pending.json）汇总——行内 ⟳ + 底部待生效条数据 ----
+    // ---- v2 任务 7：待生效清单（pending.json）汇总——底部待生效条数据（v4：行内 ⟳ 退役） ----
     // 全部主线程（Pump/BuildSnapshot 上下文）；mtime 节流读（Pump 每 2s 查一次，
     // 变了才重读），BuildSnapshot 前强制重读一次（MC_OPEN/MC_TOGGLE 均走快照）。
     private static List<McPending.Op> _pendOps = new();
@@ -123,11 +123,10 @@ internal static class ConfigBridge
     // ============ 对外契约（任务 7/13/14 消费） ============
 
     /// <summary>全量快照：{self:{ver}, mods:[ModInfo], tp:[ModInfo]}（tp=第三方 Tier 0 通用页，任务 14）。
-    /// v2 任务 7：快照前强制重读 pending.json，归属到的 mod 行挂 ⟳ 待生效徽标（ics:[{k:"amber",tip}]）。</summary>
+    /// v4：行内 ⟳ 待生效徽标退役——待生效只在底条汇总呈现（快照不再带 amber ics）。</summary>
     internal static Snapshot BuildSnapshot()
     {
         RefreshPending(true);
-        var pendByRow = PendingTipsByRow(); // guid（小写）→ 行内 ⟳ tip
         var repoPend = RepoPendingGuids();  // v2 任务 8：有待生效 install/replace 意图的 guid（仓库行/侧栏徽标判定）
         var cfRows = InstalledCfRows();     // v2 任务 11：冲突体检投影（一次枚举 Plugins，全行复用）
         var snap = new Snapshot
@@ -159,20 +158,20 @@ internal static class ConfigBridge
             }
             if (mm.OvrHost != null) mi.Ovr = ReadOvr(cfg, mm.OvrHost);
             if (mm.BagOvrHost != null) mi.BagOvr = ReadBagOvr(cfg, mm.BagOvrHost);
-            // v2 任务 11：冲突徽标置最前（L1 红/灰 + L3 同域灰；点击 cf 拉详情弹窗）
-            // v2 任务 12：L2 碰撞橙标插在 L1 与 L3 之间（同 cf 弹窗复用）；停用行徽标弱化（M7）
-            // v2 任务 8：随后仓库态（↑蓝可更新/↓橙可降级/↑+⊘版本告警，点击 upd 弹确认窗）
-            // + 待生效 ⟳（T7）。已有待生效意图的行不再给可动作徽标（裁定 3：⟳ 出现、↑/↓ 消失）。
+            // v4 三标记（作者拍板）：⚠红=确定不可用（L1 严重冲突）、⚠橙=其余一切告警
+            // （L2 碰撞/L3 叠加/版本不符）、↑黄=仅有新版本；↓/⊘/⟳/蓝 退役（待生效只留底条）。
+            // 未安装（dll 不在场）实机反馈修正：不挂 ⚠红——主动卸载不是故障，行内锁定开关
+            // 已表达；红标只留给真冲突（冲突/仓库态对未加载插件本就无意义）。
+            // 已有待生效意图的行不再给可动作徽标（裁定 3 语义保留，只是不再补 ⟳）。
+            // v2 任务 11：冲突徽标置最前；任务 12：L2 碰撞插其间（同 cf 弹窗）；停用行弱化（M7）
             var ics = CfIcsFor(cfRows, mm.Guid);
             if (!mi.Enabled) WeakenCfIcs(ics); // T11 M7：套件停用（General.Enabled=false）→ cf 徽标弱化+tip 前缀
             var repoIcs = RepoIcsOf(mm.Guid, repoPend);
             if (repoIcs != null) ics.AddRange(repoIcs);
-            if (pendByRow.TryGetValue(mm.Guid, out var pendTip))
-                ics.Add(new IcInfo { K = "amber", Tip = pendTip }); // ⟳ 纯状态（无 click）
             if (ics.Count > 0) mi.Ics = ics;
             snap.Mods.Add(mi);
         }
-        BuildTp(snap, pendByRow, cfRows); // 任务 14：Tier 0 第三方通用页
+        BuildTp(snap, cfRows); // 任务 14：Tier 0 第三方通用页
         return snap;
     }
 
@@ -386,7 +385,7 @@ internal static class ConfigBridge
     /// （section 分组沿用对方 cfg 节名；徽标一律 cfg；Description→note）；无 entry →
     /// 仅启停形态（空 groups + desc 说明，同灾前加速页）。按 Name 排序稳定输出。
     /// </summary>
-    private static void BuildTp(Snapshot snap, Dictionary<string, string> pendByRow, List<CfRow> cfRows)
+    private static void BuildTp(Snapshot snap, List<CfRow> cfRows)
     {
         Dictionary<string, PluginInfo> plugins = null;
         try { plugins = IL2CPPChainloader.Instance?.Plugins; } catch { }
@@ -401,7 +400,7 @@ internal static class ConfigBridge
                 var md = info?.Metadata;
                 if (md == null || string.IsNullOrEmpty(md.GUID) || info.Instance == null) continue;
                 if (TpExempt(md.GUID, md.Name)) continue;
-                snap.Tp.Add(BuildTpMod(info, pendByRow, cfRows));
+                snap.Tp.Add(BuildTpMod(info, cfRows));
             }
             catch (Exception e) { Log("warn tp 构建跳过 " + (info?.Metadata?.GUID ?? "?") + ": " + e.Message); }
         }
@@ -449,7 +448,7 @@ internal static class ConfigBridge
     /// 任务 16：启停真值源=DllDisabler [DisabledTp] marker 取反（下次启动由启动清理器改名不加载，T4）；
     /// Tier 2 软停能力标记（约定类型在场或清单 softDisable）与 QueryStates 状态回报随后合入。
     /// </summary>
-    private static ModInfo BuildTpMod(BepInEx.PluginInfo info, Dictionary<string, string> pendByRow, List<CfRow> cfRows)
+    private static ModInfo BuildTpMod(BepInEx.PluginInfo info, List<CfRow> cfRows)
     {
         var md = info.Metadata;
         var dllRel = DllDisabler.DllRelOf(info);
@@ -461,14 +460,10 @@ internal static class ConfigBridge
             Enabled = dllRel == null || !DllDisabler.MarkerOf(dllRel), // 任务 16：[DisabledTp] marker 取反
             Desc = "第三方 mod（Tier 0 自动识别）：通用页由其 cfg 自动生成；写入即触发其 SettingChanged，生效视该 mod。",
         };
-        // v2 任务 11：冲突徽标（L1 命中=红/灰；L3 同域=灰）——GUID 优先、dll 名兜底在 CfRows 内解析
+        // v2 任务 11：冲突徽标（L1 红/橙）——GUID 优先、dll 名兜底在 CfRows 内解析
+        // v4：⟳ 待生效徽标退役（底条汇总保留），tp 行只挂冲突/告警族
         var cfIcs = CfIcsFor(cfRows, md.GUID);
         if (cfIcs.Count > 0) mi.Ics = cfIcs;
-        if (pendByRow.TryGetValue(md.GUID, out var pendTip)) // v2 任务 7：GUID 命名 cfg 意图归属到 tp 行
-        {
-            mi.Ics ??= new List<IcInfo>();
-            mi.Ics.Add(new IcInfo { K = "amber", Tip = pendTip });
-        }
         ConfigFile cfg = null;
         try { if (info.Instance is BasePlugin bp) cfg = bp.Config; } catch { }
 
@@ -714,7 +709,7 @@ internal static class ConfigBridge
         catch { return false; }
     }
 
-    // ============ 待生效清单汇总（v2 任务 7：行内 ⟳ + MC_PENDING_SUMMARY 推送） ============
+    // ============ 待生效清单汇总（v2 任务 7：MC_PENDING_SUMMARY 推送；v4 行内 ⟳ 退役） ============
 
     /// <summary>读 pending.json 到 <see cref="_pendOps"/>（主线程）。force=true 无条件读（BuildSnapshot 前）；
     /// 否则 mtime 未变跳过（Pump 2s 节拍）。文件不存在=空清单（stamp 0）；坏文件按空清单展示并 Warn。</summary>
@@ -788,7 +783,7 @@ internal static class ConfigBridge
             };
             if (verb != null && !g.Verbs.Contains(verb)) g.Verbs.Add(verb);
         }
-        // v2 任务 9：order 覆盖档——RowKey=null（全局非单 mod：行内 ⟳ 永不挂行，底部条承载）；
+        // v2 任务 9：order 覆盖档——RowKey=null（全局非单 mod：不挂行，底部条承载）；
         // order==默认序（GUID 字母序）不进摘要——"恢复默认存字母序"与删除 order 字段等效（裁定 1/5）。
         // v2 任务 10（T9 改进项）：覆盖在场但本靴已应用（首拍有效序相同，或 pending.json mtime
         // 早于本进程启动）→ 挂中性标签"自定义加载序生效中"（不计入待生效计数，面板弱化样式）；
@@ -862,7 +857,7 @@ internal static class ConfigBridge
         return res;
     }
 
-    /// <summary>组标签（底部待生效条 + 行内 ⟳ tip 复用）：动词+名（多动词按既定序 "、" 连接）。</summary>
+    /// <summary>组标签（底部待生效条呈现）：动词+名（多动词按既定序 "、" 连接）。</summary>
     private static string PendLabel(PendGroup g)
     {
         if (g.FixedLabel != null) return g.FixedLabel; // v2 任务 9：order 整档固定标签
@@ -933,16 +928,6 @@ internal static class ConfigBridge
         return ix > 0 ? n.Substring(0, ix) : n;
     }
 
-    /// <summary>guid（任意大小写）→ 行内 ⟳ tip（v3 固定一句；明细在底部待生效条）。</summary>
-    private static Dictionary<string, string> PendingTipsByRow()
-    {
-        var map = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
-        foreach (var g in PendGroups())
-            if (g.RowKey != null)
-                map[g.RowKey] = "待生效：重启游戏后应用";
-        return map;
-    }
-
     /// <summary>摘要签名（条数+标签串）——变化才推送。含中性档（"生效中"↔"加载顺序调整"切换
     /// 也是摘要变化，须触发推送）。</summary>
     private static string PendingSig()
@@ -979,7 +964,7 @@ internal static class ConfigBridge
     /// <summary>
     /// MC_PENDING_UNDO（v2 任务 13）：撤销全部待生效操作——pending.json 整体移除（ops 清空；
     /// **order 一并清空**，裁定=撤销语义包含本会话刚保存的加载顺序，"回到默认序"与删除 order
-    /// 字段等效，见 T9 裁定 1/5）。随后强制重读 + 同拍推新快照与摘要（行内 ⟳ / 底条一起消失）。
+    /// 字段等效，见 T9 裁定 1/5）。随后强制重读 + 同拍推新快照与摘要（底条一起消失）。
     /// 删除失败只 toast 报错、不清空内存态（不假装成功）；幂等（文件不在场=成功）。
     /// 暂存（staging）不做运行期清理：下次启动清理器的目录 sweep（Ruling 12）回收，避免运行期
     /// 与后台下载链抢文件。
@@ -1001,16 +986,14 @@ internal static class ConfigBridge
         catch (Exception e)
         {
             Log("warn 撤销待生效失败: " + e.Message);
-            PushEvent("{\"type\":\"MC_TOAST\",\"main\":" + JsonW.Str("撤销失败")
-                + ",\"small\":" + JsonW.Str("pending.json 无法删除：" + e.Message) + "}");
+            McToast("撤销没成功", "err", "原因：" + e.Message);
             return;
         }
         RefreshPending(true); // 内存态对齐磁盘（文件已不在=空清单/空 order）
         _pendSig = PendingSig();
-        PushRender(BuildSnapshot().ToJson()); // 行内 ⟳ 同拍消失（BuildSnapshot 内部再强制重读）
+        PushRender(BuildSnapshot().ToJson()); // 待生效徽标同拍消失（BuildSnapshot 内部再强制重读）
         PushPendingSummary();                 // 底条隐藏（n=0 且无 applied）
-        PushEvent("{\"type\":\"MC_TOAST\",\"main\":" + JsonW.Str("已撤销待生效操作")
-            + ",\"small\":" + JsonW.Str("加载顺序也恢复默认") + "}"); // v3 精简（spec §5.4）
+        McToast("已撤销全部待生效操作", "now", "什么都没变；加载顺序也恢复默认");
     }
 
     /// <summary>
@@ -1026,28 +1009,25 @@ internal static class ConfigBridge
         if (_restartRequested)
         {
             // 连点/双发：等待链已拉起，不再起第二条（防退出后 Steam 被拉两次）
-            PushEvent("{\"type\":\"MC_TOAST\",\"main\":" + JsonW.Str("重启已请求")
-                + ",\"small\":" + JsonW.Str("分离进程已在等待本进程退出；游戏随后自动关闭并由 Steam 重开") + "}");
+            McToast("已经在重启了", "info", "游戏马上会自己关掉，再由 Steam 自动打开");
             return;
         }
         try { FlushDirty(); }
         catch (Exception e) { Log("warn 一键重启：前置落盘异常: " + e.Message); }
         if (!RestartHelper.Request())
         {
-            PushEvent("{\"type\":\"MC_TOAST\",\"main\":" + JsonW.Str("无法请求重启")
-                + ",\"small\":" + JsonW.Str("分离进程拉起失败（PowerShell 不可用？）——请手动退出游戏后重新启动") + "}");
+            McToast("没法自动重启", "err", "请自己退出游戏，再重新打开");
             return;
         }
         _restartRequested = true;
         _restartQuitAge = 0f;
-        PushEvent("{\"type\":\"MC_TOAST\",\"main\":" + JsonW.Str("正在重启游戏…")
-            + ",\"small\":" + JsonW.Str("本进程退出后经 Steam 自动重拉") + "}"); // v3 精简（spec §5.4）
+        McToast("正在重启游戏…", "info", "游戏会自己关掉，Steam 会自动再打开");
     }
 
     // ============ 套件仓库页（v2 任务 8：拉取/检查节流 + 下载确认链） ============
 
     /// <summary>guid → 待生效 install/replace/delete 意图集合（小写 guid；仓库行/侧栏徽标与动作闸共用）。
-    /// v2 任务 10（T8 带出）：delete 类 op（卸载意图）同样进集合——待卸载的行 ⟳ 挂上、↑/↓ 徽标
+    /// v2 任务 10（T8 带出）：delete 类 op（卸载意图）同样进集合——待卸载的行 ↑黄/⚠橙 徽标
     /// 被吃掉（裁定 3 同款语义）、仓库行动作被闸（已要删的 mod 不该再更新）。</summary>
     private static HashSet<string> RepoPendingGuids()
     {
@@ -1062,9 +1042,10 @@ internal static class ConfigBridge
         return set;
     }
 
-    /// <summary>侧栏仓库态徽标（↑/↓/⊘；BuildSnapshot 消费）。无远端（未查/检查失败）或已有
-    /// 待生效意图的行返回 null（后者只显 ⟳）。⊘ 与 ↓ 同为 orange+upd，G="kbw" 消歧。
-    /// v3：tip 逐字精简（spec §5.3）；kbw 不符的 Ok/Downgrade 行仍挂 ⊘（D8 不拦截）。</summary>
+    /// <summary>侧栏仓库态徽标（v4 三标记；BuildSnapshot 消费）。无远端（未查/检查失败）或已有
+    /// 待生效意图的行返回 null。归级：Update/Warn → ↑黄（有新版本）；Warn/Kbw → 再挂 ⚠橙
+    /// （版本告警）；Ok+Kbw（同版本但 gamekb 不符）→ ⚠橙；其余（含本地比远端新，v4.1 起静默）
+    /// 零标记。</summary>
     private static List<IcInfo> RepoIcsOf(string guid, HashSet<string> repoPend)
     {
         if (_repoRows == null) return null;
@@ -1077,32 +1058,36 @@ internal static class ConfigBridge
         switch (row.State)
         {
             case RepoState.Update:
-                ics.Add(new IcInfo { K = "blue", Tip = $"可更新：{row.Local} → {row.Remote}", Click = "upd" });
-                break;
-            case RepoState.Downgrade:
-                ics.Add(new IcInfo { K = "orange", Tip = $"可降级：本地 {row.Local} 比远端 {row.Remote} 新", Click = "upd" });
-                if (row.Kbw) ics.Add(KbIc(row));
+                ics.Add(UpIc());
                 break;
             case RepoState.Warn:
-                ics.Add(new IcInfo { K = "blue", Tip = $"可更新：{row.Local} → {row.Remote}", Click = "upd" });
-                ics.Add(new IcInfo { K = "orange", Tip = "可能不适配当前游戏版本", Click = "upd", G = "kbw" });
+                ics.Add(UpIc());
+                ics.Add(KbIc()); // 有更新 + 新版可能不适配：↑黄 + ⚠橙 并挂
                 break;
             case RepoState.Ok:
-                if (row.Kbw) ics.Add(KbIc(row)); // 同版本但 gamekb 不符：行内仍给 ⊘
+                if (row.Kbw) ics.Add(KbIc()); // 同版本但 gamekb 不符：行内仍给 ⚠橙
                 break;
             default:
-                break; // Install=未装（侧栏本就无此行）
+                break; // Install=未装（侧栏行内零徽标，维护区按钮承载）
         }
         return ics.Count > 0 ? ics : null;
     }
 
-    /// <summary>D8 ⊘ 徽标（橙 + ⊘ 字形消歧；点击走更新确认窗，D8 红字在弹窗）。</summary>
-    private static IcInfo KbIc(RepoRow row) => new()
+    /// <summary>↑黄 徽标（仅有新版本；点击走更新确认窗，版本对比在弹窗）。</summary>
+    private static IcInfo UpIc() => new()
+    {
+        K = "yellow",
+        Tip = "有新版本，点击升级",
+        Click = "upd",
+    };
+
+    /// <summary>⚠橙 版本告警徽标（点击走更新确认窗，风险红字在弹窗）。
+    /// 同版本 Ok+Kbw 态 = 现装版本可能不适配（更新到同版本可修复）；Warn 态 = 新版可能不适配。</summary>
+    private static IcInfo KbIc() => new()
     {
         K = "orange",
-        Tip = "可能不适配当前游戏版本",
+        Tip = "可能不支持当前游戏版本，点击修复",
         Click = "upd",
-        G = "kbw",
     };
 
     /// <summary>MC_REPO_GET{force}（仓库视图打开拉取）/ MC_CHK（手动"检查更新"）共用入口。
@@ -1122,7 +1107,7 @@ internal static class ConfigBridge
                 if (!RepoAllFailed())
                 {
                     PushRepoData();
-                    PushEvent("{\"type\":\"MC_TOAST\",\"main\":" + JsonW.Str("刚检查过，稍后再试") + "}");
+                    McToast("检查太频繁", "err", "等 1 分钟再点");
                     return;
                 }
             }
@@ -1185,20 +1170,17 @@ internal static class ConfigBridge
     {
         if (_repoChain)
         {
-            PushEvent("{\"type\":\"MC_TOAST\",\"main\":" + JsonW.Str("已有下载在进行")
-                + ",\"small\":" + JsonW.Str("一次只处理一个，完成后再试") + "}"); // v3 精简
+            McToast("已有下载在进行", "info", "一次只处理一个，下完再点");
             return;
         }
         if (_repoFetching)
         {
-            PushEvent("{\"type\":\"MC_TOAST\",\"main\":" + JsonW.Str("正在检查更新")
-                + ",\"small\":" + JsonW.Str("检查完成后即可更新") + "}");
+            McToast("正在检查更新", "info", "查完就能更新");
             return;
         }
         if (_repoRows == null)
         {
-            PushEvent("{\"type\":\"MC_TOAST\",\"main\":" + JsonW.Str("尚未检查更新")
-                + ",\"small\":" + JsonW.Str("先点\"检查更新\"获取仓库版本") + "}");
+            McToast("还没检查过更新", "info", "先点「检查更新」");
             return;
         }
         var pend = RepoPendingGuids();
@@ -1210,8 +1192,7 @@ internal static class ConfigBridge
             if (row == null) { Log("repo upd 拒绝：未知仓键 " + repoKey); return; }
             if (!RepoActionable(row, pend, out var why))
             {
-                PushEvent("{\"type\":\"MC_TOAST\",\"main\":" + JsonW.Str(row.Name + " 当前无可执行动作")
-                    + ",\"small\":" + JsonW.Str(why) + "}");
+                McToast(row.Name + "：现在没有可做的", "info", why);
                 return;
             }
             targets = new List<RepoRow> { row };
@@ -1226,15 +1207,21 @@ internal static class ConfigBridge
         System.Threading.Tasks.Task.Run(() => RunRepoChainAsync(jobs));
     }
 
-    /// <summary>行可动作判定：fetch 成功（Remote/信息在）且无待生效意图。Update/Downgrade/Warn/Install
-    /// 为常规动作；Ok 同版本也放行（仅覆盖 ⊘ 告警行的"更新到同版本"确认路径；v3：独立
-    /// "重装当前版本"入口已退役，spec D3/D8）。</summary>
+    /// <summary>行可动作判定：fetch 成功（Remote/信息在）且无待生效意图，且 tag 方向成立——
+    /// v4.1 作者拍板：只做 release tag 版本比较，本地比 tag 高（超前构建）一律拒，杜绝变相
+    /// 降级入口；同版本放行仅覆盖 ⚠橙 版本告警行的"更新到同版本"修复路径（spec D3/D8）。</summary>
     private static bool RepoActionable(RepoRow r, HashSet<string> pend, out string why)
     {
         why = null;
-        if (string.IsNullOrEmpty(r.Remote)) { why = "上次检查该仓失败（Remote 不可用）"; return false; }
-        if (!_repoInfos.ContainsKey(r.RepoKey)) { why = "仓库数据已过期，请重新检查更新"; return false; }
-        if (pend.Contains(r.Guid.ToLowerInvariant())) { why = "已有待生效意图（重启后应用）"; return false; }
+        if (string.IsNullOrEmpty(r.Remote)) { why = "上次没查到它的版本，先重新检查更新"; return false; }
+        if (!_repoInfos.ContainsKey(r.RepoKey)) { why = "版本信息过期了，先重新检查更新"; return false; }
+        if (pend.Contains(r.Guid.ToLowerInvariant())) { why = "它已有排队中的操作，重启游戏后应用"; return false; }
+        if (r.Local != null
+            && RepoDecision.CompareVersions(r.Local, r.Remote) is > 0)
+        {
+            why = "本地版本比仓库新，不用动";
+            return false;
+        }
         return true;
     }
 
@@ -1317,7 +1304,7 @@ internal static class ConfigBridge
     }
 
     /// <summary>后台队列收割（Pump 主线程）：fetch 完成=换快照+推数据+侧栏徽标快照；
-    /// 进度=推 MC_DL；单仓成功=主线程 AddUpdate+快照刷新（⟳ 出现/↑↓ 消失）；失败=MC_DL err+toast；
+    /// 进度=推 MC_DL；单仓成功=主线程 AddUpdate+快照刷新（可动作徽标消失/底条出现该项）；失败=MC_DL err+toast；
     /// 链收尾=释放串行闸+推数据。</summary>
     private static void RepoHarvest(RepoUi ui)
     {
@@ -1334,12 +1321,11 @@ internal static class ConfigBridge
                 _repoRateLimited = ui.RateLimited > 0;
                 if (_repoRateLimited)
                 {
-                    // T16/D：403 不显示成普通"检查失败"——一次专门 toast（v3 精简文案）。
+                    // T16/D：403 不显示成普通"检查失败"——一次专门 toast（v4 白话）。
                     if (ui.OkCount == 0) _repoFetchError = "GitHub 限流（HTTP 403），请稍后再试";
-                    PushEvent("{\"type\":\"MC_TOAST\",\"main\":" + JsonW.Str("GitHub 限流")
-                        + ",\"small\":" + JsonW.Str("请稍后再试") + "}");
+                    McToast("检查太频繁（GitHub 限流）", "err", "等几分钟再试");
                 }
-                PushRender(BuildSnapshot().ToJson()); // 侧栏 ↑/↓/⊘ 徽标（快照协议承载）
+                PushRender(BuildSnapshot().ToJson()); // 侧栏 ↑黄/⚠橙 徽标（快照协议承载）
                 PushRepoData();
                 break;
             case 2:
@@ -1366,8 +1352,7 @@ internal static class ConfigBridge
                             PushEvent("{\"type\":\"MC_DL\",\"repoKey\":" + JsonW.Str(ui.RepoKey)
                                 + ",\"pct\":100,\"stage\":\"err\",\"err\":"
                                 + JsonW.Str("该 mod 已加入待生效卸载——本次下载已丢弃（暂存已清理）") + "}");
-                            PushEvent("{\"type\":\"MC_TOAST\",\"main\":" + JsonW.Str(name + " 的更新已取消")
-                                + ",\"small\":" + JsonW.Str("检测到该 mod 的卸载意图（先落盘）——更新结果已丢弃，暂存已清理") + "}");
+                            McToast(name + " 的更新已取消", "info", "你同时要卸载它，本次下载作废");
                             RefreshPending(true);
                             _pendSig = PendingSig();
                             PushPendingSummary();
@@ -1378,12 +1363,11 @@ internal static class ConfigBridge
                         PendingWriter.AddUpdate(ui.Row, ui.Info, ui.Staged); // 主线程唯一写者
                         PushEvent("{\"type\":\"MC_DL\",\"repoKey\":" + JsonW.Str(ui.RepoKey)
                             + ",\"pct\":100,\"stage\":\"ok\"}");
-                        PushEvent("{\"type\":\"MC_TOAST\",\"main\":" + JsonW.Str(name + " 已加入待生效")
-                            + ",\"small\":" + JsonW.Str("已下载并校验，重启游戏后自动替换") + "}"); // v3 精简
+                        McToast(name + " " + to + " 已就绪", "reboot", "重启游戏后自动换上新版");
                         RefreshPending(true);
                         _pendSig = PendingSig();
                         PushPendingSummary();
-                        PushRender(BuildSnapshot().ToJson()); // 行内 ⟳ 出现、↑/↓ 消失（裁定 3）
+                        PushRender(BuildSnapshot().ToJson()); // 可动作徽标消失（裁定 3，底条出现该项）
                         PushRepoData();
                     }
                     catch (Exception e)
@@ -1397,10 +1381,8 @@ internal static class ConfigBridge
                 {
                     PushEvent("{\"type\":\"MC_DL\",\"repoKey\":" + JsonW.Str(ui.RepoKey)
                         + ",\"pct\":100,\"stage\":\"err\",\"err\":" + JsonW.Str(ui.Err ?? "未知错误") + "}");
-                    var v = ui.Row != null && ui.Row.State == RepoState.Downgrade ? "降级"
-                        : (ui.Row != null && !string.IsNullOrEmpty(ui.Row.Local) ? "更新" : "安装"); // v3 精简
-                    PushEvent("{\"type\":\"MC_TOAST\",\"main\":" + JsonW.Str(v + "失败")
-                        + ",\"small\":" + JsonW.Str((ui.Err ?? "未知错误") + " · 没有做任何更改，可稍后重试") + "}");
+                    var v = ui.Row != null && !string.IsNullOrEmpty(ui.Row.Local) ? "更新" : "安装"; // v4：降级术语退役
+                    McToast(v + "没成功", "err", (ui.Err ?? "不知道哪里出了问题") + "；什么都没改，稍后再试");
                 }
                 break;
             case 4:
@@ -1413,8 +1395,7 @@ internal static class ConfigBridge
                 _repoFetching = false;
                 _repoFetchError = ui.Err ?? "未知异常"; // 入口卡"检查失败（点击重试）"（必修 8）
                 PushRepoData();
-                PushEvent("{\"type\":\"MC_TOAST\",\"main\":" + JsonW.Str("检查失败，稍后再试")
-                    + ",\"small\":" + JsonW.Str(ui.Err ?? "未知异常") + "}"); // v3 精简（spec §5.4/Task2）
+                McToast("检查失败", "err", (ui.Err ?? "网络或仓库问题") + "，稍后再试");
                 break;
         }
     }
@@ -1771,8 +1752,7 @@ internal static class ConfigBridge
         if (u == null || string.IsNullOrEmpty(u.DllBaseRel))
         {
             Log("uninst 拒绝：未知/不在链上 " + (guid ?? "?"));
-            PushEvent("{\"type\":\"MC_TOAST\",\"main\":" + JsonW.Str("无法构造卸载明细")
-                + ",\"small\":" + JsonW.Str("插件不在链上（guid=" + (guid ?? "?") + "），详见 LogOutput") + "}");
+            McToast("没法卸载它", "err", "找不到它的文件（详见 LogOutput）");
             return;
         }
         // 明细只列实际在场的目标：缺席行的裸 dll 已不存在（现名 .disabled），列它等于谎报——
@@ -1802,7 +1782,7 @@ internal static class ConfigBridge
     /// .disabled 一条——裸 dll 不存在）→ marker 处理（第三方在链上走 DllDisabler.Enable：dll 即将被删，反向改名
     /// 副作用无害、marker 留 false 即可；**缺席行不动 marker**（终审必修 2）；
     /// Meta 套件无 marker 不建孤儿键；Self 跳过）→ order 记录清掉该 guid（弹窗"排序记录"承诺）→
-    /// FlushDirty（意图即时落盘，强杀免疫）→ 快照/摘要/仓库数据刷新（行内 ⟳、仓库 pending 标记）。
+    /// FlushDirty（意图即时落盘，强杀免疫）→ 快照/摘要/仓库数据刷新（底条、仓库 pending 标记）。
     /// 防重：已有同目标 delete 意图→幂等跳过（toast 提示，不二次写）。
     /// 终审必修 1：该仓下载/更新链在跑 → 整单拒绝（toast），绝不与链尾 AddUpdate 竞争。</summary>
     private static void HandleUninstDo(string guid)
@@ -1811,8 +1791,7 @@ internal static class ConfigBridge
         if (u == null || string.IsNullOrEmpty(u.DllBaseRel))
         {
             Log("uninst-do 拒绝：未知/不在链上 " + (guid ?? "?"));
-            PushEvent("{\"type\":\"MC_TOAST\",\"main\":" + JsonW.Str("卸载失败")
-                + ",\"small\":" + JsonW.Str("插件不在链上（guid=" + (guid ?? "?") + "），详见 LogOutput") + "}");
+            McToast("没法卸载它", "err", "它不在运行列表里（详见 LogOutput）");
             return;
         }
 
@@ -1824,8 +1803,7 @@ internal static class ConfigBridge
         if (_repoChain && _chainGuids.Contains(chainId))
         {
             Log("uninst-do 拒绝：下载链正在处理 " + guid);
-            PushEvent("{\"type\":\"MC_TOAST\",\"main\":" + JsonW.Str("该 mod 正在下载更新")
-                + ",\"small\":" + JsonW.Str("下载链执行中，完成（或撤销待生效）后再卸载——本次未写入卸载意图") + "}");
+            McToast("这个 mod 正在下载更新", "info", "等下载完成后再卸载（或先撤销待生效操作）");
             return;
         }
 
@@ -1836,8 +1814,7 @@ internal static class ConfigBridge
         foreach (var op in _pendOps)
             if (op.Type == McPending.TypeDelete && targets.Contains(NormOpRel(op.Target)))
             {
-                PushEvent("{\"type\":\"MC_TOAST\",\"main\":" + JsonW.Str(u.Name + " 已有待生效卸载意图")
-                    + ",\"small\":" + JsonW.Str("重启游戏后彻底删除（底部待生效条可查看）") + "}"); // v3 术语清零（终审 F2）
+                McToast(u.Name + " 已经在卸载队列里", "info", "重启游戏后彻底删除");
                 return;
             }
 
@@ -1877,14 +1854,12 @@ internal static class ConfigBridge
                     ? dllOp + ".disabled"
                     : dllOp + (u.CfgRel != null ? " + " + u.CfgRel : "")
                       + (u.DisabledTwin ? " + " + dllOp + ".disabled" : "")));
-            PushEvent("{\"type\":\"MC_TOAST\",\"main\":" + JsonW.Str("已加入待生效：卸载 " + u.Name)
-                + ",\"small\":" + JsonW.Str("重启游戏后执行") + "}"); // v3 精简（spec §5.4/终审 F2）
+            McToast("卸载已备好：" + u.Name, "reboot", "重启游戏后移除");
         }
         catch (Exception e)
         {
             Log("warn uninst-do 写入失败(" + u.Name + "): " + e.Message);
-            PushEvent("{\"type\":\"MC_TOAST\",\"main\":" + JsonW.Str(u.Name + " 卸载写入失败")
-                + ",\"small\":" + JsonW.Str(e.Message + "（详见 LogOutput）——未写入待生效清单") + "}");
+            McToast("卸载没成功", "err", e.Message + "（详见 LogOutput）");
         }
         RefreshPending(true);
         _pendSig = PendingSig();
@@ -2049,9 +2024,8 @@ internal static class ConfigBridge
             }
     }
 
-    /// <summary>行内 L1 图标：tip=表内 TipShort 逐字（v3 精简；完整结论在弹窗卡片）。
-    /// 功能叠加条目（orange+Tag=功能叠加）带显式 G="!"——否则旧面板按 orange+cf 推断成
-    /// ⇄（终审 F1 同理：显式字形对旧面板也生效；v3.1 普通告警族统一小号黄叹号 !）。</summary>
+    /// <summary>行内 L1 冲突图标（v4：红=确定不可用、橙=其余告警；tip=表内 TipShort 逐字，
+    /// 完整结论在弹窗卡片；G 字段随三标记体系退役）。</summary>
     private static IcInfo EntryIc(ConflictEntry e)
     {
         return new IcInfo
@@ -2059,20 +2033,17 @@ internal static class ConfigBridge
             K = e.Level,
             Click = "cf",
             Tip = e.TipShort,
-            G = e.Tag == "功能叠加" ? "!" : null,
         };
     }
 
-    /// <summary>行内 L3 叠加图标（v3 并入橙色级 + 显式字形——旧面板 icGlyph 先认 g，兼容；
-    /// v3.1 字形=小号黄叹号 !（⇄/◎ 退役）；tip 一句话，不再列名单）。</summary>
+    /// <summary>行内 L3 叠加图标（v4 ⚠橙小号；tip 一句白话，不再列名单）。</summary>
     private static IcInfo DomainIc(CfRow row, List<CfRow> mates)
     {
         return new IcInfo
         {
             K = "orange",
-            G = "!",
             Click = "cf",
-            Tip = "功能叠加：" + row.Domain + "类 mod 效果会叠加，点看详情",
+            Tip = "和同类 mod 叠着用，效果可能乱，点击查看",
         };
     }
 
@@ -2371,6 +2342,19 @@ internal static class ConfigBridge
     private static void PushRender(string snapshotJson) => PushJs("window.__mcRender&&window.__mcRender(" + snapshotJson + ")");
 
     private static void PushEvent(string eventJson) => PushJs("window.__mcEvent&&window.__mcEvent(" + eventJson + ")");
+
+    /// <summary>MC_TOAST（v4：badge=now|reboot|reload|info|err，面板按档配色/停留；small 给定
+    /// 则作 toast 第二行，缺省用 badge 默认文案）。文案原则：大白话——做了什么+什么时候见效，
+    /// 失败说原因；不出现 gamekb/待生效/Remote 这类术语。</summary>
+    private static void McToast(string main, string badge, string small = null)
+    {
+        var sb = new StringBuilder(128);
+        sb.Append("{\"type\":\"MC_TOAST\",\"main\":").Append(JsonW.Str(main))
+          .Append(",\"badge\":").Append(JsonW.Str(badge));
+        if (small != null) sb.Append(",\"small\":").Append(JsonW.Str(small));
+        sb.Append('}');
+        PushEvent(sb.ToString());
+    }
 
     private static void PushJs(string js)
     {

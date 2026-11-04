@@ -206,20 +206,19 @@ public sealed class BagOvrInfo
 }
 
 /// <summary>
-/// 行内图标徽标（v2 生命周期任务 7；v3.1 字形：⚠红冲突 18px / !橙告警 14px 小号黄叹号（碰撞/叠加
-/// 同形，⇄/◎ 退役）/↑蓝可更新/↓橙可降级/⊘橙版本告警/⟳琥珀待生效）。
-/// k=色级（小写 red|orange|gray|blue|amber）；tip=悬停 title 全文；click=点击路由
-/// （cf=冲突详情弹窗 / upd=更新确认弹窗；null/空=纯状态不输出，如 ⟳）；g=可选字形符——
-/// ↓与⊘同为 orange+upd，无 g 无法消歧（缺省按 k+click 推断：red→⚠ / orange+cf→! / gray→! /
-/// blue→↑ / orange+upd→↓ / amber→⟳；T8 喂 ⊘ 时带 g:"kbw"，panel.js 将其映射为 ⊘ 字形）。
-/// T7 只接真数据 ⟳ 待生效（pending.json）；冲突形由 T11 喂，更新/降级/告警三形由 T8 喂。
+/// 行内图标徽标（v4 三标记体系，作者拍板）：⚠红 18px=确定不可用（L1 严重冲突）、
+/// ⚠橙 15px 小号=其余一切告警（L2 碰撞/L3 叠加/版本不符）、↑黄 18px=仅有新版本；
+/// ↓可降级/⊘版本告警/⟳待生效/蓝色↑ 全部退役（待生效只经底部待生效条呈现）。
+/// 未安装不挂标（实机反馈修正：主动卸载不是故障，行内锁定开关已表达）。
+/// k=色级（小写 red|orange|yellow；gray/blue 仅旧版兼容）；tip=悬停 title 全文（白话）；
+/// click=点击路由（cf=冲突详情弹窗 / upd=更新确认弹窗；null/空=纯状态不输出）。
+/// 冲突族由 T11/T12 喂，更新/告警由 T8 喂。
 /// </summary>
 public sealed class IcInfo
 {
-    public string K;     // red | orange | gray | blue | amber（小写）
-    public string Tip;   // 悬停 title 全文（原型：悬停 title 全文）
+    public string K;     // red | orange | yellow（小写；gray/blue legacy）
+    public string Tip;   // 悬停 title 全文（白话：怎么了+会怎样+点了干嘛）
     public string Click; // cf | upd；null/空 不输出（纯状态）
-    public string G;     // 可选字形符（↓/⊘ 消歧）；null 不输出
     public bool? W;      // v2 任务 12（T11 M7）：行已停用 → 徽标弱化（面板降透明度+tip 已加"（已停用）"）
 
     internal void Write(StringBuilder sb)
@@ -227,7 +226,6 @@ public sealed class IcInfo
         sb.Append("{\"k\":").Append(JsonW.Str(K))
           .Append(",\"tip\":").Append(JsonW.Str(Tip));
         if (!string.IsNullOrEmpty(Click)) sb.Append(",\"click\":").Append(JsonW.Str(Click));
-        if (!string.IsNullOrEmpty(G)) sb.Append(",\"g\":").Append(JsonW.Str(G));
         if (W == true) sb.Append(",\"w\":true");
         sb.Append('}');
     }
@@ -235,9 +233,10 @@ public sealed class IcInfo
 
 /// <summary>
 /// 仓库页行 DTO（v2 生命周期任务 8）：<see cref="RepoDecision.RepoRow"/> 的面板投影——
-/// Status 固定小写五值；Remote=null = fetch 失败（面板"检查失败"，快照 checking=true 时
-/// 显示"检查中…"）；Pending=该行已有待生效 install/replace 意图（⟳ 替代动作按钮，
-/// 行内 ↑/↓ 同步消失——控制器裁定 3）。Gamekb/VerNote 空不输出。
+/// Status 固定小写五值（v4.1：downgrade 不再产出——本地比 release tag 高=Ok 静默，降级
+/// 全面退役；字段保留仅为历史快照兼容）；Remote=null = fetch 失败（面板"检查失败"，快照
+/// checking=true 时显示"检查中…"）；Pending=该行已有待生效 install/replace 意图（可动作
+/// 徽标同步消失——控制器裁定 3；v4 行内不再有 ⟳，仅底条呈现）。Gamekb/VerNote 空不输出。
 /// </summary>
 public sealed class RepoRowInfo
 {
@@ -245,12 +244,12 @@ public sealed class RepoRowInfo
     public string Status;  // ok|update|downgrade|warn|install（小写）
     public string Local;   // 本地版本；null = 未安装
     public string Remote;  // 远端版本；null = fetch 失败
-    public string Why;     // warn 原因 / downgrade 提示；其余态空
+    public string Why;     // warn 原因；其余态空（v4.1：downgrade 提示随降级态退役）
     public string RepoKey; // 仓键（MC_UPD/MC_INST 路由用）
     public string Guid;    // 套件插件 GUID
     public string Gamekb;  // 远端 gamekb 快照名；空不输出
     public string VerNote; // 未校验游戏版本注记（D8）；空不输出
-    public bool Kbw;       // D8 终审必修 6：Ok/Downgrade 行 gamekb 不符（行内 ⊘ + 行级原因）
+    public bool Kbw;       // D8 终审必修 6：同版本 Ok 行 gamekb 不符（行内 ⚠橙 + 行级原因；v4.1 本地更高不参与）
     public string KbWhy;   // 上述告警原因全文；空不输出
     public bool Pending;   // 已有待生效 install/replace 意图
     public int? HttpStatus; // T16/D：仅 403（GitHub 限流）输出，供行内专门文案

@@ -6,15 +6,16 @@ using BepInEx.Unity.IL2CPP;
 
 namespace SurvivalLog.ModCenter;
 
-/// <summary>仓库决策五态（spec §4.1/D7/D8 定稿）：Ok 相等 / Update 远端新 / Downgrade 本地高
-/// （D7 告警不拦截）/ Warn gamekb 不匹配（D8 告警不拦截）/ Install 未安装。</summary>
+/// <summary>仓库决策五态（spec §4.1/D7/D8 定稿）：Ok 相等或本地更高（v4.1：降级退役，本地高=静默）/
+/// Update 远端 tag 大于本地 / Warn gamekb 不匹配（D8 告警不拦截）/ Install 未安装。
+/// Downgrade 成员保留仅为协议兼容（面板 status 字符串历史值），v4.1 起不再产出。</summary>
 public enum RepoState { Ok, Update, Downgrade, Warn, Install }
 
 /// <summary>
 /// 仓库页一行（任务 6 冻结接口，T7/T8 面板消费）。Status 固定小写五值
-/// "ok"|"update"|"downgrade"|"warn"|"install"（控制器裁定 2）。Why 在 Warn 与 Downgrade
-/// 态非空（其余态空）；VerNote 为 D8"未校验游戏版本"注记
-/// （基线不可用时任何 fetch 成功行可携带，不改 State——冻结面之外的增量字段）。
+/// "ok"|"update"|"downgrade"|"warn"|"install"（控制器裁定 2；v4.1 起 downgrade 不再
+/// 产出，值保留为历史兼容）。Why 仅 Warn 态非空（其余态空）；VerNote 为 D8"未校验
+/// 游戏版本"注记（基线不可用时任何 fetch 成功行可携带，不改 State——冻结面之外的增量字段）。
 /// </summary>
 public sealed class RepoRow
 {
@@ -22,14 +23,14 @@ public sealed class RepoRow
     public RepoState State;
     public string Local;   // 本地版本（PluginInfo.Metadata.Version）；null = 未安装
     public string Remote;  // 远端版本（update.json.version）；null = fetch 失败（面板按 null 渲染"检查失败"，State 不虚报）
-    public string Why;     // warn 原因 / downgrade 提示；其余态空
+    public string Why;     // warn 原因；其余态空（v4.1：downgrade 提示随降级态退役）
     public string RepoKey; // 仓键（= 组织仓名，12 名之一，Ruling 5）
     public string Guid;    // 套件插件 GUID（com.local.survivallog.<小写仓键>）
 
     // ---- 冻结面之外的增量字段（T8 决策/PendingWriter 消费，不破坏冻结签名）----
     public string Gamekb;  // 远端 gamekb 快照名（update.json.gamekb，fetch 时附带）
     public string VerNote; // gamekb 未校验注记（D8："未校验游戏版本：…"）；基线可用 = 空
-    public bool Kbw;       // 终审必修 6：Ok/Downgrade 行 gamekb 不符（不改 State，行内 ⊘ + 行级原因）
+    public bool Kbw;       // 终审必修 6：同版本 Ok 行 gamekb 不符（不改 State，行内 ⚠橙 + 行级原因；本地更高不参与）
     public string KbWhy;   // 上述告警原因全文；空 = 无
     public int? HttpStatus; // T16/D：本轮 fetch 的 HTTP 状态（403=GitHub 限流；面板专门提示）
 
@@ -38,12 +39,13 @@ public sealed class RepoRow
 }
 
 /// <summary>
-/// 仓库决策层（ModCenter v2 生命周期任务 6）：12 仓清单 + 本地插件快照 + 五态决策。
-/// 决策口径（spec §4.1 + D7/D8 作者拍板，均**只告警不拦截**）：
-/// - 本地版本 &gt; 远端 = Downgrade（Why="远端低于本地"）；远端 &gt; 本地 = Update；相等 = Ok；
-///   未安装 = Install；fetch 失败（Remote=null）= Ok + Remote null（五态无 fail 态，不虚报）。
+/// 仓库决策层（ModCenter v2 生命周期任务 6）：13 仓清单 + 本地插件快照 + 五态决策。
+/// 决策口径（v4.1 作者拍板：只做 release tag 版本比较，降级全面退役）：
+/// - 远端 tag &gt; 本地 = Update；未安装 = Install；相等或本地更高（超前构建）= Ok 静默
+///   （不提示、无任何动作入口）；fetch 失败（Remote=null）= Ok + Remote null（面板按
+///   "检查失败"渲染，不虚报）。
 /// - gamekb 告警（D8）：远端 gamekb ≠ 本地基线 → Warn（Install/Update 态）或
-///   Kbw 标记（Ok/Downgrade 态——保持原态，主列表行内 ⊘ 仍给；终审必修 6）；
+///   Kbw 标记（同版本 Ok 态——保持原态，行内 ⚠橙 仍给；本地更高不参与）；
 ///   基线不可用（通道失败/无法映射）→ 不判 Warn/Kbw，VerNote="未校验游戏版本：…"。
 /// <see cref="Build"/> 为纯函数（不碰 IO/interop，任意线程可调）；本地枚举在
 /// <see cref="SnapshotLocal"/>（主线程，IL2CPPChainloader 契约）。
@@ -113,8 +115,10 @@ public static class RepoDecision
                 continue;
             }
 
-            // 版本基态（D7：Downgrade 告警不拦截）
+            // 版本基态（v4.1 作者拍板：只做 release tag 版本比较，tag 大于本地才有 Update；
+            // 本地更高（开发机构建超前 release）= Ok 静默——降级态/降级提示全面退役）
             RepoState basis;
+            bool sameVersion = false;
             if (row.Local == null)
             {
                 basis = RepoState.Install;
@@ -122,28 +126,19 @@ public static class RepoDecision
             else
             {
                 var cmp = CompareVersions(row.Local, row.Remote);
-                if (cmp == null)
-                {
-                    basis = RepoState.Ok; // 远端版本不可解析（自家管线不会发生）：保守不动作，Remote 原样展示
-                }
-                else if (cmp > 0)
-                {
-                    basis = RepoState.Downgrade;
-                    row.Why = $"远端 {row.Remote} 低于本地 {row.Local}（D7 告警不拦截）";
-                }
-                else if (cmp < 0)
-                {
-                    basis = RepoState.Update;
-                }
+                if (cmp != null && cmp < 0) basis = RepoState.Update;   // tag > 本地 → 有更新
                 else
                 {
-                    basis = RepoState.Ok;
+                    basis = RepoState.Ok; // 相等 / 本地更高 / 远端不可解析（自家管线不会发生）
+                    sameVersion = cmp == 0;
                 }
             }
             row.State = basis;
 
-            // gamekb 门（D8 告警不拦截）：fetch 成功且带 gamekb 的行参与
-            if (!string.IsNullOrEmpty(row.Gamekb))
+            // gamekb 门（D8 告警不拦截）：fetch 成功且带 gamekb 的行参与。
+            // v4.1：本地比远端新（sameVersion=false 的 Ok）不参与——旧 release 的 gamekb
+            // 对超前构建无意义，标了只会引向变相降级入口。
+            if (!string.IsNullOrEmpty(row.Gamekb) && (basis != RepoState.Ok || sameVersion))
             {
                 if (local.Baseline == null)
                 {
@@ -155,8 +150,7 @@ public static class RepoDecision
                     var why = GameVersion.GamekbMismatchReason(row.Gamekb, local);
                     if (why != null)
                     {
-                        // 终审必修 6：D8 字面"主列表行内 ⊘"不限于可动作态——Ok/Downgrade
-                        // 保持原态（无更新动作面）但仍带 Kbw 标记，面板行内给 ⊘。
+                        // 同版本（Ok）但 gamekb 不符：保持原态 + Kbw 标记，面板行内给 ⚠橙（v4）。
                         row.Kbw = true;
                         row.KbWhy = why;
                         if (basis is RepoState.Install or RepoState.Update)
@@ -171,8 +165,9 @@ public static class RepoDecision
         return src;
     }
 
-    /// <summary>语义版本比较（本地/远端均为 x.y.z 形态）；任一不可解析 = null（保守不动作）。</summary>
-    private static int? CompareVersions(string local, string remote)
+    /// <summary>语义版本比较（本地/远端均为 x.y.z 形态）；任一不可解析 = null（保守不动作）。
+    /// v4.1 起 internal：RepoActionable 复用（tag 不大于本地一律拒动作）。</summary>
+    internal static int? CompareVersions(string local, string remote)
     {
         if (!SemanticVersioning.Version.TryParse(remote, out var r) ||
             !SemanticVersioning.Version.TryParse(local, out var l))

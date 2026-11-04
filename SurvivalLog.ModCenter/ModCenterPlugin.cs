@@ -31,7 +31,7 @@ public sealed class ModCenterPlugin : BasePlugin
 {
     public const string Guid = "com.local.survivallog.modcenter";
     public const string Name = "ModCenter";
-    public const string Version = "2.0.1"; // 版本号 csproj 单源（<Version>），此处与 csproj 同步
+    public const string Version = "2.0.2"; // 版本号 csproj 单源（<Version>），此处与 csproj 同步
 
     public static ModCenterPlugin Instance { get; private set; }
 
@@ -665,7 +665,8 @@ internal static class RepoProbe
                 Synth("未装+基线匹配",         null,    "1.7.0", gk,     RepoState.Install),
                 Synth("旧版+基线匹配",         "1.0.0", "1.7.0", gk,     RepoState.Update),
                 Synth("同版+基线匹配",         "1.7.0", "1.7.0", gk,     RepoState.Ok),
-                Synth("本地高（D7）",          "9.9.9", "1.7.0", gk,     RepoState.Downgrade),
+                Synth("同版+基线不匹配（Kbw）", "1.7.0", "1.7.0", gkBad, RepoState.Ok),
+                Synth("本地高（v4.1 静默）",   "9.9.9", "1.7.0", gk,     RepoState.Ok),
                 Synth("未装+基线不匹配（D8）",  null,    "1.7.0", gkBad,  RepoState.Warn),
                 Synth("旧版+基线不匹配（D8）",  "1.0.0", "1.7.0", gkBad,  RepoState.Warn),
                 Synth("快照名形态异常",         "1.0.0", "1.7.0", "2000-01-01_pre1", RepoState.Warn),
@@ -704,9 +705,10 @@ internal static class RepoProbe
             var cRows = cases.ConvertAll(c => c.Row);
             var cDist = Distribution(cRows);
             var fiveOk = CountState(cRows, RepoState.Ok) >= 1 && CountState(cRows, RepoState.Update) >= 1 &&
-                         CountState(cRows, RepoState.Downgrade) >= 1 && CountState(cRows, RepoState.Warn) >= 1 &&
-                         CountState(cRows, RepoState.Install) >= 1;
-            P($"C 五态覆盖: {cDist} → {(fiveOk ? "PASS" : "FAIL（基线不可用机器上期望翻转，见上）")}");
+                         CountState(cRows, RepoState.Warn) >= 1 &&
+                         CountState(cRows, RepoState.Install) >= 1
+                         && CountState(cRows, RepoState.Downgrade) == 0; // v4.1：降级不再产出（本地高=Ok）
+            P($"C 四态覆盖+零降级: {cDist} → {(fiveOk ? "PASS" : "FAIL（基线不可用机器上期望翻转，见上）")}");
             cPass &= _local.Baseline != null && fiveOk;
             pass &= cPass;
 
