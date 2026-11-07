@@ -52,12 +52,14 @@ public sealed class RepoRow
 /// </summary>
 public static class RepoDecision
 {
-    /// <summary>13 仓清单（Ruling 5：仓键 = 组织仓名；GUID 映射见 <see cref="GuidOf"/>）。
+    /// <summary>10 仓清单（Ruling 5：仓键 = 组织仓名；GUID 映射见 <see cref="GuidOf"/>）。
     /// 2026-10-31 +SaveMgr（第 13 仓，GUID 符合约定；Release 未发 → 面板显示未发版）。
-    /// 2026-11-02 RoleUnlock 更名 UnlockHub（GitHub 仓同步改名，旧名 URL 自动重定向；仓键跟随新名）。</summary>
+    /// 2026-11-02 RoleUnlock 更名 UnlockHub（GitHub 仓同步改名，旧名 URL 自动重定向；仓键跟随新名）。
+    /// 2026-11-07 -BackpackExpand/-CabinetSize/-CabinetBurden（负重批退役：背包/柜子高度与负重
+    /// 全部并入「更好的储物系统」CabinetEverywhere v1.8.6，三仓不再随套件发版/检查更新）。</summary>
     public static readonly string[] RepoKeys =
     {
-        "BackpackExpand", "CabinetBurden", "CabinetEverywhere", "CabinetSize",
+        "CabinetEverywhere",
         "EndlessGuard", "FridgeChill", "ModCenter", "PlanPick",
         "PreDisasterSpeed", "QuickAction", "RobotSpeed", "SaveMgr", "UnlockHub",
     };

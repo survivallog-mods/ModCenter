@@ -3,6 +3,22 @@
 > 本文件只记本 mod 的更新；套件/安装器版本史见总仓根 CHANGELOG.md。
 > 版本号单源：本仓 csproj `<Version>`（作者定义，硬规则 1）。
 
+## v2.1.0（2026-11-07，负重批随行——三 mod 退役）
+
+### 套件成员退役：背包扩容 / 柜子容量 / 柜子负重解放 → 并入「更好的储物系统」（作者令）
+
+- **面板移除三页**：Meta.Mods 删 BackpackExpand/CabinetSize/CabinetBurden 三条目（含
+  柜子容量 13 包 BagW/BagH 助手）；RepoDecision.RepoKeys 13→10——三仓不再出现在侧栏、
+  不再检查更新。功能归宿：背包/柜子高度与宽度口径=更好的储物系统 v1.8.6 高度批（宽度恒 12）；
+  背包负重与柜子负重解放=更好的储物系统 v1.8.6 `[Burden]` 区（见下）。
+- **更好的储物系统页新增「负重（重进存档后生效）」组两键**（反射桥直写，Badge=reload：
+  Burden 是 BagComponent.OnInit 快照，改后需重进存档对已存在容器/已穿背包生效）：
+  `Burden.BackpackBurden`（背包负重 kg，0~1000 滑条，0=官方原值，9 背包统一天赋照常叠加）+
+  `Burden.CabinetUnburden`（柜子负重解放开关，默认 true 承袭原 mod）。
+- SuiteGuids/Domains/ExtraNames 保留三旧 GUID（惰性：旧 dll 未卸载时仍按套件成员归类，
+  不进第三方页）；BagOvrHost 字段保留兼容 ConfigBridge/panel.js 数据契约（暂无使用者，
+  加初始化器消 CS0649）。详见 DESIGN §7.3 退役表。
+
 ## v2.0.6（2026-11-07）
 
 ### 检查聚合成 1 次 API（spec 单轮检查落地）

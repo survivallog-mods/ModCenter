@@ -926,6 +926,7 @@ v1 的第三方重启级禁用流程 = 面板写 `[DisabledTp]` marker → 游�
 | `MC_UPDALL`（全部更新） | v2 Update 态整批串行 | **v3 退役**（spec D4）：面板入口与 C# 分支/处理器删除，逐仓确认 |
 | 「重装当前版本」入口 | 必修 5（D7）ok 行重装按钮 | **v3 退役**（spec D3）：需要时先卸载再安装；Ok+kbw ⊘ 仍可"更新到同版本"确认 |
 | `gray` 冲突色级 | v2 三级（红/橙/灰，◎=同域灰标） | **v3 退役**（spec D1）：功能叠加并入 orange + 显式 `G="!"`（v3.2 起面板不消费 g，`icIcon` 只认 kbw）；panel gray 分支保留为 legacy |
+| 背包扩容/柜子容量/柜子负重解放 三 mod 面板页（Meta 三条目 + BagW/BagH 助手 + RepoKeys 13 仓） | 三 mod 独立发版独立调参 | **2026-11-07 退役**（负重批）：功能并入「更好的储物系统」v1.8.6（背包/柜子高度=其高度批；背包负重/柜子负重解放=其 [Burden] 区，本面板 CE 页新增「负重」组两键 Badge=reload）；RepoKeys 13→10 不再检查三仓更新；SuiteGuids/Domains/ExtraNames 保留三旧 GUID（惰性：旧 dll 未卸载时仍按套件成员归类、不进第三方页）；BagOvrHost 字段保留兼容数据契约（暂无使用者） |
 
 ### 7.4 幂等不变量（所有 op 必须幂等）
 

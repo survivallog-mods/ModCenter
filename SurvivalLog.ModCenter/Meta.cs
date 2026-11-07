@@ -12,7 +12,7 @@ internal sealed class MetaMod
     public string Desc;  // 一句话简介
     public List<MetaGroup> Groups = new();
     public MetaItem OvrHost; // ovr 清单宿主项（动作加速 其他.Overrides；不进 groups items，可写）
-    public MetaItem BagOvrHost; // bagOvr 清单宿主项（柜子容量 个性化 Global.BagOverrides，T20；不进 groups items，可写）
+    public MetaItem BagOvrHost = null; // bagOvr 清单宿主项（柜子容量 个性化 Global.BagOverrides，T20；不进 groups items，可写。2026-11-07 CabinetSize 退役后暂无使用者，字段保留兼容 ConfigBridge/panel.js 数据契约）
 
     // 启停键（任务 13）：该 mod 总开关在【其自己 cfg】里的真实节/键——SetModEnabled 直写
     // 此 entry（默认 General:Enabled，与 T9-T12 九 mod 的 Bind 一致；个别 mod 键名不同时覆盖）。
@@ -90,183 +90,6 @@ internal static class Meta
 
     internal static readonly List<MetaMod> Mods = new()
     {
-        new MetaMod
-        {
-            Guid = "com.local.survivallog.backpackexpand",
-            Name = "背包扩容", En = "BackpackExpand",
-            Desc = "宽度/基础高度/负重三个明确数值统一应用全部背包（0=恢复官方原值）；天赋『背包加一行』照常每级+1；热改即时生效。",
-            Groups =
-            {
-                new MetaGroup
-                {
-                    Title = "扩容数值（0=恢复官方原值）",
-                    Items =
-                    {
-                        new MetaItem
-                        {
-                            Section = "Expand", Key = "Width", Label = "背包宽度",
-                            Badge = "now", Type = "int", Def = 11, Min = 0, Max = 30, St = 1,
-                            Note = "全部背包统一列数（原生最大 10）"
-                        },
-                        new MetaItem
-                        {
-                            Section = "Expand", Key = "Height", Label = "基础高度",
-                            Badge = "now", Type = "int", Def = 10, Min = 0, Max = 30, St = 1,
-                            Note = "初始背包与登山包行数；天赋『背包加一行』每级自动 +1，照常生效"
-                        },
-                        new MetaItem
-                        {
-                            Section = "Expand", Key = "Burden", Label = "负重上限",
-                            Badge = "reload", Type = "int", Def = 48000, Min = 0, Max = 150000, St = 1000,
-                            Note = "全部背包统一基础值，天赋加成照常叠加；读档后体现"
-                        }
-                    }
-                },
-                new MetaGroup
-                {
-                    Title = "防呆上限（0=不封顶）",
-                    Items =
-                    {
-                        new MetaItem
-                        {
-                            Section = "Global", Key = "MaxWidth", Label = "宽度上限",
-                            Badge = "now", Type = "int", Def = 16, Min = 0, Max = 30, St = 1,
-                            Note = "Width 超出即夹到此值；过宽挤压背包页右侧栏"
-                        },
-                        new MetaItem
-                        {
-                            Section = "Global", Key = "MaxHeight", Label = "高度上限",
-                            Badge = "now", Type = "int", Def = 18, Min = 0, Max = 30, St = 1
-                        }
-                    }
-                }
-            }
-            // 2026-10-25 数值化对账（作者定稿极简版）：Bind 面 = General.Enabled + Expand.Width/
-            // Height/Burden + Global.MaxWidth/MaxHeight，共 6 键；面板暴露 5 键（Enabled 走侧栏启停位）。
-            // Height 语义=基础高度，天赋加行三连（31931-31933）每级 +1 由 mod 按链级数表计算。
-            // 旧倍率键（Expand.*Mult）与 ExtraIds/ExcludeIds/Debug.* 已全部退役（首跑迁移后删除）。
-        },
-        new MetaMod
-        {
-            Guid = "com.local.survivallog.cabinetsize",
-            Name = "柜子容量", En = "CabinetSize",
-            Desc = "常用 13 包（置物架/冰箱/载具/工具柜）单独定宽高（0=恢复该柜原生）；其余柜子按 小/中/大/特大 档位自动调整；任意柜子可加个性化覆盖（优先级最高）；热改即时生效。",
-            Groups =
-            {
-                new MetaGroup
-                {
-                    Title = "专属修改：常用 13 包（0=恢复该柜原生）",
-                    Items =
-                    {
-                        BagW(110002, "小型置物架", 14, 10, "原生 6x8｜小档"),
-                        BagH(110002, "小型置物架", 10, "原生 6x8｜小档"),
-                        BagW(110001, "中型置物架", 16, 12, "原生 8x10｜中档；游戏内'工具柜'家具(70006)共用此包"),
-                        BagH(110001, "中型置物架", 12, "原生 8x10｜中档"),
-                        BagW(110000, "大型置物架", 18, 14, "原生 12x10｜大档"),
-                        BagH(110000, "大型置物架", 14, "原生 12x10｜大档"),
-                        BagW(110008, "超大型置物架", 20, 16, "原生 15x12｜特大档"),
-                        BagH(110008, "超大型置物架", 16, "原生 15x12｜特大档"),
-                        BagW(110009, "材料架", 20, 16, "原生 20x12｜特大档"),
-                        BagH(110009, "材料架", 16, "原生 20x12｜特大档"),
-                        BagW(1004, "双门冰箱", 16, 12, "原生 8x7｜中档"),
-                        BagH(1004, "双门冰箱", 12, "原生 8x7｜中档"),
-                        BagW(115000, "双开门冰箱", 16, 12, "原生 8x7｜中档"),
-                        BagH(115000, "双开门冰箱", 12, "原生 8x7｜中档"),
-                        BagW(115001, "冰柜", 18, 14, "原生 8x10｜大档"),
-                        BagH(115001, "冰柜", 14, "原生 8x10｜大档"),
-                        BagW(115005, "大容量冰柜", 20, 16, "原生 12x10｜特大档"),
-                        BagH(115005, "大容量冰柜", 16, "原生 12x10｜特大档"),
-                        BagW(1021, "自行车车筐", 12, 6, "原生 5x4｜独立定值 12x6"),
-                        BagH(1021, "自行车车筐", 6, "原生 5x4｜独立定值"),
-                        BagW(1022, "小汽车后备箱", 16, 8, "原生 10x8｜独立定值 16x8"),
-                        BagH(1022, "小汽车后备箱", 8, "原生 10x8｜独立定值"),
-                        BagW(1023, "SUV后备箱+门口塑料袋", 18, 10, "原生 12x10｜独立定值 18x10"),
-                        BagH(1023, "SUV后备箱+门口塑料袋", 10, "原生 12x10｜独立定值"),
-                        BagW(10007, "工具柜", 14, 10, "原生 6x7｜包 10007（家具 406），不随小档"),
-                        BagH(10007, "工具柜", 10, "原生 6x7｜不随小档；另一'工具柜'家具 70006 走中型置物架包 110001")
-                    }
-                },
-                new MetaGroup
-                {
-                    Title = "通用：档位与上限（未单独列出的柜子自动落档）",
-                    Items =
-                    {
-                        new MetaItem
-                        {
-                            Section = "Global", Key = "MaxWidth", Label = "宽度上限",
-                            Badge = "now", Type = "int", Def = 20, Min = 0, Max = 40, St = 1,
-                            Note = "0=不封顶；默认 20=官方原生最大宽度（材料架列数）"
-                        },
-                        new MetaItem
-                        {
-                            Section = "Global", Key = "MaxHeight", Label = "高度上限",
-                            Badge = "now", Type = "int", Def = 16, Min = 0, Max = 30, St = 1,
-                            Note = "0=不封顶；默认 16=特大档高度"
-                        },
-                        new MetaItem { Section = "Tier.Small", Key = "Width", Label = "小档宽度", Badge = "now", Type = "int", Def = 14, Min = 4, Max = 40, St = 1, Note = "原生格数 ≤60 的柜子" },
-                        new MetaItem { Section = "Tier.Small", Key = "Height", Label = "小档高度", Badge = "now", Type = "int", Def = 10, Min = 4, Max = 30, St = 1 },
-                        new MetaItem { Section = "Tier.Medium", Key = "Width", Label = "中档宽度", Badge = "now", Type = "int", Def = 16, Min = 4, Max = 40, St = 1, Note = "原生格数 61~99" },
-                        new MetaItem { Section = "Tier.Medium", Key = "Height", Label = "中档高度", Badge = "now", Type = "int", Def = 12, Min = 4, Max = 30, St = 1 },
-                        new MetaItem { Section = "Tier.Large", Key = "Width", Label = "大档宽度", Badge = "now", Type = "int", Def = 18, Min = 4, Max = 40, St = 1, Note = "原生格数 100~149" },
-                        new MetaItem { Section = "Tier.Large", Key = "Height", Label = "大档高度", Badge = "now", Type = "int", Def = 14, Min = 4, Max = 30, St = 1 },
-                        new MetaItem { Section = "Tier.XLarge", Key = "Width", Label = "特大档宽度", Badge = "now", Type = "int", Def = 20, Min = 4, Max = 40, St = 1, Note = "原生格数 ≥150" },
-                        new MetaItem { Section = "Tier.XLarge", Key = "Height", Label = "特大档高度", Badge = "now", Type = "int", Def = 16, Min = 4, Max = 30, St = 1 }
-                    }
-                }
-            },
-            // 个性化覆盖清单宿主（T20，照动作加速 OvrHost 同构）：string "id:WxH,id:WxH" ↔ bagOvr:[{id,w,h}]
-            // ——面板渲染为"个性化修改"块（新增柜子ID/逐行宽高/删除），值解析优先级最高、绕过黑名单
-            BagOvrHost = new MetaItem
-            {
-                Section = "Global", Key = "BagOverrides", Label = "个性化柜子清单",
-                Badge = "now", Type = "sel", Def = ""
-            }
-            // T20 对账注记（2026-10-25 作者令）：①工具柜并回"专属"一块不再单列；②展示顺序 专属→通用→个性化；
-            // ③新增个性化清单（BagOverrides 绑定键，CabinetSize 侧 Resolve 最高优先级 + 受管集注入绕黑名单）；
-            // ④全页面数值输入框去原生加减钮（panel.js numbox：type=text + inputmode=numeric + 仅数字清洗）。
-            // 13 包 [Bag.<id>] 为 v4 绑定键直达反射桥；Preset（勿手改）/ExcludeIds/Debug.* 不进面板。
-        },
-        new MetaMod
-        {
-            Guid = "com.local.survivallog.cabinetburden",
-            Name = "柜子负重解放", En = "CabinetBurden",
-            Desc = "储物家具负重清零（0=官方'无重量上限'语义，柜子界面负重条自动隐藏）；名单自动发现，默认排除购物车/轿车；切换/改名单后重进存档对已存在容器生效。",
-            // CabinetBurden 的总开关在自己的 cfg [Burden] Enabled（非套件模板 General.Enabled）
-            EnabledSection = "Burden", EnabledKey = "Enabled",
-            Groups =
-            {
-                new MetaGroup
-                {
-                    Title = "负重名单（改后重进存档生效）",
-                    Items =
-                    {
-                        new MetaItem
-                        {
-                            Section = "Burden", Key = "IncludeBagIds", Label = "追加解放的包编号（逗号分隔）",
-                            Badge = "reload", Type = "sel", Def = "",
-                            Note = "如 5010,5012,5013（工作台抽屉）或 3,4（购物车/轿车）；留空=只覆盖自动发现的储物包"
-                        },
-                        new MetaItem
-                        {
-                            Section = "Burden", Key = "ExcludeBagIds", Label = "排除的包编号（优先级最高）",
-                            Badge = "reload", Type = "sel", Def = "3,4",
-                            Note = "默认排除 3(购物车)/4(轿车)——载具包走背包装备体系"
-                        },
-                        new MetaItem
-                        {
-                            Section = "Debug", Key = "ListOnReady", Label = "启动时在日志列出受管包",
-                            Badge = "cfg", Type = "bool", Def = true,
-                            Note = "首轮生效时在 LogOutput 列出全部受管储物包与负重改写（核对名单用）"
-                        },
-                        new MetaItem
-                        {
-                            Section = "Debug", Key = "Verbose", Label = "每轮输出明细",
-                            Badge = "cfg", Type = "bool", Def = false
-                        }
-                    }
-                }
-            }
-        },
         new MetaMod
         {
             Guid = "com.local.survivallog.fridgechill",
@@ -352,6 +175,17 @@ internal static class Meta
                         new MetaItem { Section = "Rail", Key = "Height_1023", Label = "SUV后备箱", Badge = "now", Type = "int", Def = 0, Min = 0, Max = 50, St = 1, Note = "与门口塑料袋共用；原生 10" },
                         new MetaItem { Section = "Rail", Key = "DrawerHeight", Label = "工作台抽屉", Badge = "now", Type = "int", Def = 0, Min = 0, Max = 50, St = 1, Note = "基准行数：三档=H/H+1/H+2（升级加行保留）；原生链 5/6/7" },
                         new MetaItem { Section = "Rail", Key = "MaxHeight", Label = "高度上限", Badge = "now", Type = "int", Def = 50, Min = 0, Max = 200, St = 1, Note = "逐包夹持；0=不封顶自担" }
+                    }
+                },
+                // 负重批（2026-11-07 作者令）：背包负重调整新增 + 原独立 mod CabinetBurden 并回；
+                // Burden 是 BagComponent.OnInit 快照——改值/切换后需重进存档对已存在容器/已穿背包生效（Badge=reload）。
+                new MetaGroup
+                {
+                    Title = "负重（重进存档后生效）",
+                    Items =
+                    {
+                        new MetaItem { Section = "Burden", Key = "BackpackBurden", Label = "背包负重（kg）", Badge = "reload", Type = "int", Def = 0, Min = 0, Max = 1000, St = 1, Note = "0=官方原值；9 个可穿背包统一（原生 9.6~12.5kg），天赋加成照常叠加" },
+                        new MetaItem { Section = "Burden", Key = "CabinetUnburden", Label = "柜子负重解放", Badge = "reload", Type = "bool", Def = true, Note = "true=储物家具负重清零（负重条整行隐藏，等同冰箱）；false=恢复官方原值" }
                     }
                 }
             }
@@ -537,20 +371,6 @@ internal static class Meta
     {
         Section = "分类修改", Key = key, Label = label,
         Badge = "now", Type = "int", Def = 500, Min = 0, Max = 5000, St = 50
-    };
-
-    // 柜子容量 13 包显式条目（T19）：Section="Bag.<id>" 是 CabinetSize v4 绑定键——
-    // 反射桥按 entry 读写（V/Min/Max 快照反射+Meta 兜底，写走 TrySet 常规路径）
-    private static MetaItem BagW(int id, string name, int defW, int defH, string note) => new()
-    {
-        Section = "Bag." + id, Key = "Width", Label = name + " 宽度",
-        Badge = "now", Type = "int", Def = defW, Min = 0, Max = 40, St = 1, Note = note
-    };
-
-    private static MetaItem BagH(int id, string name, int defH, string note) => new()
-    {
-        Section = "Bag." + id, Key = "Height", Label = name + " 高度",
-        Badge = "now", Type = "int", Def = defH, Min = 0, Max = 30, St = 1, Note = note
     };
 
     private static MetaItem MultItem(string key) => new()
