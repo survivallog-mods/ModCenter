@@ -64,12 +64,13 @@
  *
  * 数据流（T6 契约）：收 __mcRender(snapshot) 全量重绘（无 diff，官方模式）；
  * snapshot = {self:{ver}, mods:[ModInfo], tp:[ModInfo]}，
- * ModInfo={guid,name,en,desc,enabled,groups:[{title,items:[Item]}],ovr?:[{id,ms}]}，
+ * ModInfo={guid,name,en,desc,enabled,groups:[{title,items:[Item]}],ovr?:[{id,ms}],acts?:[{id,n,c,ms}]}，
  * Item={k,l,t,v,min?,max?,st?,b,note?,opts?}。发消息 push __mcOutbox：
  * MC_SET{guid,section,key,value}（section/key 从展示键 k 按首个 '.' 拆分——C# Match
  * 接受真实节名+主键/组合展示键/任一实写键）/ MC_TOGGLE_MOD{guid,enabled} / MC_OPEN{host}
  * / MC_CLOSE{host?,why?}（why='host-doc-gone' 为任务 8 孤儿看门狗补发）。ovr 清单序列化
- * （"id:ms,id:ms" 整串写 其他.Overrides）由本文件承担。
+ * （"id:ms,id:ms" 整串写 其他.Overrides）由本文件承担。acts=动作目录（v2.1.1，QuickAction
+ * v1.8.0+ 产 QuickActionCatalog.txt）——动作覆盖新增走五分类下拉显示动作名，无 acts 回退 ID 手输。
  *
  * 全部元素 id/class 与样式 __mc 前缀且选择器锚定 #__mc_overlay（零泄漏）；不碰官方
  * tabs 数组与页面数据（CabinetEverywhere C6 决策同款）。
@@ -177,8 +178,29 @@
     + '#__mc_overlay .__mc-b-now{color:#4ade80;}#__mc_overlay .__mc-b-reload{color:#60a5fa;}'
     + '#__mc_overlay .__mc-b-reboot{color:#f87171;}#__mc_overlay .__mc-b-cfg{color:#b8a1e3;}'
     /* 覆盖清单 */
-    + '#__mc_overlay .__mc-ovr-add{display:flex;gap:8px;align-items:center;padding:10px 4px 6px;}'
+    + '#__mc_overlay .__mc-ovr-add{display:flex;gap:8px;align-items:center;padding:10px 4px 6px;flex-wrap:wrap;}'
     + '#__mc_overlay .__mc-ovr-add input{width:120px;background:#0f1219;border:1px solid #2a2f3d;color:#e8e6e0;border-radius:6px;padding:5px 9px;font-size:13px;font-family:Consolas,monospace;}'
+    /* v2.1.1（作者令四稿）：动作覆盖行内两级可搜索下拉（自绘 dd 组件——原生 select 不支持
+     * 搜索/两级弹出）。关闭态=按钮显示当前动作名；点开=第 1 级类型列表（组+数量）→ 选类型
+     * 弹第 2 级该类型动作列表（顶部搜索框过滤动作名 + 返回类型）；点动作即提交。列表开时才
+     * 构建（按类型现取；单类型最多约 2700 项一次渲染无压力，搜索按 display 过滤）。 */
+    + '#__mc_overlay .__mc-ovr-dd{position:relative;flex:1 1 auto;min-width:0;max-width:320px;}'
+    + '#__mc_overlay .__mc-ovr-dd-btn{width:100%;display:flex;align-items:center;justify-content:space-between;gap:6px;background:#0f1219;border:1px solid #2a2f3d;color:#e8e6e0;border-radius:6px;padding:5px 9px;font-size:13px;cursor:pointer;font-family:inherit;text-align:left;}'
+    + '#__mc_overlay .__mc-ovr-dd-btn:hover{border-color:#e8a33d;}'
+    + '#__mc_overlay .__mc-ovr-dd-btn.__mc-ovr-dd-ph{color:#6b7180;}'
+    + '#__mc_overlay .__mc-ovr-dd-caret{color:#6b7180;font-size:11px;flex-shrink:0;}'
+    + '#__mc_overlay .__mc-ovr-dd-pop{position:absolute;top:calc(100% + 4px);left:0;z-index:12;min-width:100%;width:260px;max-height:280px;overflow:auto;background:#0f1219;border:1px solid #2a2f3d;border-radius:8px;box-shadow:0 10px 30px rgba(0,0,0,.6);padding:4px;}'
+    /* 下方空间不足（尾部行贴近滚动容器底边）→ 向上弹出（检查轮 2026-11-08：恒在底部的
+     * 尾行向下展开必被容器底边裁切） */
+    + '#__mc_overlay .__mc-ovr-dd-pop.__mc-ovr-dd-up{top:auto;bottom:calc(100% + 4px);}'
+    + '#__mc_overlay .__mc-ovr-dd-item{display:flex;align-items:center;justify-content:space-between;gap:8px;padding:6px 9px;font-size:12.5px;color:#e8e6e0;cursor:pointer;border-radius:5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}'
+    + '#__mc_overlay .__mc-ovr-dd-item:hover{background:rgba(232,163,61,.13);color:#e8a33d;}'
+    + '#__mc_overlay .__mc-ovr-dd-cnt{color:#6b7180;font-size:11px;flex-shrink:0;}'
+    + '#__mc_overlay .__mc-ovr-dd-tools{position:sticky;top:0;display:flex;gap:6px;align-items:center;background:#0f1219;padding:4px 4px 6px;border-bottom:1px solid #2a2f3d;margin-bottom:4px;z-index:1;}'
+    + '#__mc_overlay .__mc-ovr-dd-search{flex:1;min-width:0;background:#171a23;border:1px solid #2a2f3d;color:#e8e6e0;border-radius:6px;padding:4px 8px;font-size:12.5px;font-family:inherit;}'
+    + '#__mc_overlay .__mc-ovr-dd-back{flex-shrink:0;background:transparent;border:1px solid #2a2f3d;color:#9aa0ad;border-radius:6px;padding:4px 8px;font-size:12px;cursor:pointer;font-family:inherit;}'
+    + '#__mc_overlay .__mc-ovr-dd-back:hover{color:#e8a33d;border-color:#e8a33d;}'
+    + '#__mc_overlay .__mc-ovr-hint{font-size:12px;color:#6b7180;}'
     + '#__mc_overlay .__mc-ovr-add button{background:#0f1219;border:1px solid #e8a33d;color:#e8a33d;border-radius:6px;padding:5px 14px;font-size:13px;cursor:pointer;font-family:inherit;}'
     + '#__mc_overlay .__mc-ovr-add button:hover{background:rgba(232,163,61,.13);}'
     + '#__mc_overlay .__mc-del{width:26px;height:26px;border-radius:6px;border:1px solid #2a2f3d;background:transparent;color:#6b7180;font-size:12px;cursor:pointer;flex-shrink:0;font-family:inherit;line-height:1;}'
@@ -916,33 +938,116 @@
       + '</div>';
   }
 
+  /* ---- v2.1.1 动作覆盖：行内两级可搜索下拉（作者令四稿）----
+   * m.acts=[{id,n,c,ms}]（QuickActionCatalog.txt，QuickAction v1.8.0+ 每会话产出，约 3800 条）。
+   * 自绘 dd 组件：关闭态=按钮显示当前动作名；点开=第 1 级类型列表（六组+数量）→ 选类型弹
+   * 第 2 级该类型动作列表（顶部搜索框过滤 + 返回类型）——不全平铺。点动作即提交（尾行新增
+   * 默认 1000ms、已覆盖行换动作保留毫秒、重复拒绝）。守卫口径（不可提速名单）由 QuickAction
+   * 单源过滤，列进来的动作覆盖一定生效。无目录回退旧渲染 + ID 手输框（行为不变）。 */
+  var OVR_CAT_NAMES = { 1: '\u7269\u54c1\u4f7f\u7528', 2: '\u5bb6\u5177\u529f\u80fd', 3: '\u623f\u5c4b\u7ef4\u62a4', 4: '\u6742\u9879\u4ea4\u4e92', 5: '\u5a31\u4e50\u953b\u70bc', 6: '\u91ce\u5916\u4e0e\u5176\u4ed6' };
+  function ovrNameOf(m, id) {
+    var acts = m.acts || [];
+    for (var i = 0; i < acts.length; i++) if (acts[i].id === id) return acts[i].n;
+    return null;
+  }
+  function ovrLabelOf(m, id) { return ovrNameOf(m, id) || ('\u52a8\u4f5c #' + id); }
+  /* dd 组件壳（kind='pick' 已覆盖行 / 'new' 尾部未设置行；label 空=占位态灰字） */
+  function ovrDdHtml(kind, idx, label, ph) {
+    return '<div class="__mc-ovr-dd" data-kind="' + kind + '"' + (idx != null ? ' data-idx="' + idx + '"' : '') + '>'
+      + '<button type="button" class="__mc-ovr-dd-btn' + (label ? '' : ' __mc-ovr-dd-ph') + '" data-act="ovr-dd-toggle">'
+      + esc(label || ph) + '<span class="__mc-ovr-dd-caret">\u25be</span></button>'
+      + '<div class="__mc-ovr-dd-pop" hidden></div>'
+      + '</div>';
+  }
+  function closeAllOvrDd() {
+    if (!S.cfg) return;
+    var pops = S.cfg.querySelectorAll('.__mc-ovr-dd-pop');
+    for (var i = 0; i < pops.length; i++) { pops[i].hidden = true; pops[i].innerHTML = ''; }
+  }
+  /* 弹层方向：dd 下方到滚动容器（S.cfg）底边空间 <300px → 向上弹（尾行恒在底部必命中） */
+  function ovrDdPlace(widget) {
+    var pop = widget.querySelector('.__mc-ovr-dd-pop');
+    var host = S.cfg || document.querySelector('#__mc_overlay');
+    if (!pop || !host) return;
+    var below = host.getBoundingClientRect().bottom - widget.getBoundingClientRect().bottom;
+    if (below < 300) pop.classList.add('__mc-ovr-dd-up');
+    else pop.classList.remove('__mc-ovr-dd-up');
+  }
+  /* 第 1 级：类型列表（现算各组数量） */
+  function ovrDdShowLv1(widget, m) {
+    var pop = widget.querySelector('.__mc-ovr-dd-pop');
+    var counts = {};
+    var acts = m.acts || [];
+    for (var i = 0; i < acts.length; i++) counts[acts[i].c] = (counts[acts[i].c] || 0) + 1;
+    var h = '';
+    for (var c = 1; c <= 6; c++)
+      if (counts[c])
+        h += '<div class="__mc-ovr-dd-item" data-act="ovr-dd-cat" data-cat="' + c + '">'
+          + esc(OVR_CAT_NAMES[c]) + '<span class="__mc-ovr-dd-cnt">' + counts[c] + '</span></div>';
+    pop.innerHTML = h;
+    pop.hidden = false;
+    ovrDdPlace(widget);
+  }
+  /* 第 2 级：该类型动作列表 + 搜索框（sticky）+ 返回类型 */
+  function ovrDdShowLv2(widget, m, cat) {
+    var pop = widget.querySelector('.__mc-ovr-dd-pop');
+    var acts = m.acts || [];
+    var h = '<div class="__mc-ovr-dd-tools">'
+      + '<input type="text" class="__mc-ovr-dd-search" data-act="ovr-dd-search" placeholder="\u641c\u7d22\u52a8\u4f5c\u2026">'
+      + '<button type="button" class="__mc-ovr-dd-back" data-act="ovr-dd-back">\u2039 \u7c7b\u578b</button>'
+      + '</div>';
+    for (var i = 0; i < acts.length; i++)
+      if (acts[i].c === cat)
+        h += '<div class="__mc-ovr-dd-item __mc-ovr-dd-opt" data-act="ovr-dd-opt" data-id="' + acts[i].id + '">' + esc(acts[i].n) + '</div>';
+    pop.innerHTML = h;
+    pop.hidden = false;
+    ovrDdPlace(widget);
+    var se = pop.querySelector('.__mc-ovr-dd-search');
+    if (se) se.focus();
+  }
   function ovrHtml(m) {
-    var h = '<div class="__mc-grp"><h3>\u52a8\u4f5c\u8986\u76d6\uff08\u5355\u4e2a\u52a8\u4f5c\u5355\u72ec\u8c03\uff09</h3>'
-      + '<div class="__mc-ovr-add">'
+    var acts = m.acts || [];
+    var h = '<div class="__mc-grp"><h3>\u52a8\u4f5c\u8986\u76d6\uff08\u5355\u4e2a\u52a8\u4f5c\u5355\u72ec\u8c03\uff09</h3>';
+    var ovr = m.ovr || [];
+    for (var idx = 0; idx < ovr.length; idx++) {
+      var info;
+      if (acts.length) {
+        /* 行内 dd=该行动作（目录外的 id 兜底显示，照常可改/删） */
+        info = '<div class="__mc-info">'
+          + ovrDdHtml('pick', idx, ovrLabelOf(m, ovr[idx].id), '')
+          + '<div class="__mc-ck">' + OVR_SECTION + '.' + OVR_KEY + ' \u00b7 ' + ovr[idx].id + ':' + ovr[idx].ms + '</div>'
+          + '</div>';
+      } else {
+        info = '<div class="__mc-info">'
+          + '<div class="__mc-lb">' + esc(ovrLabelOf(m, ovr[idx].id)) + '</div>'
+          + '<div class="__mc-ck">' + OVR_SECTION + '.' + OVR_KEY + ' \u00b7 ' + ovr[idx].id + ':' + ovr[idx].ms + '</div>'
+          + '</div>';
+      }
+      h += '<div class="__mc-item">'
+        + info
+        + '<div class="__mc-ctl">'
+        + '<input type="range" min="0" max="5000" step="50" value="' + ovr[idx].ms + '" data-act="ovr-set" data-idx="' + idx + '">'
+        + '<input type="text" class="__mc-numbox" inputmode="numeric" data-num="int" value="' + ovr[idx].ms + '" data-act="ovr-set" data-idx="' + idx + '">'
+        + '</div>'
+        + '<div class="__mc-badge __mc-b-now">\u26a1 \u7acb\u5373\u751f\u6548</div>'
+        + '<button type="button" class="__mc-del" data-act="ovr-del" data-idx="' + idx + '" title="\u5220\u9664\u6b64\u8986\u76d6">\u2715</button>'
+        + '</div>';
+    }
+    if (acts.length) {
+      /* 尾部未设置行：选完动作即提交（默认 1000ms），renderCfg 后自动补新空行 */
+      h += '<div class="__mc-item">'
+        + '<div class="__mc-info">' + ovrDdHtml('new', null, '', '\u9009\u62e9\u52a8\u4f5c\u2026') + '</div>'
+        + '<div class="__mc-ctl"><span class="__mc-ovr-hint">\u9009\u5b8c\u52a8\u4f5c\u81ea\u52a8\u6dfb\u52a0\uff08\u9ed8\u8ba4 1000ms\uff09</span></div>'
+        + '</div>';
+    } else {
       /* 实机 UI 三修·问题3：number 框在游戏 WebView 带原生加减钮（遮挡/误触）——改纯文本框
        * + inputmode=numeric（软键盘数字提示）；min 属性去除。parseInt 校验与防重复逻辑
        * 不变（wireCfg ovr-add 分支：!isNaN(id) && id>0 && !m.ovr.some(...)）。 */
-      + '<input type="text" id="__mc_ovr_new" placeholder="\u52a8\u4f5c ID" inputmode="numeric">'
-      + '<button type="button" data-act="ovr-add">\uff0b \u65b0\u589e\u8986\u76d6</button>'
-      + '</div>';
-    var ovr = m.ovr || [];
-    if (!ovr.length) {
-      h += '<div class="__mc-ovr-empty">\u6682\u65e0\u8986\u76d6\u3002\u65b0\u589e\u540e\u5728\u6b64\u5217\u51fa\uff0c\u6ed1\u6761\u5373\u65f6\u8c03\u6574\u3002</div>';
-    } else {
-      for (var idx = 0; idx < ovr.length; idx++) {
-        h += '<div class="__mc-item">'
-          + '<div class="__mc-info">'
-          + '<div class="__mc-lb">\u52a8\u4f5c #' + ovr[idx].id + '</div>'
-          + '<div class="__mc-ck">' + OVR_SECTION + '.' + OVR_KEY + ' \u00b7 ' + ovr[idx].id + ':' + ovr[idx].ms + '</div>'
-          + '</div>'
-          + '<div class="__mc-ctl">'
-          + '<input type="range" min="0" max="5000" step="50" value="' + ovr[idx].ms + '" data-act="ovr-set" data-idx="' + idx + '">'
-          + '<input type="text" class="__mc-numbox" inputmode="numeric" data-num="int" value="' + ovr[idx].ms + '" data-act="ovr-set" data-idx="' + idx + '">'
-          + '</div>'
-          + '<div class="__mc-badge __mc-b-now">\u26a1 \u7acb\u5373\u751f\u6548</div>'
-          + '<button type="button" class="__mc-del" data-act="ovr-del" data-idx="' + idx + '" title="\u5220\u9664\u6b64\u8986\u76d6">\u2715</button>'
-          + '</div>';
-      }
+      h += '<div class="__mc-ovr-add">'
+        + '<input type="text" id="__mc_ovr_new" placeholder="\u52a8\u4f5c ID" inputmode="numeric">'
+        + '<button type="button" data-act="ovr-add">\uff0b \u65b0\u589e\u8986\u76d6</button>'
+        + '</div>'
+        + '<div class="__mc-ovr-empty">\u6682\u65e0\u8986\u76d6\u3002\u65b0\u589e\u540e\u5728\u6b64\u5217\u51fa\uff0c\u6ed1\u6761\u5373\u65f6\u8c03\u6574\u3002</div>';
     }
     return h + '</div>';
   }
@@ -1619,6 +1724,8 @@
     cfg.addEventListener('click', function (e) {
       var t = e.target;
       if (!t.closest) return;
+      /* v2.1.1 dd 下拉：点击 dd 以外区域关闭已打开的动作弹出层 */
+      if (!t.closest('.__mc-ovr-dd')) closeAllOvrDd();
       /* v3：仓库动作只保留 行内 更新·降级·安装 → 确认弹窗（back/chk/updall/repogoto 随
        * 仓库页退役；检查更新在头部按钮）。 */
       var ra = t.closest('[data-ract]');
@@ -1648,7 +1755,65 @@
         toast('\u5df2\u4fdd\u5b58\uff1a' + m.name + ' \u00b7 ' + it.l + ' = ' + (it.v ? '\u5f00' : '\u5173'), it.b);
         return;
       }
-      /* 覆盖清单：新增 */
+      /* 覆盖清单 dd 下拉：开/关（切换时先全局关再按需开，保证同时只有一个弹出层） */
+      var ddt = t.closest('[data-act="ovr-dd-toggle"]');
+      if (ddt) {
+        var ddw = ddt.closest('.__mc-ovr-dd');
+        var ddPop = ddw.querySelector('.__mc-ovr-dd-pop');
+        var ddWasOpen = !ddPop.hidden;
+        closeAllOvrDd();
+        if (!ddWasOpen) ovrDdShowLv1(ddw, m);
+        return;
+      }
+      /* dd 第 1 级：选类型 → 弹该类型动作列表（第 2 级，带搜索） */
+      var ddc = t.closest('[data-act="ovr-dd-cat"]');
+      if (ddc) {
+        ovrDdShowLv2(ddc.closest('.__mc-ovr-dd'), m, +ddc.getAttribute('data-cat'));
+        return;
+      }
+      /* dd 第 2 级：返回类型列表 */
+      var ddb = t.closest('[data-act="ovr-dd-back"]');
+      if (ddb) {
+        var dbw = ddb.closest('.__mc-ovr-dd');
+        closeAllOvrDd();
+        ovrDdShowLv1(dbw, m);
+        return;
+      }
+      /* dd 第 2 级：点动作即提交（new=尾部未设置行新增默认 1000ms；pick=已覆盖行换动作保留毫秒） */
+      var ddo = t.closest('[data-act="ovr-dd-opt"]');
+      if (ddo) {
+        if (!m.ovr) return;
+        var dow = ddo.closest('.__mc-ovr-dd');
+        var doid = +ddo.getAttribute('data-id');
+        closeAllOvrDd();
+        if (dow.dataset.kind === 'new') {
+          if (m.ovr.some(function (x) { return x.id === doid; })) {
+            toast('\u8be5\u52a8\u4f5c\u5df2\u5728\u8986\u76d6\u6e05\u5355\uff0c\u53ef\u76f4\u63a5\u62d6\u6ed1\u6761\u8c03\u6574');
+            renderCfg();
+            return;
+          }
+          m.ovr.push({ id: doid, ms: 1000 });
+          renderCfg();
+          ovrCommit(m);
+          toast('\u5df2\u6dfb\u52a0\uff1a' + m.name + ' \u00b7 ' + ovrLabelOf(m, doid) + ' = 1000ms\uff08\u6ed1\u6761\u53ef\u8c03\uff09', 'now');
+        } else {
+          var dpi = +dow.dataset.idx;
+          var dpo = m.ovr[dpi];
+          if (!dpo) return;
+          if (doid === dpo.id) { renderCfg(); return; }
+          if (m.ovr.some(function (x, xi) { return x.id === doid && xi !== dpi; })) {
+            toast('\u8be5\u52a8\u4f5c\u5df2\u5728\u8986\u76d6\u6e05\u5355\uff0c\u53ef\u76f4\u63a5\u62d6\u90a3\u884c\u6ed1\u6761\u8c03\u6574');
+            renderCfg();
+            return;
+          }
+          dpo.id = doid;
+          renderCfg();
+          ovrCommit(m);
+          toast('\u5df2\u6539\u4e3a\uff1a' + m.name + ' \u00b7 ' + ovrLabelOf(m, doid) + ' = ' + dpo.ms + 'ms', 'now');
+        }
+        return;
+      }
+      /* 覆盖清单：新增（仅旧版回退路径——无动作目录时的 ID 手输框；目录路径走 dd 下拉） */
       var add = t.closest('[data-act="ovr-add"]');
       if (add) {
         if (!m.ovr) return;
@@ -1672,7 +1837,7 @@
           m.ovr.splice(idx, 1);
           renderCfg();
           ovrCommit(m);
-          toast('\u5df2\u5220\u9664\uff1a' + m.name + ' \u00b7 \u8986\u76d6 #' + gone, 'now');
+          toast('\u5df2\u5220\u9664\uff1a' + m.name + ' \u00b7 \u8986\u76d6 ' + ovrLabelOf(m, gone), 'now');
         }
         return;
       }
@@ -1721,6 +1886,15 @@
       if (!act) return;
       var m = curMod();
       if (!m) return;
+      /* v2.1.1 dd 下拉第 2 级搜索框：按动作名子串过滤（display 隐藏，保留滚动位置） */
+      if (act === 'ovr-dd-search') {
+        var sq = (el.value || '').trim().toLowerCase();
+        var spop = el.closest('.__mc-ovr-dd-pop');
+        var sitems = spop.querySelectorAll('.__mc-ovr-dd-opt');
+        for (var si = 0; si < sitems.length; si++)
+          sitems[si].style.display = (!sq || sitems[si].textContent.toLowerCase().indexOf(sq) >= 0) ? '' : 'none';
+        return;
+      }
       /* 覆盖清单滑条/数值 */
       if (act === 'ovr-set') {
         if (!m.ovr) return;
@@ -1736,7 +1910,7 @@
           if (ckEl) ckEl.textContent = OVR_SECTION + '.' + OVR_KEY + ' \u00b7 ' + o.id + ':' + o.ms;
         }
         throttleSend('ovr' + el.getAttribute('data-idx'), function () { ovrCommit(m); });
-        toast('\u5df2\u4fdd\u5b58\uff1a' + m.name + ' \u00b7 \u8986\u76d6 #' + o.id + ' = ' + o.ms + 'ms', 'now');
+        toast('\u5df2\u4fdd\u5b58\uff1a' + m.name + ' \u00b7 \u8986\u76d6 ' + ovrLabelOf(m, o.id) + ' = ' + o.ms + 'ms', 'now');
         return;
       }
       /* T20 个性化柜子清单：宽/高纯文本框（int 清洗已在上；0..40/0..30 钳制） */
@@ -1778,9 +1952,9 @@
       var el = e.target;
       if (!el.getAttribute) return;
       var act = el.getAttribute('data-act');
-      if (act !== 'set') return;
       var m = curMod();
       if (!m) return;
+      if (act !== 'set') return;
       var it = itemOf(m, +el.getAttribute('data-g'), +el.getAttribute('data-i'));
       if (!it) return;
       if (el.tagName === 'SELECT') {

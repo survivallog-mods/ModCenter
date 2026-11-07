@@ -1284,9 +1284,13 @@ entry.Value = 3f;
   `Description.AcceptableValues`（`AcceptableValueRange.MinValue/MaxValue` / `AcceptableValueList`，
   closed generic 走 `GetType().GetProperty` 反射读）合入；Meta 里的 Def/Min/Max 只在范围缺失或
   entry 尚不存在时兜底（数值照 spec §7 表抄）。步进 st 无反射来源，永远兜底。
-- `Payload.cs`：DTO（Snapshot/ModInfo/GroupInfo/ItemInfo/OvrInfo）+ 手写 JSON（AOT 零反射）；
+- `Payload.cs`：DTO（Snapshot/ModInfo/GroupInfo/ItemInfo/OvrInfo/ActInfo）+ 手写 JSON（AOT 零反射）；
   入向消息解析 `JsonDocument`（EndlessGuard 同款实绩 API）。契约签名冻结：任务 7 UI 逐字消费
-  （`{self:{ver},mods,tp}` / `Item={k,l,t,v,min,max,st,b,note,opts}` / ovr 类 mod 另挂 `ovr:[{id,ms}]`）。
+  （`{self:{ver},mods,tp}` / `Item={k,l,t,v,min,max,st,b,note,opts}` / ovr 类 mod 另挂 `ovr:[{id,ms}]`；
+  v2.1.1 起动作加速另挂 `acts:[{id,n,c,ms}]` 动作目录——「动作覆盖」每行自带自绘两级可搜索
+  下拉（点开选类型→弹该类型动作列表可搜索），动作随时可改，尾部恒置未设置行选完自动补新行，
+  单源=QuickActionCatalog.txt（ActionCatalog.cs
+  读+LastWriteTimeUtc 缓存），缺文件=null 不输出，面板回退 ID 手输框（旧版 QuickAction dll 兼容）。
 - `ConfigBridge.cs`：枚举/快照/写/启停/消息分发/Save 防抖，全部在 Ticker 主线程（Pump）执行；
   Eval 回调线程只入队（`ConcurrentQueue`）。
 - 两处对 spec 的实证修正（实证优先）：**UiFit.Mode 合法值是 Scroll/Zoom/Off**（ViewportFit.cs

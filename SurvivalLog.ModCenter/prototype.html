@@ -105,8 +105,26 @@
 #__mc_overlay .__mc-b-now{color:#4ade80;}#__mc_overlay .__mc-b-reload{color:#60a5fa;}
 #__mc_overlay .__mc-b-reboot{color:#f87171;}#__mc_overlay .__mc-b-cfg{color:#b8a1e3;}
 /* 覆盖清单 */
-#__mc_overlay .__mc-ovr-add{display:flex;gap:8px;align-items:center;padding:10px 4px 6px;}
+#__mc_overlay .__mc-ovr-add{display:flex;gap:8px;align-items:center;padding:10px 4px 6px;flex-wrap:wrap;}
 #__mc_overlay .__mc-ovr-add input{width:120px;background:#0f1219;border:1px solid #2a2f3d;color:#e8e6e0;border-radius:6px;padding:5px 9px;font-size:13px;font-family:Consolas,monospace;}
+/* v2.1.1（作者令四稿）：动作覆盖行内两级可搜索下拉（自绘 dd 组件——原生 select 不支持搜索/两级弹出）。
+关闭态=按钮显示当前动作名；点开=第 1 级类型列表（组+数量）→ 选类型弹第 2 级该类型动作列表（顶部搜索框过滤+返回类型）；点动作即提交。列表开时才构建。 */
+#__mc_overlay .__mc-ovr-dd{position:relative;flex:1 1 auto;min-width:0;max-width:320px;}
+#__mc_overlay .__mc-ovr-dd-btn{width:100%;display:flex;align-items:center;justify-content:space-between;gap:6px;background:#0f1219;border:1px solid #2a2f3d;color:#e8e6e0;border-radius:6px;padding:5px 9px;font-size:13px;cursor:pointer;font-family:inherit;text-align:left;}
+#__mc_overlay .__mc-ovr-dd-btn:hover{border-color:#e8a33d;}
+#__mc_overlay .__mc-ovr-dd-btn.__mc-ovr-dd-ph{color:#6b7180;}
+#__mc_overlay .__mc-ovr-dd-caret{color:#6b7180;font-size:11px;flex-shrink:0;}
+#__mc_overlay .__mc-ovr-dd-pop{position:absolute;top:calc(100% + 4px);left:0;z-index:12;min-width:100%;width:260px;max-height:280px;overflow:auto;background:#0f1219;border:1px solid #2a2f3d;border-radius:8px;box-shadow:0 10px 30px rgba(0,0,0,.6);padding:4px;}
+/* 下方空间不足（尾部行贴近滚动容器底边）→ 向上弹出（检查轮 2026-11-08：恒在底部的尾行向下展开必被容器底边裁切） */
+#__mc_overlay .__mc-ovr-dd-pop.__mc-ovr-dd-up{top:auto;bottom:calc(100% + 4px);}
+#__mc_overlay .__mc-ovr-dd-item{display:flex;align-items:center;justify-content:space-between;gap:8px;padding:6px 9px;font-size:12.5px;color:#e8e6e0;cursor:pointer;border-radius:5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+#__mc_overlay .__mc-ovr-dd-item:hover{background:rgba(232,163,61,.13);color:#e8a33d;}
+#__mc_overlay .__mc-ovr-dd-cnt{color:#6b7180;font-size:11px;flex-shrink:0;}
+#__mc_overlay .__mc-ovr-dd-tools{position:sticky;top:0;display:flex;gap:6px;align-items:center;background:#0f1219;padding:4px 4px 6px;border-bottom:1px solid #2a2f3d;margin-bottom:4px;z-index:1;}
+#__mc_overlay .__mc-ovr-dd-search{flex:1;min-width:0;background:#171a23;border:1px solid #2a2f3d;color:#e8e6e0;border-radius:6px;padding:4px 8px;font-size:12.5px;font-family:inherit;}
+#__mc_overlay .__mc-ovr-dd-back{flex-shrink:0;background:transparent;border:1px solid #2a2f3d;color:#9aa0ad;border-radius:6px;padding:4px 8px;font-size:12px;cursor:pointer;font-family:inherit;}
+#__mc_overlay .__mc-ovr-dd-back:hover{color:#e8a33d;border-color:#e8a33d;}
+#__mc_overlay .__mc-ovr-hint{font-size:12px;color:#6b7180;}
 #__mc_overlay .__mc-ovr-add button{background:#0f1219;border:1px solid #e8a33d;color:#e8a33d;border-radius:6px;padding:5px 14px;font-size:13px;cursor:pointer;font-family:inherit;}
 #__mc_overlay .__mc-ovr-add button:hover{background:rgba(232,163,61,.13);}
 #__mc_overlay .__mc-del{width:26px;height:26px;border-radius:6px;border:1px solid #2a2f3d;background:transparent;color:#6b7180;font-size:12px;cursor:pointer;flex-shrink:0;font-family:inherit;line-height:1;}
@@ -408,7 +426,16 @@ var MOCK = {
           { k: 'Speed.Combat',  l: '战斗类', t: 'int', v: 500, min: 0, max: 5000, st: 50, b: 'now' },
         ]},
       ],
-      ovr: [ { id: 1001, ms: 800 }, { id: 1002, ms: 1200 } ],
+      /* v2.1.1 动作目录样例（真机=QuickActionCatalog.txt 全量约 3800 条；夹具每组 2 条演示下拉） */
+      acts: [
+        { id: 100003001, n: '看书', c: 5, ms: 2600 }, { id: 1915, n: '空调吹风', c: 5, ms: 5000 },
+        { id: 100009001, n: '观察便签', c: 4, ms: 2000 }, { id: 9075, n: '上厕所', c: 4, ms: 1500 },
+        { id: 30, n: '修补房门', c: 3, ms: 1500 }, { id: 25, n: '修理设施', c: 3, ms: 6000 },
+        { id: 2, n: '拆封包裹', c: 2, ms: 3000 }, { id: 1611, n: '正在种植', c: 2, ms: 1500 },
+        { id: 100001001, n: '吃喝', c: 1, ms: 2750 }, { id: 112, n: '上厕所', c: 1, ms: 1000 },
+        { id: 109, n: '冒险出门 探索中……', c: 6, ms: 3000 }, { id: 114, n: '瞭望', c: 6, ms: 1500 },
+      ],
+      ovr: [ { id: 100001001, ms: 800 }, { id: 30, ms: 1200 } ],
     },
     {
       guid: 'com.local.survivallog.cabineteverywhere', name: '更好的储物柜', en: 'CabinetEverywhere', enabled: true,
@@ -871,30 +898,110 @@ function itemHtml(m, it, gi, ii) {
     + '</div>';
 }
 
-function ovrHtml(m) {
-  var h = '<div class="__mc-grp"><h3>动作覆写（单个动作单独调）</h3>'
-    + '<div class="__mc-ovr-add">'
-    + '<input type="text" id="__mc_ovr_new" placeholder="动作 ID" inputmode="numeric">'
-    + '<button type="button" data-act="ovr-add">＋ 新增覆写</button>'
+/* v2.1.1 动作覆盖：行内两级可搜索下拉（acts，QuickAction v1.8.0+ 产 QuickActionCatalog.txt 单源，
+ * 守卫口径由对方过滤——列进来的动作覆盖一定生效，约 3800 条）。自绘 dd 组件：点开先选类型
+ * （六组+数量）→ 弹该类型动作列表（搜索框过滤+返回类型）——不全平铺；点动作即提交（尾行新增
+ * 默认 1000ms、已覆盖行换动作保留毫秒、重复拒绝）。列表开时才构建。无 acts 回退旧渲染 + ID 手输框。 */
+var OVR_CAT_NAMES = { 1: '物品使用', 2: '家具功能', 3: '房屋维护', 4: '杂项交互', 5: '娱乐锻炼', 6: '野外与其他' };
+function ovrNameOf(m, id) {
+  var acts = m.acts || [];
+  for (var i = 0; i < acts.length; i++) if (acts[i].id === id) return acts[i].n;
+  return null;
+}
+function ovrLabelOf(m, id) { return ovrNameOf(m, id) || ('动作 #' + id); }
+/* dd 组件壳（kind='pick' 已覆盖行 / 'new' 尾部未设置行；label 空=占位态灰字） */
+function ovrDdHtml(kind, idx, label, ph) {
+  return '<div class="__mc-ovr-dd" data-kind="' + kind + '"' + (idx != null ? ' data-idx="' + idx + '"' : '') + '>'
+    + '<button type="button" class="__mc-ovr-dd-btn' + (label ? '' : ' __mc-ovr-dd-ph') + '" data-act="ovr-dd-toggle">'
+    + esc(label || ph) + '<span class="__mc-ovr-dd-caret">▾</span></button>'
+    + '<div class="__mc-ovr-dd-pop" hidden></div>'
     + '</div>';
+}
+function closeAllOvrDd() {
+  var pops = document.querySelectorAll('#__mc_overlay .__mc-ovr-dd-pop');
+  for (var i = 0; i < pops.length; i++) { pops[i].hidden = true; pops[i].innerHTML = ''; }
+}
+/* 弹层方向：dd 下方到滚动容器（S.cfg）底边空间 <300px → 向上弹（尾行恒在底部必命中） */
+function ovrDdPlace(widget) {
+  var pop = widget.querySelector('.__mc-ovr-dd-pop');
+  var host = S.cfg || document.querySelector('#__mc_overlay');
+  if (!pop || !host) return;
+  var below = host.getBoundingClientRect().bottom - widget.getBoundingClientRect().bottom;
+  if (below < 300) pop.classList.add('__mc-ovr-dd-up');
+  else pop.classList.remove('__mc-ovr-dd-up');
+}
+/* 第 1 级：类型列表（现算各组数量） */
+function ovrDdShowLv1(widget, m) {
+  var pop = widget.querySelector('.__mc-ovr-dd-pop');
+  var counts = {};
+  var acts = m.acts || [];
+  for (var i = 0; i < acts.length; i++) counts[acts[i].c] = (counts[acts[i].c] || 0) + 1;
+  var h = '';
+  for (var c = 1; c <= 6; c++)
+    if (counts[c])
+      h += '<div class="__mc-ovr-dd-item" data-act="ovr-dd-cat" data-cat="' + c + '">'
+        + esc(OVR_CAT_NAMES[c]) + '<span class="__mc-ovr-dd-cnt">' + counts[c] + '</span></div>';
+  pop.innerHTML = h;
+  pop.hidden = false;
+  ovrDdPlace(widget);
+}
+/* 第 2 级：该类型动作列表 + 搜索框（sticky）+ 返回类型 */
+function ovrDdShowLv2(widget, m, cat) {
+  var pop = widget.querySelector('.__mc-ovr-dd-pop');
+  var acts = m.acts || [];
+  var h = '<div class="__mc-ovr-dd-tools">'
+    + '<input type="text" class="__mc-ovr-dd-search" data-act="ovr-dd-search" placeholder="搜索动作…">'
+    + '<button type="button" class="__mc-ovr-dd-back" data-act="ovr-dd-back">‹ 类型</button>'
+    + '</div>';
+  for (var i = 0; i < acts.length; i++)
+    if (acts[i].c === cat)
+      h += '<div class="__mc-ovr-dd-item __mc-ovr-dd-opt" data-act="ovr-dd-opt" data-id="' + acts[i].id + '">' + esc(acts[i].n) + '</div>';
+  pop.innerHTML = h;
+  pop.hidden = false;
+  ovrDdPlace(widget);
+  var se = pop.querySelector('.__mc-ovr-dd-search');
+  if (se) se.focus();
+}
+function ovrHtml(m) {
+  var acts = m.acts || [];
+  var h = '<div class="__mc-grp"><h3>动作覆盖（单个动作单独调）</h3>';
   var ovr = m.ovr || [];
-  if (!ovr.length) {
-    h += '<div class="__mc-ovr-empty">暂无覆写。新增后在此列出，滑条即时调整。</div>';
-  } else {
-    for (var idx = 0; idx < ovr.length; idx++) {
-      h += '<div class="__mc-item">'
-        + '<div class="__mc-info">'
-        + '<div class="__mc-lb">动作 #' + ovr[idx].id + '</div>'
+  for (var idx = 0; idx < ovr.length; idx++) {
+    var info;
+    if (acts.length) {
+      /* 行内 dd=该行动作（目录外的 id 兜底显示，照常可改/删） */
+      info = '<div class="__mc-info">'
+        + ovrDdHtml('pick', idx, ovrLabelOf(m, ovr[idx].id), '')
         + '<div class="__mc-ck">' + OVR_SECTION + '.' + OVR_KEY + ' · ' + ovr[idx].id + ':' + ovr[idx].ms + '</div>'
-        + '</div>'
-        + '<div class="__mc-ctl">'
-        + '<input type="range" min="0" max="5000" step="50" value="' + ovr[idx].ms + '" data-act="ovr-set" data-idx="' + idx + '">'
-        + '<input type="text" class="__mc-numbox" inputmode="numeric" data-num="int" value="' + ovr[idx].ms + '" data-act="ovr-set" data-idx="' + idx + '">'
-        + '</div>'
-        + '<div class="__mc-badge __mc-b-now">⚡ 立即生效</div>'
-        + '<button type="button" class="__mc-del" data-act="ovr-del" data-idx="' + idx + '" title="删除此覆写">✕</button>'
+        + '</div>';
+    } else {
+      info = '<div class="__mc-info">'
+        + '<div class="__mc-lb">' + esc(ovrLabelOf(m, ovr[idx].id)) + '</div>'
+        + '<div class="__mc-ck">' + OVR_SECTION + '.' + OVR_KEY + ' · ' + ovr[idx].id + ':' + ovr[idx].ms + '</div>'
         + '</div>';
     }
+    h += '<div class="__mc-item">'
+      + info
+      + '<div class="__mc-ctl">'
+      + '<input type="range" min="0" max="5000" step="50" value="' + ovr[idx].ms + '" data-act="ovr-set" data-idx="' + idx + '">'
+      + '<input type="text" class="__mc-numbox" inputmode="numeric" data-num="int" value="' + ovr[idx].ms + '" data-act="ovr-set" data-idx="' + idx + '">'
+      + '</div>'
+      + '<div class="__mc-badge __mc-b-now">⚡ 立即生效</div>'
+      + '<button type="button" class="__mc-del" data-act="ovr-del" data-idx="' + idx + '" title="删除此覆写">✕</button>'
+      + '</div>';
+  }
+  if (acts.length) {
+    /* 尾部未设置行：选完动作即提交（默认 1000ms），renderCfg 后自动补新空行 */
+    h += '<div class="__mc-item">'
+      + '<div class="__mc-info">' + ovrDdHtml('new', null, '', '选择动作…') + '</div>'
+      + '<div class="__mc-ctl"><span class="__mc-ovr-hint">选完动作自动添加（默认 1000ms）</span></div>'
+      + '</div>';
+  } else {
+    h += '<div class="__mc-ovr-add">'
+      + '<input type="text" id="__mc_ovr_new" placeholder="动作 ID" inputmode="numeric">'
+      + '<button type="button" data-act="ovr-add">＋ 新增覆写</button>'
+      + '</div>'
+      + '<div class="__mc-ovr-empty">暂无覆写。新增后在此列出，滑条即时调整。</div>';
   }
   return h + '</div>';
 }
@@ -1494,6 +1601,8 @@ function wireCfg(cfg) {
   cfg.addEventListener('click', function (e) {
     var t = e.target;
     if (!t.closest) return;
+    /* v2.1.1 dd 下拉：点击 dd 以外区域关闭已打开的动作弹出层 */
+    if (!t.closest('.__mc-ovr-dd')) closeAllOvrDd();
     var ra = t.closest('[data-ract]');
     if (ra) {
       var ract = ra.getAttribute('data-ract');
@@ -1518,8 +1627,67 @@ function wireCfg(cfg) {
       toast(m.name + ' · ' + it.l + ' → ' + (it.v ? '开' : '关'), it.b);
       return;
     }
+    /* 覆盖清单 dd 下拉：开/关（切换时先全局关再按需开，保证同时只有一个弹出层） */
+    var ddt = t.closest('[data-act="ovr-dd-toggle"]');
+    if (ddt) {
+      var ddw = ddt.closest('.__mc-ovr-dd');
+      var ddPop = ddw.querySelector('.__mc-ovr-dd-pop');
+      var ddWasOpen = !ddPop.hidden;
+      closeAllOvrDd();
+      if (!ddWasOpen) ovrDdShowLv1(ddw, m);
+      return;
+    }
+    /* dd 第 1 级：选类型 → 弹该类型动作列表（第 2 级，带搜索） */
+    var ddc = t.closest('[data-act="ovr-dd-cat"]');
+    if (ddc) {
+      ovrDdShowLv2(ddc.closest('.__mc-ovr-dd'), m, +ddc.getAttribute('data-cat'));
+      return;
+    }
+    /* dd 第 2 级：返回类型列表 */
+    var ddb = t.closest('[data-act="ovr-dd-back"]');
+    if (ddb) {
+      var dbw = ddb.closest('.__mc-ovr-dd');
+      closeAllOvrDd();
+      ovrDdShowLv1(dbw, m);
+      return;
+    }
+    /* dd 第 2 级：点动作即提交（new=尾部未设置行新增默认 1000ms；pick=已覆盖行换动作保留毫秒） */
+    var ddo = t.closest('[data-act="ovr-dd-opt"]');
+    if (ddo) {
+      if (!m.ovr) return;
+      var dow = ddo.closest('.__mc-ovr-dd');
+      var doid = +ddo.getAttribute('data-id');
+      closeAllOvrDd();
+      if (dow.dataset.kind === 'new') {
+        if (m.ovr.some(function (x) { return x.id === doid; })) {
+          toast('该动作已在覆写清单，可直接拖滑条调整');
+          renderCfg();
+          return;
+        }
+        m.ovr.push({ id: doid, ms: 1000 });
+        renderCfg();
+        ovrCommit(m);
+        toast(m.name + ' · 已添加 ' + ovrLabelOf(m, doid) + ' = 1000ms（滑条可调）', 'now');
+      } else {
+        var dpi = +dow.dataset.idx;
+        var dpo = m.ovr[dpi];
+        if (!dpo) return;
+        if (doid === dpo.id) { renderCfg(); return; }
+        if (m.ovr.some(function (x, xi) { return x.id === doid && xi !== dpi; })) {
+          toast('该动作已在覆写清单，可直接拖那行滑条调整');
+          renderCfg();
+          return;
+        }
+        dpo.id = doid;
+        renderCfg();
+        ovrCommit(m);
+        toast(m.name + ' · 已改为 ' + ovrLabelOf(m, doid) + ' = ' + dpo.ms + 'ms', 'now');
+      }
+      return;
+    }
     var add = t.closest('[data-act="ovr-add"]');
     if (add) {
+      /* 仅旧版回退路径（无动作目录时的 ID 手输框）；目录路径走 change 联动下拉 */
       if (!m.ovr) return;
       var inp = S.cfg.querySelector('#__mc_ovr_new');
       var id = inp ? parseInt(inp.value, 10) : NaN;
@@ -1540,7 +1708,7 @@ function wireCfg(cfg) {
         m.ovr.splice(idx, 1);
         renderCfg();
         ovrCommit(m);
-        toast(m.name + ' · 已删除覆写 #' + gone, 'now');
+        toast(m.name + ' · 已删除覆写 ' + ovrLabelOf(m, gone), 'now');
       }
       return;
     }
@@ -1585,6 +1753,15 @@ function wireCfg(cfg) {
     if (!act) return;
     var m = curMod();
     if (!m) return;
+    /* v2.1.1 dd 下拉第 2 级搜索框：按动作名子串过滤（display 隐藏，保留滚动位置） */
+    if (act === 'ovr-dd-search') {
+      var sq = (el.value || '').trim().toLowerCase();
+      var spop = el.closest('.__mc-ovr-dd-pop');
+      var sitems = spop.querySelectorAll('.__mc-ovr-dd-opt');
+      for (var si = 0; si < sitems.length; si++)
+        sitems[si].style.display = (!sq || sitems[si].textContent.toLowerCase().indexOf(sq) >= 0) ? '' : 'none';
+      return;
+    }
     if (act === 'ovr-set') {
       if (!m.ovr) return;
       var o = m.ovr[+el.getAttribute('data-idx')];
@@ -1599,7 +1776,7 @@ function wireCfg(cfg) {
         if (ckEl) ckEl.textContent = OVR_SECTION + '.' + OVR_KEY + ' · ' + o.id + ':' + o.ms;
       }
       throttleSend('ovr' + el.getAttribute('data-idx'), function () { ovrCommit(m); });
-      toast(m.name + ' · 覆写 #' + o.id + ' → ' + o.ms + 'ms', 'now');
+      toast(m.name + ' · 覆写 ' + ovrLabelOf(m, o.id) + ' → ' + o.ms + 'ms', 'now');
       return;
     }
     if (act === 'bov-set') {
