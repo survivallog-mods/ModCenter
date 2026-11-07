@@ -283,7 +283,7 @@ v2 在此之上补齐**生命周期闭环**（作者 2026-10-28 拍板，spec §
 
 | 事件 | 形状 | 说明 |
 |---|---|---|
-| `__mcRender` | `snapshot = {self:{ver}, mods[], tp[]}` | 全量快照；每 mod 可带 `ics[]`（§4.1）。MC_OPEN/MC_TOGGLE_MOD/各类写操作后推送 |
+| `__mcRender` | `snapshot = {self:{ver,ics?}, mods[], tp[]}` | 全量快照；每 mod 可带 `ics[]`（§4.1）；`self.ics`（v2.0.4 起，可选）=面板自身行仓库徽标——仓库页退役后自更新唯一入口。MC_OPEN/MC_TOGGLE_MOD/各类写操作后推送 |
 | `MC_SET_OK` | `{type,k,badge}` | 写值回执；`k`=展示键原串，`badge`=生效时机 |
 | `MC_SET_FAIL` | `{type,k,err}` | 写值拒绝/异常；面板错误 toast 覆盖乐观提示 |
 | `MC_TOAST` | `{type,main,small}` | 面板 toast 原文（`small` 可缺省）；守卫/拒绝/结果统一走此通道 |

@@ -136,7 +136,10 @@ internal static class ConfigBridge
         var cfRows = InstalledCfRows();     // v2 任务 11：冲突体检投影（一次枚举 Plugins，全行复用）
         var snap = new Snapshot
         {
-            Self = new SelfInfo { Ver = ModCenterPlugin.Version },
+            // v2.0.4：自身行也挂仓库态徽标——仓库页 v3 退役后 ↑黄 徽标是更新唯一入口，而自身
+            // 既不在 Meta.Mods（无配置页）又被 TpExempt 排除在 tp 外，只能经 self.ics 落到
+            // 面板自身行（panel.js SELF_GUID 路由 → MC_UPD('ModCenter') 自更新链）。
+            Self = new SelfInfo { Ver = ModCenterPlugin.Version, Ics = RepoIcsOf(ModCenterPlugin.Guid, repoPend) },
             // T16 I-2：缺壳 → 面板顶部告警（更新/卸载/排序/停用全部不会执行）
             ShellWarn = ModCenterPlugin.ShellMissing
                 ? "启动清理组件缺失（patchers\\MCShell.dll）：更新/安装/卸载/停用/排序不会生效。请用安装器或完整包补装。"

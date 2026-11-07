@@ -99,6 +99,7 @@
     err:    { t: '\u2716 \u6ca1\u6210\u529f', cls: '__mc-t-err', ms: 4500 },
   };
   var SELF_NAME = 'Mod \u7ba1\u7406\u4e2d\u5fc3'; // Mod 管理中心
+  var SELF_GUID = 'com.local.survivallog.modcenter'; // v2.0.4：自身真实 GUID（仓库徽标路由/弹窗用；行选仍用 '__self'）
   var SELF_EN = 'ModCenter\uff08\u672c\u9762\u677f\uff09';
   var OVR_SECTION = '\u5176\u4ed6', OVR_KEY = 'Overrides'; // 与 C# Meta.OvrSection/OvrKey 同源
 
@@ -463,6 +464,9 @@
     for (i = 0; i < ms.length; i++) if (ms[i].guid === guid) return ms[i];
     var ts = tps();
     for (i = 0; i < ts.length; i++) if (ts[i].guid === guid) return ts[i];
+    /* v2.0.4：自身行徽标路由——自身不在 mods/tp（TpExempt 排除），给虚拟行对象，
+     * openUpdModal → repoRowOfGuid(SELF_GUID) 命中仓库行（RepoKeys 含 ModCenter）。 */
+    if (guid === SELF_GUID) return { guid: SELF_GUID, name: SELF_NAME, self: true };
     return null;
   }
   function isTpMod(m) { return tps().indexOf(m) !== -1; }
@@ -577,9 +581,12 @@
           : swBtn(m.enabled, ' data-act="toggle" data-guid="' + esc(m.guid) + '"')) + '</div>';
     }
     h += '<div class="__mc-cat">\u9762\u677f\u81ea\u8eab</div>';
+    /* v2.0.4：自身行挂仓库徽标（快照 self.ics；data-guid 用真实 GUID——findMod 路由到
+     * openUpdModal → MC_UPD('ModCenter') 自更新链。仓库页退役后这是自更新唯一入口）。 */
     h += '<div class="__mc-mod-row __mc-lock' + (ST.sel === '__self' ? ' __mc-sel' : '')
       + '" data-interactive data-guid="__self">'
       + '<span class="__mc-st" style="background:#e8a33d;"></span><span class="__mc-nm">' + esc(SELF_NAME) + '</span>'
+      + icsHtml({ guid: SELF_GUID, ics: ST.snap && ST.snap.self ? ST.snap.self.ics : null })
       + '<span class="__mc-mini-sw __mc-lock" title="\u9632\u5446\uff1a\u9762\u677f\u4e0d\u53ef\u505c\u7528\u81ea\u8eab"></span></div>';
     h += '<div class="__mc-cat">\u7b2c\u4e09\u65b9 MOD\uff08\u901a\u7528 / \u58f0\u660e\u5f0f\uff09</div>';
     if (ts.length === 0) {

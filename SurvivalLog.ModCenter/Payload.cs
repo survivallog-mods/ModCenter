@@ -6,7 +6,8 @@ namespace SurvivalLog.ModCenter;
 
 /// <summary>
 /// 面板数据契约（任务 6 定稿，任务 7 UI 逐字消费，签名不得偏差）：
-/// Snapshot = {self:{ver}, mods:[ModInfo], tp:[ModInfo]}（tp 第三方通用页，任务 14 填，本任务空数组占位）；
+/// Snapshot = {self:{ver,ics?}, mods:[ModInfo], tp:[ModInfo]}（tp 第三方通用页，任务 14 填，本任务空数组占位；
+/// self.ics v2.0.4 起=面板自身行仓库徽标，可选字段）；
 /// ModInfo = {guid,name,en,desc,enabled,tier?,groups:[{title,items:[Item]}]}，ovr 类 mod（动作加速）另挂 ovr:[{id,ms}]
 /// （tier? 仅第三方 Tier 1 清单定制页输出 1，任务 15；省略 = Tier 0）；
 /// Item = {k,l,t,v,min?,max?,st?,b,note?,opts?}——与原型 v4 MODS 数组同名同义
@@ -24,7 +25,18 @@ public sealed class Snapshot
     public string ToJson()
     {
         var sb = new StringBuilder(8192);
-        sb.Append("{\"self\":{\"ver\":").Append(JsonW.Str(Self?.Ver)).Append("},\"mods\":[");
+        sb.Append("{\"self\":{\"ver\":").Append(JsonW.Str(Self?.Ver));
+        if (Self?.Ics != null && Self.Ics.Count > 0) // v2.0.4：自身行仓库徽标（空不输出——老 panel.js 无感）
+        {
+            sb.Append(",\"ics\":[");
+            for (var i = 0; i < Self.Ics.Count; i++)
+            {
+                if (i > 0) sb.Append(',');
+                Self.Ics[i].Write(sb);
+            }
+            sb.Append(']');
+        }
+        sb.Append("},\"mods\":[");
         for (var i = 0; i < Mods.Count; i++)
         {
             if (i > 0) sb.Append(',');
@@ -46,6 +58,7 @@ public sealed class Snapshot
 public sealed class SelfInfo
 {
     public string Ver; // ModCenter 版本（csproj 单源 <Version>；由 ModCenterPlugin.Version 注入）
+    public List<IcInfo> Ics; // v2.0.4：面板自身行徽标（仓库态 ↑黄/⚠橙——仓库页退役后自更新的唯一入口）；null/空不输出（协议向后兼容）
 }
 
 public sealed class ModInfo
