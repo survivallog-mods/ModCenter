@@ -231,7 +231,7 @@
 #__mc_overlay .__mc-mod-row.__mc-ord-row.__mc-drop-above{box-shadow:0 -2px 0 0 #e8a33d;}
 #__mc_overlay .__mc-mod-row.__mc-ord-row.__mc-drop-below{box-shadow:0 2px 0 0 #e8a33d;}
 #__mc_overlay .__mc-ver{font-size:10.5px;color:#6b7180;font-family:Consolas,monospace;flex-shrink:0;}
-#__mc_overlay .__mc-mod-row.__mc-ord-row .__mc-nm{white-space:normal;display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:2;line-height:1.3;word-break:break-word;} /* v3.3：排序行 mod 名换行显示完整 */
+/* v2.0.5（撤 v3.3）：排序行名回退基础 .__mc-nm（flex:1+nowrap+ellipsis）——不换行、放不下省略、版本右对齐行尾 */
 #__mc_overlay .__mc-side::-webkit-scrollbar,#__mc_overlay .__mc-cfg::-webkit-scrollbar{width:8px;}
 #__mc_overlay .__mc-side::-webkit-scrollbar-thumb,#__mc_overlay .__mc-cfg::-webkit-scrollbar-thumb{background:#2a2f3d;border-radius:4px;}
 
@@ -785,7 +785,6 @@ function renderSideOrder() {
         + '<span class="__mc-ver">' + (n < 10 ? '0' : '') + n + '</span>'
         + '<span class="__mc-nm" title="' + esc(info.name) + '">' + esc(info.name) + '</span>'
         + '<span class="__mc-ver">' + esc(info.ver) + '</span>'
-        + '<span class="__mc-sp"></span>'
         + ordIcsHtml(info)
         + '</div>';
     }

@@ -324,8 +324,10 @@
     + '#__mc_overlay .__mc-mod-row.__mc-ord-row.__mc-dragging .__mc-grip{cursor:grabbing;}'
     + '#__mc_overlay .__mc-mod-row.__mc-ord-row.__mc-drop-above{box-shadow:0 -2px 0 0 #e8a33d;}'
     + '#__mc_overlay .__mc-mod-row.__mc-ord-row.__mc-drop-below{box-shadow:0 2px 0 0 #e8a33d;}'
-    + '#__mc_overlay .__mc-ver{font-size:10.5px;color:#6b7180;font-family:Consolas,monospace;flex-shrink:0;}' /* 序号+版本两用（原型 .ver） */
-    + '#__mc_overlay .__mc-mod-row.__mc-ord-row .__mc-nm{white-space:normal;display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:2;line-height:1.3;word-break:break-word;}' /* v3.3：排序行 mod 名换行显示完整（最多两行，悬停 title 兜底） */
+    + '#__mc_overlay .__mc-ver{font-size:10.5px;color:#6b7180;font-family:Consolas,monospace;flex-shrink:0;}' /* 序号+版本两用（原型 .ver）；排序行版本随名 flex:1 顶到行尾（右侧对齐） */
+    /* v2.0.5（作者拍板，撤 v3.3）：排序行 mod 名不再两行换行——回退基础 .__mc-nm（flex:1 +
+     * nowrap + ellipsis）：90%+ 名称当前宽度可完整显示，放不下的省略号 + 悬停 title 全名；
+     * 版本号随之右对齐到行尾（冲突 chip 前）。 */
     + '#__mc_overlay .__mc-side::-webkit-scrollbar,#__mc_overlay .__mc-cfg::-webkit-scrollbar{width:8px;}'
     + '#__mc_overlay .__mc-side::-webkit-scrollbar-thumb,#__mc_overlay .__mc-cfg::-webkit-scrollbar-thumb{background:#2a2f3d;border-radius:4px;}';
 
@@ -688,8 +690,7 @@
           + '<span class="__mc-grip" aria-hidden="true">\u22ee\u22ee</span>'
           + '<span class="__mc-ver">' + (n < 10 ? '0' : '') + n + '</span>'
           + '<span class="__mc-nm" title="' + esc(info.name) + '">' + esc(info.name) + '</span>'
-          + '<span class="__mc-ver">' + esc(info.ver) + '</span>'
-          + '<span class="__mc-sp"></span>'
+          + '<span class="__mc-ver">' + esc(info.ver) + '</span>' // v2.0.5：名 flex:1 已把版本顶到行尾；旧 __mc-sp 撤除（它抢走一半弹性导致版本跟名不走右）
           + ordIcsHtml(info)
           + '</div>';
       }
