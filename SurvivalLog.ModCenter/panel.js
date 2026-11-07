@@ -158,6 +158,7 @@
     + '#__mc_overlay .__mc-mod-title{display:flex;align-items:center;gap:12px;}'
     + '#__mc_overlay .__mc-mod-title h2{font-size:18px;font-weight:600;}'
     + '#__mc_overlay .__mc-mod-title .__mc-en{font-size:12px;color:#6b7180;font-weight:400;}'
+    + '#__mc_overlay .__mc-mod-title .__mc-v{font-size:12px;color:#6b7180;font-weight:400;font-family:Consolas,monospace;}' /* v2.0.6：详情页标题行版本号（名 + 英文标识右侧） */
     + '#__mc_overlay .__mc-mod-desc{margin:8px 0 4px;font-size:13px;color:#9aa0ad;line-height:1.6;}'
     + '#__mc_overlay .__mc-stop-banner{margin:10px 0 0;padding:9px 14px;border-radius:8px;font-size:12.5px;line-height:1.6;background:rgba(127,29,29,.2);border:1px solid rgba(248,113,113,.27);color:#fca5a5;display:none;}'
     + '#__mc_overlay .__mc-stop-banner.__mc-show{display:block;}'
@@ -1126,6 +1127,9 @@
   /* v3：仓库视图渲染（repoViewHtml/repoRowHtml）随独立仓库页退役——行内图标与详情「维护」
    * 区按钮共用 openRepoModal 确认链。 */
 
+  /* v2.0.6：详情页标题行版本号（名 + 英文标识右侧，等宽灰字）；未安装/读不到不显示 */
+  function verHtml(v) { return v ? '<span class="__mc-v">v' + esc(v) + '</span>' : ''; }
+
   function renderCfg() {
     if (!S.cfg) return;
     if (!ST.snap) {
@@ -1134,7 +1138,7 @@
     }
     if (ST.sel === '__self' || !mods().length) {
       S.cfg.innerHTML = shellWarnHtml() + '<div class="__mc-mod-title"><h2>' + esc(SELF_NAME) + '</h2>'
-        + '<span class="__mc-en">' + esc(SELF_EN) + '</span></div>'
+        + '<span class="__mc-en">' + esc(SELF_EN) + '</span>' + verHtml(ST.snap && ST.snap.self ? ST.snap.self.ver : null) + '</div>'
         + '<div class="__mc-mod-desc">\u9762\u677f\u81ea\u8eab\u3002\u4e0d\u53ef\u505c\u7528\uff1b\u5982\u9700\u79fb\u9664\uff0c\u7528\u4e0b\u65b9\u5378\u8f7d\u3002</div>'
         + uninstActHtml(SELF_GUID);
       return;
@@ -1152,7 +1156,7 @@
       : (m.missing
         ? '\u672a\u5b89\u88c5\uff1a\u6b64\u9875\u53ea\u8bfb\u3002\u53ef\u5728\u4e0b\u65b9\u300c\u7ef4\u62a4\u300d\u5b89\u88c5\u3002'
         : '\u5df2\u505c\u7528\uff1a\u6539\u52a8\u4ecd\u4f1a\u4fdd\u5b58\uff0c\u91cd\u65b0\u542f\u7528\u540e\u751f\u6548\u3002');
-    var h = shellWarnHtml() + '<div class="__mc-mod-title"><h2>' + esc(m.name) + '</h2><span class="__mc-en">' + esc(m.en) + '</span></div>'
+    var h = shellWarnHtml() + '<div class="__mc-mod-title"><h2>' + esc(m.name) + '</h2><span class="__mc-en">' + esc(m.en) + '</span>' + verHtml(m.ver) + '</div>'
       + '<div class="__mc-mod-desc">' + esc(m.desc) + '</div>'
       + '<div class="__mc-stop-banner' + (m.enabled ? '' : ' __mc-show') + '">' + banner + '</div>';
     for (var gi = 0; gi < m.groups.length; gi++) {

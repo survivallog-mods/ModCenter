@@ -8,7 +8,7 @@ namespace SurvivalLog.ModCenter;
 /// 面板数据契约（任务 6 定稿，任务 7 UI 逐字消费，签名不得偏差）：
 /// Snapshot = {self:{ver,ics?}, mods:[ModInfo], tp:[ModInfo]}（tp 第三方通用页，任务 14 填，本任务空数组占位；
 /// self.ics v2.0.4 起=面板自身行仓库徽标，可选字段）；
-/// ModInfo = {guid,name,en,desc,enabled,tier?,groups:[{title,items:[Item]}]}，ovr 类 mod（动作加速）另挂 ovr:[{id,ms}]
+/// ModInfo = {guid,name,en,ver?,desc,enabled,tier?,groups:[{title,items:[Item]}]}（ver v2.0.6 起=插件版本，可选），ovr 类 mod（动作加速）另挂 ovr:[{id,ms}]
 /// （tier? 仅第三方 Tier 1 清单定制页输出 1，任务 15；省略 = Tier 0）；
 /// Item = {k,l,t,v,min?,max?,st?,b,note?,opts?}——与原型 v4 MODS 数组同名同义
 /// （docs/superpowers/specs/2026-10-24-modcenter-prototype.html）。
@@ -66,6 +66,7 @@ public sealed class ModInfo
     public string Guid;  // BepInEx 插件 GUID（面板回传 MC_SET/MC_TOGGLE_MOD 用它路由）
     public string Name;  // 面板显示名（中文）
     public string En;    // 内部名（原型 id 的对应物，兼容短名路由）
+    public string Ver;   // 插件版本（v2.0.6：详情页标题行显示；未安装/读不到 null 不输出）
     public string Desc;  // 一句话功能简介
     public bool Enabled; // 启停状态（套件=各 mod General.Enabled；第三方=[DisabledTp] marker 取反，任务 16）
     public bool? Soft;   // 第三方软停能力（任务 16）：Tier 2 约定在场或清单 softDisable→true（套件 null 不输出）
@@ -81,8 +82,9 @@ public sealed class ModInfo
     {
         sb.Append("{\"guid\":").Append(JsonW.Str(Guid))
           .Append(",\"name\":").Append(JsonW.Str(Name))
-          .Append(",\"en\":").Append(JsonW.Str(En))
-          .Append(",\"desc\":").Append(JsonW.Str(Desc))
+          .Append(",\"en\":").Append(JsonW.Str(En));
+        if (!string.IsNullOrEmpty(Ver)) sb.Append(",\"ver\":").Append(JsonW.Str(Ver)); // v2.0.6：详情页标题行版本（空不输出）
+        sb.Append(",\"desc\":").Append(JsonW.Str(Desc))
           .Append(",\"enabled\":").Append(Enabled ? "true" : "false");
         if (Soft == true) sb.Append(",\"soft\":true");       // 任务 16：软停语义标记（仅第三方输出）
         if (Absent == true) sb.Append(",\"absent\":true");   // 任务 16：dll 已禁用缺席行（仅第三方输出）

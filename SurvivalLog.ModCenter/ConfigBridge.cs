@@ -26,7 +26,8 @@ namespace SurvivalLog.ModCenter;
 /// v4：行内 ⟳ 徽标退役，待生效只经底条呈现；Pump 每 2s 巡检，摘要变化推 MC_PENDING_SUMMARY。
 /// v2 生命周期任务 8：更新链——触发点两处（作者拍板，替代旧"面板打开自动查"）：启动 +10s
 /// 预检一轮（Pump _bootDone，面板没开也跑）+ MC_CHK 手动刷新（60 秒冷却；MC_REPO_GET{force}
-/// 保留兼容）→ 后台 12 仓 fetch + RepoDecision.Build（主线程收割推 MC_REPO_DATA +
+/// 保留兼容）→ 后台 fetch（v2.0.6 起索引优先：index 仓 suite.json 1 次 API；缺行逐仓补/
+/// 不可用回退/403 收轮，见 RepoClient.FetchSuite）+ RepoDecision.Build（主线程收割推 MC_REPO_DATA +
 /// 快照侧栏 ↑黄/⚠橙 徽标）；MC_UPD/MC_INST 确认后走**串行**下载链（后台：下载（进度
 /// 250ms 节流推 MC_DL）→ zip MD5 对 update.json → 解包 BepInEx/plugins/*.dll 暂存 → 主线程
 /// PendingWriter.AddUpdate）→ 快照刷新（可动作徽标消失、底条出现该项）。GitHub 匿名 60 次/h：一轮
@@ -134,6 +135,9 @@ internal static class ConfigBridge
         RefreshPending(true);
         var repoPend = RepoPendingGuids();  // v2 任务 8：有待生效 install/replace 意图的 guid（仓库行/侧栏徽标判定）
         var cfRows = InstalledCfRows();     // v2 任务 11：冲突体检投影（一次枚举 Plugins，全行复用）
+        // v2.0.6：详情页标题行版本号（Chainloader 主线程读一次；未安装行查不到 = null 不输出）
+        Dictionary<string, BepInEx.PluginInfo> plugMap = null;
+        try { plugMap = IL2CPPChainloader.Instance?.Plugins; } catch { }
         var snap = new Snapshot
         {
             // v2.0.4：自身行也挂仓库态徽标——仓库页 v3 退役后 ↑黄 徽标是更新唯一入口，而自身
@@ -151,6 +155,7 @@ internal static class ConfigBridge
             var mi = new ModInfo
             {
                 Guid = mm.Guid, Name = mm.Name, En = mm.En, Desc = mm.Desc,
+                Ver = PluginVerOf(plugMap, mm.Guid), // v2.0.6：详情页标题行版本（未安装 null）
                 // 插件不在链上（dll 级缺失/已卸载）视为未安装：面板呈现"未安装/去仓库安装"态，
                 // 详情控件不可写（必修 7；与"已停用"严格分流——停用有 cfg 可写，未安装没有）
                 Missing = cfg == null,
@@ -393,6 +398,14 @@ internal static class ConfigBridge
     /// （section 分组沿用对方 cfg 节名；徽标一律 cfg；Description→note）；无 entry →
     /// 仅启停形态（空 groups + desc 说明，同灾前加速页）。按 Name 排序稳定输出。
     /// </summary>
+    /// <summary>guid → 插件版本串（Chainloader 主线程；缺/异常 = null）。v2.0.6：详情页标题行显示用。</summary>
+    private static string PluginVerOf(Dictionary<string, BepInEx.PluginInfo> plugins, string guid)
+    {
+        if (plugins != null && plugins.TryGetValue(guid, out var pi))
+            try { return pi?.Metadata?.Version?.ToString(); } catch { }
+        return null;
+    }
+
     private static void BuildTp(Snapshot snap, List<CfRow> cfRows)
     {
         Dictionary<string, PluginInfo> plugins = null;
@@ -468,6 +481,7 @@ internal static class ConfigBridge
             Enabled = dllRel == null || !DllDisabler.MarkerOf(dllRel), // 任务 16：[DisabledTp] marker 取反
             Desc = "第三方 mod（Tier 0 自动识别）：通用页由其 cfg 自动生成；写入即触发其 SettingChanged，生效视该 mod。",
         };
+        try { mi.Ver = md.Version?.ToString(); } catch { } // v2.0.6：详情页标题行版本
         // v2 任务 11：冲突徽标（L1 红/橙）——GUID 优先、dll 名兜底在 CfRows 内解析
         // v4：⟳ 待生效徽标退役（底条汇总保留），tp 行只挂冲突/告警族
         var cfIcs = CfIcsFor(cfRows, md.GUID);
@@ -1150,8 +1164,29 @@ internal static class ConfigBridge
             {
                 var infos = new Dictionary<string, RepoClient.UpdateInfo>(StringComparer.Ordinal);
                 var rateLimited = 0;
-                foreach (var r in rows) // 顺序温和（一轮 12 次 API 请求，不连环多轮）
+                // v2.0.6：索引优先（spec 单轮检查）——1 次 API 拉 index 仓 suite.json 覆盖 13 仓；
+                // 索引缺行（发版后没跑 publish-index）逐仓补查；索引不可用整体回退逐仓旧路径；
+                // 索引 403 = 匿名池空——逐仓必同 403，直接按限流收轮不白烧 13 次。
+                var suite = await RepoClient.FetchSuite();
+                Dictionary<string, RepoClient.UpdateInfo> byMod = null;
+                if (suite.Suite != null)
                 {
+                    byMod = new Dictionary<string, RepoClient.UpdateInfo>(StringComparer.OrdinalIgnoreCase);
+                    foreach (var i in suite.Suite) byMod[i.Mod] = i;
+                    Log("repo fetch: 索引轮 " + byMod.Count + " 行（1 次 API）");
+                }
+                else if (suite.Status == 403) Log("repo fetch: 索引轮 403 限流（不回退逐仓）");
+                else Log("repo fetch: 索引不可用（status=" + suite.Status + "），回退逐仓 13 次");
+                foreach (var r in rows)
+                {
+                    if (byMod != null && byMod.TryGetValue(r.RepoKey, out var hit))
+                    {
+                        r.HttpStatus = 200; r.Remote = hit.Version; r.Gamekb = hit.Gamekb;
+                        infos[r.RepoKey] = hit;
+                        continue;
+                    }
+                    if (suite.Status == 403) // 限流收轮：全部行 Remote=null + HttpStatus=403（面板行内限流文案）
+                    { r.HttpStatus = 403; rateLimited = 1; r.Remote = null; r.Gamekb = null; continue; }
                     var res = await RepoClient.FetchLatestEx(r.RepoKey); // T16/D：带 HTTP 状态（403 限流）
                     r.HttpStatus = res.Status;
                     if (res.Status == 403) rateLimited++;

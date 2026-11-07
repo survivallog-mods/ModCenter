@@ -283,7 +283,7 @@ v2 在此之上补齐**生命周期闭环**（作者 2026-10-28 拍板，spec §
 
 | 事件 | 形状 | 说明 |
 |---|---|---|
-| `__mcRender` | `snapshot = {self:{ver,ics?}, mods[], tp[]}` | 全量快照；每 mod 可带 `ics[]`（§4.1）；`self.ics`（v2.0.4 起，可选）=面板自身行仓库徽标——仓库页退役后自更新唯一入口。MC_OPEN/MC_TOGGLE_MOD/各类写操作后推送 |
+| `__mcRender` | `snapshot = {self:{ver,ics?}, mods[], tp[]}` | 全量快照；每 mod 可带 `ver`（v2.0.6 起，可选=插件版本，详情页标题行）与 `ics[]`（§4.1）；`self.ics`（v2.0.4 起，可选）=面板自身行仓库徽标——仓库页退役后自更新唯一入口。MC_OPEN/MC_TOGGLE_MOD/各类写操作后推送 |
 | `MC_SET_OK` | `{type,k,badge}` | 写值回执；`k`=展示键原串，`badge`=生效时机 |
 | `MC_SET_FAIL` | `{type,k,err}` | 写值拒绝/异常；面板错误 toast 覆盖乐观提示 |
 | `MC_TOAST` | `{type,main,small}` | 面板 toast 原文（`small` 可缺省）；守卫/拒绝/结果统一走此通道 |
@@ -557,6 +557,11 @@ PendingWriter 合并语义对临时文件 `selftest-pending.json` 自证（旧�
   （JS 在 `MC_CHK` 后等 `MC_REPO_DATA`：`检查完成：N 个可更新、…`/`都是最新版`，spec D8；
   启动预检轮无此 toast——面板未开，推送丢弃）。
   **403 专门提示**：`GitHub 限流`+`请稍后再试`（`RepoData.rateLimited` 口径不变）。
+- **聚合检查（v2.0.6，1 次 API）**：`RepoClient.FetchSuite()` 先拉 `survivallog-mods/index`
+  仓 releases/latest（1 次 API）→ 下载 `suite.json` 资产（不占池）→ 13 行五字段+assetUrl。
+  索引缺行 → 该行逐仓补查；索引不可用（404/超时/解析坏）→ 整轮回退逐仓；索引 403 → 按
+  限流收轮不回退。发布侧 = 套件根 `publish-index.ps1`（gh 认证聚合各仓 update.json 发
+  index 仓）——**发版后跑一次**。
 - **fetch/下载链**：与 v2 完全一致——后台 12 仓顺序 fetch → `RepoDecision.Build` 五态 →
   串行下载（`MC_DL` 节流）→ zip MD5 → 解包暂存 → `PendingWriter.AddUpdate` → 行内 ⟳。
 - **`MC_UPDALL`（全部更新）退役**（v3/D4）：面板入口与 C# 分支/处理器删除；Warn/降级/

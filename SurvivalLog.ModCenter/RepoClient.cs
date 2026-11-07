@@ -163,6 +163,73 @@ public static class RepoClient
     public static async Task<UpdateInfo> FetchLatest(string repoName)
         => (await FetchLatestEx(repoName)).Info;
 
+    // ============ v2.0.6：聚合检查（spec 2026-11-07 单轮检查——13 次 API → 1 次） ============
+
+    /// <summary>聚合结果：Suite=null = 索引不可用（Status 区分 403 限流与其余失败）。</summary>
+    public sealed class SuiteResult
+    {
+        public List<UpdateInfo> Suite; // 解析成功的行（缺行由调用方逐仓补查）；null = 索引不可用
+        public int Status;             // 200=拿到（≥1 行）；403=匿名限流（不回退——逐仓必同 403）；0=其余失败（回退逐仓）
+    }
+
+    private const string SuiteJsonName = "suite.json";
+
+    /// <summary>聚合检查：GET <c>survivallog-mods/index</c> 仓 releases/latest（<b>1 次 API</b>）
+    /// → 下载 suite.json（github.com 资产直连，不占匿名池）→ 解析 N 行 UpdateInfo（契约与
+    /// update.json 五字段同构 + assetUrl；发布侧 = 套件根 publish-index.ps1 聚合脚本）。
+    /// 失败语义：403 = 限流（Status=403、Suite=null——逐仓回退必同样 403，不白烧 13 次）；
+    /// 其余（404 未建仓/资产缺失/超时/JSON 坏/行字段缺失）Status=0、Suite=null → 调用方回退
+    /// <see cref="FetchLatestEx"/> 逐仓旧路径。类内零重试（同款纪律）。</summary>
+    public static async Task<SuiteResult> FetchSuite()
+    {
+        try
+        {
+            var relJson = await GetString(MapUrl(OrgPrefix + "index/releases/latest"), CheckTimeoutMs, api: true);
+            using var doc = JsonDocument.Parse(relJson);
+            if (!doc.RootElement.TryGetProperty("assets", out var assets) || assets.ValueKind != JsonValueKind.Array)
+                return new SuiteResult { Status = 0 };
+            string suiteUrl = null;
+            foreach (var a in assets.EnumerateArray())
+                if (TryGetStr(a, "name", out var name) && name == SuiteJsonName
+                    && TryGetStr(a, "browser_download_url", out var url))
+                { suiteUrl = url; break; }
+            if (suiteUrl == null) return new SuiteResult { Status = 0 }; // 索引仓无 suite.json（未跑 publish-index）
+
+            var json = await GetString(MapUrl(suiteUrl), CheckTimeoutMs, api: false);
+            using var sdoc = JsonDocument.Parse(json);
+            if (!sdoc.RootElement.TryGetProperty("mods", out var mods) || mods.ValueKind != JsonValueKind.Array)
+                return new SuiteResult { Status = 0 };
+            var list = new List<UpdateInfo>();
+            foreach (var m in mods.EnumerateArray())
+            {
+                if (m.ValueKind != JsonValueKind.Object) continue;
+                var info = new UpdateInfo
+                {
+                    Mod = GetStr(m, "mod"), Version = GetStr(m, "version"), Asset = GetStr(m, "asset"),
+                    Md5 = GetStr(m, "md5"), Gamekb = GetStr(m, "gamekb"), AssetUrl = GetStr(m, "assetUrl"),
+                };
+                if (string.IsNullOrEmpty(info.Mod) || string.IsNullOrEmpty(info.Version) ||
+                    string.IsNullOrEmpty(info.Asset) || string.IsNullOrEmpty(info.Md5) ||
+                    string.IsNullOrEmpty(info.Gamekb) || string.IsNullOrEmpty(info.AssetUrl))
+                    continue; // 行契约不完整：丢行（调用方逐仓补查该行）
+                list.Add(info);
+            }
+            if (list.Count == 0) return new SuiteResult { Status = 0 };
+            return new SuiteResult { Suite = list, Status = 200 };
+        }
+        catch (HttpRequestException e)
+        {
+            var status = e.StatusCode.HasValue ? (int)e.StatusCode.Value : 0;
+            ModCenterPlugin.Log($"warn fetch index 失败: HTTP {status} {e.Message}");
+            return new SuiteResult { Status = status };
+        }
+        catch (Exception e)
+        {
+            ModCenterPlugin.Log($"warn fetch index 失败: {e.GetType().Name} {e.Message}");
+            return new SuiteResult { Status = 0 };
+        }
+    }
+
     /// <summary>
     /// 下载 zip 资产到 StagingDir（BepInEx\ModCenter\staging\，T2 契约目录）：先落
     /// <c>&lt;asset&gt;.part</c> 临时名，成功后原子落位为 <c>&lt;asset&gt;</c> 并返回该绝对路径

@@ -990,6 +990,8 @@ function dlStageText(st, pct) {
 
 /* ---- 右区：配置页（mod 详情 / __self） ---- */
 
+function verHtml(v) { return v ? '<span class="__mc-v">v' + esc(v) + '</span>' : ''; }
+
 function renderCfg() {
   if (!S.cfg) return;
   if (ST.sel === '__self' || !mods().length) {
