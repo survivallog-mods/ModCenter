@@ -361,8 +361,10 @@
     var x = doc.createElement('button');
     x.type = 'button'; x.className = '__mc-close'; x.setAttribute('aria-label', '\u5173\u95ed\u9762\u677f'); x.textContent = '\u2715';
     x.addEventListener('click', function (e) { e.stopPropagation(); window.__mcClose(); });
-    /* v3：头部「检查更新」= 全局唯一检查入口（60 秒冷却在 C#）。点击置 busy（图标旋转、
-     * 禁点——作者拍板：未检查完成前不可重复点击），MC_REPO_DATA 到达或 20s 兜底复位。 */
+    /* v3：头部「检查更新」= 全局唯一手动检查入口（60 秒冷却在 C#）。启动 +10s C# 已自动
+     * 预检过一轮（面板没开也跑，结果随打开推来）——本钮给"刚启动就想再刷"的场景。点击置
+     * busy（图标旋转、禁点——作者拍板：未检查完成前不可重复点击），MC_REPO_DATA 到达或
+     * 20s 兜底复位。 */
     var chk = doc.createElement('button');
     chk.type = 'button'; chk.className = '__mc-btn';
     chk.innerHTML = icSvg('pend') + '<span>\u68c0\u67e5\u66f4\u65b0</span>';

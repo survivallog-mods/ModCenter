@@ -24,12 +24,13 @@ namespace SurvivalLog.ModCenter;
 /// 3s 节流 + MC_CLOSE 立即落盘后恢复原值）。
 /// v2 生命周期任务 7：待生效清单汇总——BuildSnapshot 前主线程读 pending.json（mtime 节流），
 /// v4：行内 ⟳ 徽标退役，待生效只经底条呈现；Pump 每 2s 巡检，摘要变化推 MC_PENDING_SUMMARY。
-/// v2 生命周期任务 8：更新链——MC_REPO_GET{force}（打开自动查：15 分钟会话缓存）/ MC_CHK
-/// （手动刷新：60 秒冷却）→ 后台 12 仓 fetch + RepoDecision.Build（主线程收割推 MC_REPO_DATA +
+/// v2 生命周期任务 8：更新链——触发点两处（作者拍板，替代旧"面板打开自动查"）：启动 +10s
+/// 预检一轮（Pump _bootDone，面板没开也跑）+ MC_CHK 手动刷新（60 秒冷却；MC_REPO_GET{force}
+/// 保留兼容）→ 后台 12 仓 fetch + RepoDecision.Build（主线程收割推 MC_REPO_DATA +
 /// 快照侧栏 ↑黄/⚠橙 徽标）；MC_UPD/MC_INST 确认后走**串行**下载链（后台：下载（进度
 /// 250ms 节流推 MC_DL）→ zip MD5 对 update.json → 解包 BepInEx/plugins/*.dll 暂存 → 主线程
 /// PendingWriter.AddUpdate）→ 快照刷新（可动作徽标消失、底条出现该项）。GitHub 匿名 60 次/h：一轮
-/// 12 次，绝不后台轮询。
+/// 12 次，绝不后台轮询（每靴只预检一轮，余量全给手动）。
 /// v2 生命周期任务 9：加载排序模式——MC_ORDER_GET（组装生效序：pending.order 命中项按序
 /// 前置 + 其余 GUID 字母序，与清理器 OrderReorder 语义一致）→ 推 MC_ORDER_DATA
 /// {guids[],rows[],def[]}；MC_ORDER_SAVE 校验（白名单=当前 Plugins 键、元素不重不漏=与可排序
@@ -113,8 +114,12 @@ internal static class ConfigBridge
     private static string _dlKey;                // 当前下载链仓键；null=空闲（推送体 dl 字段）
     private static int _dlPct;
     private static string _dlStage;
-    private const long RepoCacheMs = 15 * 60 * 1000;   // 打开自动查：15 分钟会话级缓存（D6/Ruling 22 加固：12×4=48 < 60 匿名限额）
+    private const long RepoCacheMs = 15 * 60 * 1000;   // 启动预检会话级缓存（头 10s 内手动查过则启动轮不重复 fetch：12×4=48 < 60 匿名限额）
     private const long RepoCooldownMs = 60 * 1000;     // 手动刷新：60 秒冷却
+    // 启动一次性预检（作者拍板，替代 MC_OPEN 自动查）：+10s 起 L2 碰撞扫描 + 仓库 fetch 各一轮
+    //（10s 沿用 DebugPatchScan 探针先例等其他 mod 补丁落账；面板未开推送被 PushJs 静默丢弃，状态留 C# 侧待 MC_OPEN 补推）
+    private static float _bootAge;
+    private static bool _bootDone;
     private static long NowMs => DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
 
     private static readonly string EvidencePath =
@@ -1090,9 +1095,11 @@ internal static class ConfigBridge
         Click = "upd",
     };
 
-    /// <summary>MC_REPO_GET{force}（仓库视图打开拉取）/ MC_CHK（手动"检查更新"）共用入口。
-    /// 节流（裁定 2/D6）：fetch 在跑→只推现状；打开（force=false）15 分钟缓存内推缓存；手动 60 秒
-    /// 冷却内推数据+toast"刚检查过"；否则起一轮后台 fetch（12 仓顺序，匿名限额预算内）。</summary>
+    /// <summary>仓库检查共用入口：启动预检（Pump +10s，force=false）/ MC_CHK 手动"检查更新"
+    /// （force=true；MC_REPO_GET{force} v3 起面板不再发送，保留兼容）。
+    /// 节流（裁定 2/D6）：fetch 在跑→只推现状；force=false（启动预检）15 分钟缓存内推缓存
+    ///（=头 10s 内手动查过则不重复 fetch）；手动 60 秒冷却内推数据+toast"刚检查过"（全失败轮
+    /// 豁免可立即重试，必修 8）；否则起一轮后台 fetch（12 仓顺序，匿名限额预算内）。</summary>
     private static void HandleRepoGet(bool force)
     {
         if (_repoFetching) { PushRepoData(); return; }
@@ -2155,6 +2162,19 @@ internal static class ConfigBridge
     {
         try
         {
+            // 启动一次性预检（作者拍板）：+10s 起 L2 补丁碰撞扫描 + 仓库更新 fetch 各一轮——
+            // 面板开没开都跑（结果留 C# 侧），替代旧的 MC_OPEN 打开自动查；手动按钮 60s 冷却不变。
+            if (!_bootDone)
+            {
+                _bootAge += dt;
+                if (_bootAge >= 10f)
+                {
+                    _bootDone = true;
+                    try { PatchScan.Refresh(); }
+                    catch (Exception e) { Log("warn 启动碰撞扫描异常: " + e.Message); }
+                    HandleRepoGet(false); // _repoRows==null 必然直落 StartRepoFetch；头 10s 内手动查过则走缓存分支不重复 fetch
+                }
+            }
             while (Inbox.TryDequeue(out var json)) HandleOutbox(json);
             if (Dirty.Count > 0)
             {
@@ -2211,17 +2231,17 @@ internal static class ConfigBridge
                     {
                         case "MC_OPEN":
                             FocusTick.NotifyOpen(); // 任务 8：面板开⇒键盘门交给网页（FocusTick 0.3s 沿触发）
-                            // v2 任务 12：L2 补丁碰撞实测（主线程轻量；打开即扫 + MC_SCAN 手动，绝不后台轮询）
-                            PatchScan.Refresh();
+                            // v2 任务 12 改口径（作者拍板）：打开不再扫不查——L2 碰撞与仓库更新
+                            // 均由启动 +10s 预检跑一轮（Pump 内 _bootDone），此处只推最近结果；
+                            // 手动重扫=MC_SCAN、手动检查更新=头部按钮（60 秒冷却）。
                             PushRender(BuildSnapshot().ToJson());
                             PushScanData();
                             // v2 任务 7：开门即推待生效摘要（面板底部条初始态；BuildSnapshot 内已刷新 _pendOps）
                             _pendSig = PendingSig();
                             PushPendingSummary();
-                            // T16/D6（Ruling 22）：面板打开即查一次仓库更新（15 分钟会话缓存 +
-                            // 手动刷新 60 秒冷却保留，均在 HandleRepoGet 内判定）——缓存内只推
-                            // 已有数据不重复 fetch；首次打开/缓存过期才起一轮后台 12 仓 fetch。
-                            HandleRepoGet(false);
+                            // 只推存量仓库数据（rows/最近轮/checking 态）：启动预检或手动检查的
+                            // 结果原样上屏；fetch 仍在跑则推 checking，完成时 RepoHarvest(Kind1) 补推。
+                            PushRepoData();
                             // 任务 4：v1"上次停用未完成"残留 toast 已删——改名执行迁启动清理器，无残留概念
                             break;
                         case "MC_CLOSE": // 面板关闭：键盘门双还原（任务 8）+ 立即落盘全部脏 cfg（防抖收口）

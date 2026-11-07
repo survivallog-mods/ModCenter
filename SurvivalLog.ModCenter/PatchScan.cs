@@ -78,7 +78,9 @@ internal sealed class PatchScanResult
 /// 统计口径（fix I-1）：InScope/Skipped 按"全部已挂补丁方法"计数（含单 owner），碰撞组数单独
 /// 统计（MultiOwnerGame）；框架侧多 owner 组（MultiOwnerFramework/Framework）继续过滤不铺行，
 /// 但汇总必须披露"框架侧 N 组未计入"（Ruling 14②，真实共挂不隐身）。
-/// 扫描时机：面板打开（MC_OPEN）+ 手动刷新（MC_SCAN），主线程执行、不后台轮询（裁定 1）。
+/// 扫描时机：启动 +10s 预检一轮（Pump _bootDone；10s 等其他 mod 补丁落账）+ 手动刷新
+/// （MC_SCAN），主线程执行、不后台轮询（裁定 1）；面板打开只推最近结果不再重扫
+/// （BuildSnapshot 经 Current 兜底惰性扫——预检异常时的安全网）。
 /// 探针：cfg Debug.PatchScan（默认关）启动 10s 后 dump PatchInfo 真实形态到
 /// BepInEx/ModCenter_patchscan.txt（硬规则 9：不依赖 LogOutput）。
 /// </summary>
@@ -93,7 +95,7 @@ internal static class PatchScan
     /// <summary>最近一轮结果（未扫描时惰性扫一次；BuildSnapshot 兜底用）。</summary>
     internal static PatchScanResult Current => _last ??= Scan();
 
-    /// <summary>立即重扫（MC_OPEN/MC_SCAN 主线程调用；顺带记录耗时）。</summary>
+    /// <summary>立即重扫（启动预检（Pump +10s）/MC_SCAN 主线程调用；顺带记录耗时）。</summary>
     internal static PatchScanResult Refresh()
     {
         _last = Scan();

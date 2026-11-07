@@ -46,7 +46,7 @@ v2 在此之上补齐**生命周期闭环**（作者 2026-10-28 拍板，spec §
 | D3 | 排序机制 | A1：启动清理（CleanupRunner）Harmony 改序（Cecil 改写第三方 dll 依赖属性被否——改玩家文件，对方发新版即失效） |
 | D4 | 冲突体检 | 三层全上；行内警示标 + 点击详情 + 玩家自决 |
 | D5 | 安装范围 | 套件 12 组织仓；第三方仍=玩家手丢 dll 面板纳管；不做第三方商店（转载红线）；基座修复走网盘 |
-| D6 | 更新触发 | **面板打开时自动查一次**（15 分钟会话缓存；Ruling 22 + T16/D 加固）+ 手动刷新 60 秒冷却；**无后台轮询** |
+| D6 | 更新触发 | **启动 +10s 自动查一次**（面板没开也跑，结果留 C# 侧待 MC_OPEN 补推；原"面板打开自动查"撤——每次开面板发 12 仓请求意义不大）+ 手动刷新 60 秒冷却；**无后台轮询** |
 | D7 | 本地 ≥ 远端 | **只告警不拦截**；确认窗红字"版本回退风险"，是否降级由玩家决定；保留"重装当前版本"入口 |
 | D8 | gamekb 不符 | **只告警不拦截**；行内 ⊘ 橙 + 确认窗红字，按钮保持可用；本地版本读不到 → "未校验游戏版本"照常放行 |
 | D9 | 面板形态 | 融合式（仓库入口卡 + 排序模式融入侧栏）；徽标全图标化；排序用拖拽 + 键盘 ↑↓ 替代（WCAG 2.2 AA），不用按钮堆 |
@@ -261,13 +261,13 @@ v2 在此之上补齐**生命周期闭环**（作者 2026-10-28 拍板，spec §
 
 | type | 字段 | 行为 |
 |---|---|---|
-| `MC_OPEN` | `host` | 键盘门开（FocusTick）+ L2 立即扫描 + 推全量快照 + `MC_SCAN_DATA` + `MC_REPO_DATA`（15 分钟缓存；过期则起一轮后台 fetch——D6/Ruling 22）+ `MC_PENDING_SUMMARY` |
+| `MC_OPEN` | `host` | 键盘门开（FocusTick）+ 推全量快照 + `MC_SCAN_DATA`（启动预检最近一轮，不重扫）+ `MC_REPO_DATA`（存量 rows/checking，**不 fetch**——D6 改启动预检）+ `MC_PENDING_SUMMARY` |
 | `MC_CLOSE` | `why?` | 键盘门双还原 + 立即落盘全部脏 cfg；`why='host-doc-gone'` 为孤儿看门狗补发 |
 | `MC_SET` | `guid, section, key, value` | 写值（Meta 键或第三方真实键）→ 回 `MC_SET_OK{k,badge}` / `MC_SET_FAIL{k,err}`；未登记键拒绝 |
 | `MC_TOGGLE_MOD` | `guid, enabled` | 套件=直写该 mod `General.Enabled`（热还原）；第三方=marker/软停三层语义；回推新快照 |
 | `MC_EVIDENCE` | `tag` | 验证辅助（只读）：写多表断言快照到 `ModCenter_evidence.txt`；正常玩家不触发 |
-| `MC_REPO_GET` | `force` | （v3 起面板不再发送，保留兼容）打开拉取：15 分钟会话缓存内推缓存；fetch 在跑只推现状 |
-| `MC_CHK` | — | 头部「检查更新」：60 秒冷却（GitHub 匿名 60 次/h），冷却内 only toast `刚检查过，稍后再试` |
+| `MC_REPO_GET` | `force` | （v3 起面板不再发送，保留兼容）拉取：15 分钟会话缓存内推缓存；fetch 在跑只推现状 |
+| `MC_CHK` | — | 头部「检查更新」：60 秒冷却（GitHub 匿名 60 次/h），冷却内 only toast `刚检查过，稍后再试`；启动预检完成后的 60s 内同样受限（=刚查过） |
 | `MC_UPD` | `repoKey` | 确认更新 → 串行下载链（下载→zip MD5→解包 dll→暂存→写 pending） |
 | `MC_INST` | `repoKey` | 安装（与更新同链；前端按 local==null 分流） |
 | `MC_ORDER_GET` | — | 返回生效序（pending.order 命中前置 + 其余 GUID 字母序）+ 行元数据 + 默认序 |
@@ -550,9 +550,12 @@ PendingWriter 合并语义对临时文件 `selftest-pending.json` 自证（旧�
 > **机制全部保留**，入口改为三处：顶部「检查更新」按钮（`MC_CHK`）、列表行内图标
 > （↑/↓/⊘，点击直接确认）、详情「维护」区按钮（`maintHtml`：更新到 X / 安装 X / 降级到 X）。
 
-- **查询节流**：面板打开自动查一次（15 分钟会话缓存，D6/Ruling 22 不变）+ 手动 60 秒冷却
-  （冷却内 toast `刚检查过，稍后再试`）+ **绝不后台轮询**。检查完成汇总 toast 由面板拼
-  （JS 在 `MC_CHK` 后等 `MC_REPO_DATA`：`检查完成：N 个可更新、…`/`都是最新版`，spec D8）。
+- **查询节流**：启动 +10s 自动查一次（`Pump` `_bootDone`，面板没开也跑——结果留 C# 侧，
+  开面板即见徽标/仓库态；原"面板打开自动查"撤——D6 改口径）+ 手动 60 秒冷却
+  （冷却内 toast `刚检查过，稍后再试`；启动预检完成后的 60s 内同样受限，全失败轮豁免可
+  立即重试）+ **绝不后台轮询**。检查完成汇总 toast 由面板拼
+  （JS 在 `MC_CHK` 后等 `MC_REPO_DATA`：`检查完成：N 个可更新、…`/`都是最新版`，spec D8；
+  启动预检轮无此 toast——面板未开，推送丢弃）。
   **403 专门提示**：`GitHub 限流`+`请稍后再试`（`RepoData.rateLimited` 口径不变）。
 - **fetch/下载链**：与 v2 完全一致——后台 12 仓顺序 fetch → `RepoDecision.Build` 五态 →
   串行下载（`MC_DL` 节流）→ zip MD5 → 解包暂存 → `PendingWriter.AddUpdate` → 行内 ⟳。
@@ -769,8 +772,10 @@ PendingWriter 合并语义对临时文件 `selftest-pending.json` 自证（旧�
 
 #### 6.2.2 机制（`PatchScan.cs`）
 
-- **扫描时机**：MC_OPEN（面板打开即扫）+ MC_SCAN（手动"重新扫描"）；不后台轮询（裁定 1）。
-  结果缓存 `PatchScan._last`，快照 ics / MC_CF 卡片 / MC_SCAN_DATA 三处同源。
+- **扫描时机**：启动 +10s 预检一轮（`Pump` `_bootDone`，与其他检查同拍；10s 等补丁落账）
+  + MC_SCAN（手动"重新扫描"）；MC_OPEN 只推最近结果不重扫；不后台轮询（裁定 1）。
+  结果缓存 `PatchScan._last`（`Current` 惰性兜底：预检异常时快照构建现场扫），
+  快照 ics / MC_CF 卡片 / MC_SCAN_DATA 三处同源。
 - **归组**：同方法 ≥2 owner 一条；owner 双路径合并去重（Patches.Owners + Patch.owner，防版本差异）。
   `patchedCount` = prefix+postfix+transpiler+finalizer+ilmanipulator 实例数。
 - **范围过滤与统计口径**：只看游戏侧方法（声明类型程序集=`HotUpdate` 或命名空间 `GameCore.*`）；
