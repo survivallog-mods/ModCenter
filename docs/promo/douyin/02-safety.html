@@ -1,0 +1,156 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<style>
+  * { margin:0; padding:0; box-sizing:border-box; }
+  html,body { width:1080px; height:1440px; overflow:hidden; }
+  body { font-family:'Microsoft YaHei','PingFang SC',sans-serif; }
+  .page{
+    position:relative; width:1080px; height:1440px; overflow:hidden;
+    background:#0e1118; color:#e8e6e0;
+    display:flex; flex-direction:column; justify-content:space-between;
+    padding:50px 64px 40px;
+  }
+  .bg{ position:absolute; inset:0; pointer-events:none; }
+  .bg .grid{ position:absolute; inset:0;
+    background-image:linear-gradient(rgba(255,255,255,.03) 1px,transparent 1px),
+                     linear-gradient(90deg,rgba(255,255,255,.03) 1px,transparent 1px);
+    background-size:64px 64px; }
+  .bg .glow1{ position:absolute; width:900px; height:900px; left:-320px; top:-380px; border-radius:50%;
+    background:radial-gradient(circle,rgba(74,222,128,.10),transparent 62%); }
+  .bg .glow2{ position:absolute; width:860px; height:860px; right:-300px; bottom:-320px; border-radius:50%;
+    background:radial-gradient(circle,rgba(232,163,61,.12),transparent 62%); }
+  .bg .vig{ position:absolute; inset:0; background:radial-gradient(ellipse at center,transparent 55%,rgba(0,0,0,.5)); }
+  .layer{ position:relative; z-index:2; }
+
+  .h1{ font-size:56px; font-weight:900; letter-spacing:2px; color:#f4f1ea; }
+  .h1 .hl{ color:#4ade80; }
+  .sub{ margin-top:12px; font-size:25px; color:#9aa0ad; letter-spacing:1px; }
+
+  .sec{ margin-top:0; }
+  .sec .st{ display:flex; align-items:center; gap:14px; margin-bottom:18px; }
+  .sec .st .bar{ width:8px; height:34px; border-radius:4px; background:#e8a33d; }
+  .sec .st .bar.g{ background:#4ade80; }
+  .sec .st .txt{ font-size:32px; font-weight:800; letter-spacing:2px; color:#e8e6e0; }
+  .sec .st .n{ font-size:20px; color:#6b7180; font-weight:600; letter-spacing:1px; }
+
+  /* 安全 2x2 */
+  .safe{ display:grid; grid-template-columns:1fr 1fr; gap:16px; }
+  .sc{ padding:22px 26px; border-radius:18px; background:linear-gradient(180deg,#181b24,#141720);
+    border:1px solid #272c39; min-height:148px; }
+  .sc .hd{ display:flex; align-items:center; gap:12px; }
+  .sc .ic{ width:42px; height:42px; flex:none; border-radius:12px; background:rgba(74,222,128,.12);
+    border:1px solid rgba(74,222,128,.4); display:flex; align-items:center; justify-content:center; }
+  .sc .t{ font-size:27px; font-weight:800; color:#f0ede6; letter-spacing:1px; }
+  .sc .d{ margin-top:12px; font-size:21px; color:#8a90a0; line-height:1.45; }
+  .sc .d b{ color:#9aa0ad; font-weight:700; }
+
+  /* 贴心设计 */
+  .nice{ display:flex; flex-direction:column; gap:12px; }
+  .ni{ display:flex; align-items:center; gap:16px; height:66px; padding:0 24px; border-radius:14px;
+    background:rgba(255,255,255,.03); border:1px solid #232834; }
+  .ni .dot{ width:10px; height:10px; border-radius:50%; background:#e8a33d; flex:none; }
+  .ni .t{ font-size:24px; color:#cfd3dc; font-weight:700; flex:none; }
+  .ni .d{ font-size:21px; color:#8a90a0; }
+
+  /* 安装 */
+  .inst{ display:grid; grid-template-columns:1fr 1fr; gap:16px; }
+  .ic2{ padding:22px 26px; border-radius:18px; background:rgba(96,165,250,.06);
+    border:1px solid rgba(96,165,250,.3); min-height:150px; }
+  .ic2 .hd{ display:flex; align-items:center; gap:12px; }
+  .ic2 .tag{ font-size:19px; font-weight:800; color:#60a5fa; padding:4px 14px; border-radius:999px;
+    background:rgba(96,165,250,.12); border:1px solid rgba(96,165,250,.45); }
+  .ic2 .rec{ font-size:16px; font-weight:700; color:#0e1118; padding:4px 12px; border-radius:999px;
+    background:#e8a33d; }
+  .ic2 .t{ margin-top:12px; font-size:25px; font-weight:800; color:#f0ede6; }
+  .ic2 .d{ margin-top:9px; font-size:20px; color:#8a90a0; line-height:1.45; }
+
+  /* 底部功能收尾条 */
+  .endbar{ display:flex; align-items:center; gap:22px; padding:0 30px; height:118px;
+    border-radius:20px; background:rgba(74,222,128,.07); border:1px solid rgba(74,222,128,.35); }
+  .endbar .ck{ width:50px; height:50px; flex:none; border-radius:50%;
+    background:rgba(74,222,128,.14); border:1px solid rgba(74,222,128,.5);
+    display:flex; align-items:center; justify-content:center; }
+  .endbar .t{ font-size:30px; font-weight:800; color:#f0ede6; letter-spacing:1px; }
+  .endbar .d{ margin-top:8px; font-size:21px; color:#8a90a0; letter-spacing:.5px; }
+</style>
+</head>
+<body>
+<div class="page">
+  <div class="bg"><div class="grid"></div><div class="glow1"></div><div class="glow2"></div><div class="vig"></div></div>
+
+  <div class="layer">
+    <div class="h1">用得<span class="hl">放心</span>，上手<span class="hl">简单</span></div>
+    <div class="sub">不改存档、不碰游戏本体文件，删掉 dll 就完全还原</div>
+  </div>
+
+  <div class="layer sec">
+    <div class="st"><span class="bar g"></span><span class="txt">四条安全底线</span><span class="n">SAFETY FIRST</span></div>
+    <div class="safe">
+      <div class="sc">
+        <div class="hd">
+          <span class="ic"><svg width="24" height="24" viewBox="0 0 24 24"><path d="M12 3l7 3v5c0 4.5-3 8.5-7 10-4-1.5-7-5.5-7-10V6l7-3z" stroke="#4ade80" stroke-width="2" fill="none" stroke-linejoin="round"/><path d="M9 12l2 2 4-4.5" stroke="#4ade80" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"/></svg></span>
+          <span class="t">不碰存档</span>
+        </div>
+        <div class="d">存档完全不动，装与不装、卸与不卸，<b>进度永远安全</b></div>
+      </div>
+      <div class="sc">
+        <div class="hd">
+          <span class="ic"><svg width="24" height="24" viewBox="0 0 24 24"><path d="M12 3l7 3v5c0 4.5-3 8.5-7 10-4-1.5-7-5.5-7-10V6l7-3z" stroke="#4ade80" stroke-width="2" fill="none" stroke-linejoin="round"/><path d="M9 12l2 2 4-4.5" stroke="#4ade80" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"/></svg></span>
+          <span class="t">不改游戏文件</span>
+        </div>
+        <div class="d">只写各 MOD 自己的 config 配置，<b>游戏本体一个字节不动</b></div>
+      </div>
+      <div class="sc">
+        <div class="hd">
+          <span class="ic"><svg width="24" height="24" viewBox="0 0 24 24"><path d="M12 3l7 3v5c0 4.5-3 8.5-7 10-4-1.5-7-5.5-7-10V6l7-3z" stroke="#4ade80" stroke-width="2" fill="none" stroke-linejoin="round"/><path d="M9 12l2 2 4-4.5" stroke="#4ade80" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"/></svg></span>
+          <span class="t">禁用 ≠ 删除</span>
+        </div>
+        <div class="d">第三方 MOD 只改名 <b>.disabled</b> 不删文件，随时一键恢复</div>
+      </div>
+      <div class="sc">
+        <div class="hd">
+          <span class="ic"><svg width="24" height="24" viewBox="0 0 24 24"><path d="M12 3l7 3v5c0 4.5-3 8.5-7 10-4-1.5-7-5.5-7-10V6l7-3z" stroke="#4ade80" stroke-width="2" fill="none" stroke-linejoin="round"/><path d="M9 12l2 2 4-4.5" stroke="#4ade80" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"/></svg></span>
+          <span class="t">删掉即还原</span>
+        </div>
+        <div class="d">删 dll 入口就消失，各 MOD 保留最后配置值，<b>来去自由</b></div>
+      </div>
+    </div>
+  </div>
+
+  <div class="layer sec">
+    <div class="st"><span class="bar"></span><span class="txt">3 个贴心设计</span></div>
+    <div class="nice">
+      <div class="ni"><span class="dot"></span><span class="t">双入口</span><span class="d">主菜单 + 游戏内 ESC 都能开，对局中随时调参，不用退游戏</span></div>
+      <div class="ni"><span class="dot"></span><span class="t">待生效条</span><span class="d">重启类操作先汇总，可一键撤销、可立即重启，误操作有后悔药</span></div>
+      <div class="ni"><span class="dot"></span><span class="t">排序保护</span><span class="d">拖拽调整 MOD 加载顺序规避写序冲突，硬依赖自动保护不会拖坏</span></div>
+    </div>
+  </div>
+
+  <div class="layer sec">
+    <div class="st"><span class="bar"></span><span class="txt">两种包，怎么装都行</span></div>
+    <div class="inst">
+      <div class="ic2">
+        <div class="hd"><span class="tag">Full 完整包</span><span class="rec">新手推荐</span></div>
+        <div class="t">解压到游戏根目录</div>
+        <div class="d">自带 BepInEx 基座，装完即用，不用懂任何原理</div>
+      </div>
+      <div class="ic2">
+        <div class="hd"><span class="tag">PluginOnly 纯插件</span></div>
+        <div class="t">dll 丢进 plugins</div>
+        <div class="d">已装 BepInEx 6 的老玩家，一个文件放进插件目录</div>
+      </div>
+    </div>
+  </div>
+
+  <div class="layer endbar">
+    <div class="ck"><svg width="26" height="26" viewBox="0 0 24 24"><path d="M5 12.5l4.5 4.5L19 7.5" stroke="#4ade80" stroke-width="2.8" stroke-linecap="round" stroke-linejoin="round" fill="none"/></svg></div>
+    <div>
+      <div class="t">装好即见效</div>
+      <div class="d">主菜单 / 游戏内 ESC 出现「MOD 管理」入口，点开即可集中管理全部 MOD</div>
+    </div>
+  </div>
+</div>
+</body>
+</html>
