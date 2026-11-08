@@ -988,7 +988,10 @@
     pop.hidden = false;
     ovrDdPlace(widget);
   }
-  /* 第 2 级：该类型动作列表 + 搜索框（sticky）+ 返回类型 */
+  /* 第 2 级：该类型动作列表 + 搜索框（sticky）+ 返回类型。
+   * D12：同名动作（看书×8/翻阅笔记×28——同名异 ID 的不同动作）合并为一项（×N 标），
+   * data-ids 携全组 ID，提交时逐 ID 落库（引擎语义不变）。合并按"分类内"去重——
+   * 同名跨分类（如 上厕所 在物品/杂项）在各自类型列表里仍是两项。 */
   function ovrDdShowLv2(widget, m, cat) {
     var pop = widget.querySelector('.__mc-ovr-dd-pop');
     var acts = m.acts || [];
@@ -996,42 +999,87 @@
       + '<input type="text" class="__mc-ovr-dd-search" data-act="ovr-dd-search" placeholder="\u641c\u7d22\u52a8\u4f5c\u2026">'
       + '<button type="button" class="__mc-ovr-dd-back" data-act="ovr-dd-back">\u2039 \u7c7b\u578b</button>'
       + '</div>';
+    var names = [], byName = {};
     for (var i = 0; i < acts.length; i++)
-      if (acts[i].c === cat)
-        h += '<div class="__mc-ovr-dd-item __mc-ovr-dd-opt" data-act="ovr-dd-opt" data-id="' + acts[i].id + '">' + esc(acts[i].n) + '</div>';
+    {
+      if (acts[i].c !== cat) continue;
+      var nm = acts[i].n;
+      if (!byName[nm]) { byName[nm] = { ids: [], ms: 0 }; names.push(nm); }
+      byName[nm].ids.push(acts[i].id);
+    }
+    for (var j = 0; j < names.length; j++)
+    {
+      var g = byName[names[j]];
+      h += '<div class="__mc-ovr-dd-item __mc-ovr-dd-opt" data-act="ovr-dd-opt" data-ids="' + g.ids.join(',') + '">'
+        + esc(names[j]) + (g.ids.length > 1 ? '<span class="__mc-ovr-dd-cnt">\u00d7' + g.ids.length + '</span>' : '') + '</div>';
+    }
     pop.innerHTML = h;
     pop.hidden = false;
     ovrDdPlace(widget);
     var se = pop.querySelector('.__mc-ovr-dd-search');
     if (se) se.focus();
   }
+  /* 已提交行按名聚合（D12）：目录内有名的 ID 归入其名组（跨分类也并组——玩家视角同名
+   * 即同物）；目录外 ID 各自单行。返回 [{name|null, idxs:[], label}]（label=显示名）。 */
+  function ovrGroupsOf(m) {
+    var ovr = m.ovr || [], acts = m.acts || [], groups = [], byName = {};
+    for (var i = 0; i < ovr.length; i++)
+    {
+      var nm = ovrNameOf(m, ovr[i].id);
+      if (!nm) { groups.push({ name: null, idxs: [i], label: '\u52a8\u4f5c #' + ovr[i].id }); continue; }
+      if (!byName[nm]) { byName[nm] = { name: nm, idxs: [], label: nm }; groups.push(byName[nm]); }
+      byName[nm].idxs.push(i);
+    }
+    return groups;
+  }
   function ovrHtml(m) {
     var acts = m.acts || [];
     var h = '<div class="__mc-grp"><h3>\u52a8\u4f5c\u8986\u76d6\uff08\u5355\u4e2a\u52a8\u4f5c\u5355\u72ec\u8c03\uff09</h3>';
     var ovr = m.ovr || [];
-    for (var idx = 0; idx < ovr.length; idx++) {
-      var info;
-      if (acts.length) {
-        /* 行内 dd=该行动作（目录外的 id 兜底显示，照常可改/删） */
-        info = '<div class="__mc-info">'
-          + ovrDdHtml('pick', idx, ovrLabelOf(m, ovr[idx].id), '')
-          + '<div class="__mc-ck">' + OVR_SECTION + '.' + OVR_KEY + ' \u00b7 ' + ovr[idx].id + ':' + ovr[idx].ms + '</div>'
-          + '</div>';
-      } else {
-        info = '<div class="__mc-info">'
-          + '<div class="__mc-lb">' + esc(ovrLabelOf(m, ovr[idx].id)) + '</div>'
-          + '<div class="__mc-ck">' + OVR_SECTION + '.' + OVR_KEY + ' \u00b7 ' + ovr[idx].id + ':' + ovr[idx].ms + '</div>'
+    if (acts.length) {
+      var groups = ovrGroupsOf(m);
+      for (var gi = 0; gi < groups.length; gi++)
+      {
+        var gr = groups[gi];
+        var multi = gr.idxs.length > 1;
+        var ms0 = ovr[gr.idxs[0]].ms;
+        var label = gr.label + (multi ? ' \u00d7' + gr.idxs.length : '');
+        var ck = multi ? OVR_SECTION + '.' + OVR_KEY + ' \u00b7 ' + gr.idxs.length + ' \u9879 \u00b7 ' + ms0 + 'ms'
+                       : OVR_SECTION + '.' + OVR_KEY + ' \u00b7 ' + ovr[gr.idxs[0]].id + ':' + ms0;
+        h += '<div class="__mc-item">'
+          + '<div class="__mc-info">'
+          + ovrDdHtml('pick', gi, label, '')
+          + '<div class="__mc-ck">' + ck + '</div>'
+          + '</div>'
+          + '<div class="__mc-ctl">'
+          + (multi
+            ? '<input type="range" min="0" max="5000" step="50" value="' + ms0 + '" data-act="ovr-gset" data-g="' + gi + '">'
+              + '<input type="text" class="__mc-numbox" inputmode="numeric" data-num="int" value="' + ms0 + '" data-act="ovr-gset" data-g="' + gi + '">'
+            : '<input type="range" min="0" max="5000" step="50" value="' + ms0 + '" data-act="ovr-set" data-idx="' + gr.idxs[0] + '">'
+              + '<input type="text" class="__mc-numbox" inputmode="numeric" data-num="int" value="' + ms0 + '" data-act="ovr-set" data-idx="' + gr.idxs[0] + '">')
+          + '</div>'
+          + '<div class="__mc-badge __mc-b-now">\u26a1 \u7acb\u5373\u751f\u6548</div>'
+          + (multi
+            ? '<button type="button" class="__mc-del" data-act="ovr-gdel" data-g="' + gi + '" title="\u5220\u9664\u6b64\u8986\u76d6\uff08' + gr.idxs.length + ' \u9879\uff09">\u2715</button>'
+            : '<button type="button" class="__mc-del" data-act="ovr-del" data-idx="' + gr.idxs[0] + '" title="\u5220\u9664\u6b64\u8986\u76d6">\u2715</button>')
           + '</div>';
       }
-      h += '<div class="__mc-item">'
-        + info
-        + '<div class="__mc-ctl">'
-        + '<input type="range" min="0" max="5000" step="50" value="' + ovr[idx].ms + '" data-act="ovr-set" data-idx="' + idx + '">'
-        + '<input type="text" class="__mc-numbox" inputmode="numeric" data-num="int" value="' + ovr[idx].ms + '" data-act="ovr-set" data-idx="' + idx + '">'
-        + '</div>'
-        + '<div class="__mc-badge __mc-b-now">\u26a1 \u7acb\u5373\u751f\u6548</div>'
-        + '<button type="button" class="__mc-del" data-act="ovr-del" data-idx="' + idx + '" title="\u5220\u9664\u6b64\u8986\u76d6">\u2715</button>'
-        + '</div>';
+    } else {
+      for (var idx = 0; idx < ovr.length; idx++)
+      {
+        h += '<div class="__mc-item">'
+          + '<div class="__mc-info">'
+          + '<div class="__mc-lb">' + esc(ovrLabelOf(m, ovr[idx].id)) + '</div>'
+          + '<div class="__mc-ck">' + OVR_SECTION + '.' + OVR_KEY + ' \u00b7 ' + ovr[idx].id + ':' + ovr[idx].ms + '</div>'
+          + '</div>'
+          + '<div class="__mc-ctl">'
+          + '<input type="range" min="0" max="5000" step="50" value="' + ovr[idx].ms + '" data-act="ovr-set" data-idx="' + idx + '">'
+          + '<input type="text" class="__mc-numbox" inputmode="numeric" data-num="int" value="' + ovr[idx].ms + '" data-act="ovr-set" data-idx="' + idx + '">'
+          + '</div>'
+          + '<div class="__mc-badge __mc-b-now">\u26a1 \u7acb\u5373\u751f\u6548</div>'
+          + '<button type="button" class="__mc-del" data-act="ovr-del" data-idx="' + idx + '" title="\u5220\u9664\u6b64\u8986\u76d6">\u2715</button>'
+          + '</div>';
+      }
     }
     if (acts.length) {
       /* 尾部未设置行：选完动作即提交（默认 1000ms），renderCfg 后自动补新空行 */
@@ -1779,38 +1827,51 @@
         ovrDdShowLv1(dbw, m);
         return;
       }
-      /* dd 第 2 级：点动作即提交（new=尾部未设置行新增默认 1000ms；pick=已覆盖行换动作保留毫秒） */
+      /* dd 第 2 级：点动作即提交（new=尾部未设置行新增默认 1000ms；pick=已覆盖行/组换动作保留毫秒）。
+       * D12：选项按名合并（data-ids 携全组 ID）；提交逐 ID 落库，部分已在则只补缺，全在=重复提示。 */
       var ddo = t.closest('[data-act="ovr-dd-opt"]');
       if (ddo) {
         if (!m.ovr) return;
         var dow = ddo.closest('.__mc-ovr-dd');
-        var doid = +ddo.getAttribute('data-id');
+        var dIds = (ddo.getAttribute('data-ids') || '').split(',');
+        var dLbl = ddo.textContent.replace(/\u00d7\d+$/, '').trim();
         closeAllOvrDd();
         if (dow.dataset.kind === 'new') {
-          if (m.ovr.some(function (x) { return x.id === doid; })) {
-            toast('\u8be5\u52a8\u4f5c\u5df2\u5728\u8986\u76d6\u6e05\u5355\uff0c\u53ef\u76f4\u63a5\u62d6\u6ed1\u6761\u8c03\u6574');
-            renderCfg();
-            return;
-          }
-          m.ovr.push({ id: doid, ms: 1000 });
+          var addN = 0;
+          for (var ai = 0; ai < dIds.length; ai++)
+            if (!m.ovr.some(function (x) { return x.id === +dIds[ai]; })) { m.ovr.push({ id: +dIds[ai], ms: 1000 }); addN++; }
+          if (!addN) { toast('\u8be5\u52a8\u4f5c\u5df2\u5728\u8986\u76d6\u6e05\u5355\uff0c\u53ef\u76f4\u63a5\u62d6\u6ed1\u6761\u8c03\u6574'); renderCfg(); return; }
           renderCfg();
           ovrCommit(m);
-          toast('\u5df2\u6dfb\u52a0\uff1a' + m.name + ' \u00b7 ' + ovrLabelOf(m, doid) + ' = 1000ms\uff08\u6ed1\u6761\u53ef\u8c03\uff09', 'now');
+          toast('\u5df2\u6dfb\u52a0\uff1a' + m.name + ' \u00b7 ' + dLbl + (addN > 1 ? '\uff08' + addN + ' \u4e2a\u52a8\u4f5c\uff09' : '') + ' = 1000ms\uff08\u6ed1\u6761\u53ef\u8c03\uff09', 'now');
         } else {
-          var dpi = +dow.dataset.idx;
-          var dpo = m.ovr[dpi];
-          if (!dpo) return;
-          if (doid === dpo.id) { renderCfg(); return; }
-          if (m.ovr.some(function (x, xi) { return x.id === doid && xi !== dpi; })) {
-            toast('\u8be5\u52a8\u4f5c\u5df2\u5728\u8986\u76d6\u6e05\u5355\uff0c\u53ef\u76f4\u63a5\u62d6\u90a3\u884c\u6ed1\u6761\u8c03\u6574');
-            renderCfg();
-            return;
-          }
-          dpo.id = doid;
+          /* 换动作=整组替换为新选项（组内其余 ID 移除，毫秒沿用组首值） */
+          var dgs = ovrGroupsOf(m);
+          var dgr = dgs[+dow.getAttribute('data-idx')];
+          if (!dgr) { renderCfg(); return; }
+          var dOldMs = m.ovr[dgr.idxs[0]].ms;
+          var dSame = dgr.idxs.length === dIds.length && dgr.idxs.every(function (oi, k) { return m.ovr[oi].id === +dIds[k]; });
+          if (dSame) { renderCfg(); return; } // 未变：复位
+          dgr.idxs.slice().sort(function (a, b) { return b - a; }).forEach(function (oi) { m.ovr.splice(oi, 1); });
+          for (var ri = dIds.length - 1; ri >= 0; ri--) m.ovr.push({ id: +dIds[ri], ms: dOldMs });
           renderCfg();
           ovrCommit(m);
-          toast('\u5df2\u6539\u4e3a\uff1a' + m.name + ' \u00b7 ' + ovrLabelOf(m, doid) + ' = ' + dpo.ms + 'ms', 'now');
+          toast('\u5df2\u6539\u4e3a\uff1a' + m.name + ' \u00b7 ' + dLbl + (dIds.length > 1 ? '\uff08' + dIds.length + ' \u4e2a\u52a8\u4f5c\uff09' : '') + ' = ' + dOldMs + 'ms', 'now');
         }
+        return;
+      }
+      /* D12：按名聚合组删除（组内全部 ID 一并移除） */
+      var gdel = t.closest('[data-act="ovr-gdel"]');
+      if (gdel) {
+        if (!m.ovr) return;
+        var ggs = ovrGroupsOf(m);
+        var ggr = ggs[+gdel.getAttribute('data-g')];
+        if (!ggr) return;
+        var gN = ggr.idxs.length, gLbl = ggr.label;
+        ggr.idxs.slice().sort(function (a, b) { return b - a; }).forEach(function (oi) { m.ovr.splice(oi, 1); });
+        renderCfg();
+        ovrCommit(m);
+        toast('\u5df2\u5220\u9664\uff1a' + m.name + ' \u00b7 ' + gLbl + '\uff08' + gN + ' \u9879\uff09', 'now');
         return;
       }
       /* 覆盖清单：新增（仅旧版回退路径——无动作目录时的 ID 手输框；目录路径走 dd 下拉） */
@@ -1893,6 +1954,26 @@
         var sitems = spop.querySelectorAll('.__mc-ovr-dd-opt');
         for (var si = 0; si < sitems.length; si++)
           sitems[si].style.display = (!sq || sitems[si].textContent.toLowerCase().indexOf(sq) >= 0) ? '' : 'none';
+        return;
+      }
+      /* D12：按名聚合组滑条/数值——组内全部 ID 统一毫秒 */
+      if (act === 'ovr-gset') {
+        if (!m.ovr) return;
+        var zgs = ovrGroupsOf(m);
+        var zgr = zgs[+el.getAttribute('data-g')];
+        if (!zgr) return;
+        var zv = parseFloat(el.value);
+        if (isNaN(zv)) return;
+        zv = Math.round(Math.max(0, Math.min(5000, zv)));
+        for (var zi = 0; zi < zgr.idxs.length; zi++) m.ovr[zgr.idxs[zi]].ms = zv;
+        syncSibling(el, zv);
+        var zck = el.closest('.__mc-item');
+        if (zck) {
+          var zckEl = zck.querySelector('.__mc-ck');
+          if (zckEl) zckEl.textContent = OVR_SECTION + '.' + OVR_KEY + ' \u00b7 ' + zgr.idxs.length + ' \u9879 \u00b7 ' + zv + 'ms';
+        }
+        throttleSend('ovrg' + el.getAttribute('data-g'), function () { ovrCommit(m); });
+        toast('\u5df2\u4fdd\u5b58\uff1a' + m.name + ' \u00b7 ' + zgr.label + '\uff08' + zgr.idxs.length + ' \u9879\uff09= ' + zv + 'ms', 'now');
         return;
       }
       /* 覆盖清单滑条/数值 */
