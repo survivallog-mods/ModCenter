@@ -3,6 +3,12 @@
 > 本文件只记本 mod 的更新；套件/安装器版本史见总仓根 CHANGELOG.md。
 > 版本号单源：本仓 csproj `<Version>`（作者定义，硬规则 1）。
 
+## v2.0.8（2026-11-08，随 UnlockHub v1.9.0 探索解锁）
+
+- **注册 UnlockHub v1.9.0 新开关**：解锁中心新增「探索解锁」分组——`Explore.UnlockDailyOnce`
+  （每日一次探索点不限次，默认开；机制=清空官方"每日一次地图"清单 `Explore_DailyOnceMaps`，
+  见 UnlockHub DESIGN §10）。面板侧纯注册项，无逻辑改动；未升 UnlockHub v1.9.0 的玩家不受影响。
+
 ## v2.0.7（2026-11-08，动作覆盖下拉化 + 负重批随行——三 mod 退役并入）
 
 ### 动作加速页「动作覆盖」新增入口：手输 ID → 联动下拉（作者令：玩家看不懂 ID）

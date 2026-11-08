@@ -195,7 +195,7 @@ internal static class Meta
         {
             Guid = "com.local.survivallog.unlockhub",
             Name = "解锁中心", En = "UnlockHub",
-            Desc = "通用解锁合集：角色专属内容逐项解锁 + 交易解锁（货架买后即刷）；关闭即还原官方门槛。v1.8.0 前名「角色解锁 RoleUnlock」。",
+            Desc = "通用解锁合集：角色专属内容逐项解锁 + 交易解锁（货架买后即刷）+ 探索解锁（每日一次探索点不限次）；关闭即还原官方门槛。v1.8.0 前名「角色解锁 RoleUnlock」。",
             Groups =
             {
                 new MetaGroup
@@ -226,6 +226,15 @@ internal static class Meta
                     {
                         // v1.8.0 新增（2026-11-02）：postfix 删货架快照，重开交易点走官方 DrawActiveShelf 全新上架
                         new MetaItem { Section = "Trade", Key = "UnlockTrade", Label = "交易解锁（货架买完即刷新上架）", Badge = "now", Type = "bool", Def = true }
+                    }
+                },
+                new MetaGroup
+                {
+                    Title = "探索解锁",
+                    Items =
+                    {
+                        // v1.9.0 新增（2026-11-08）：清空 Explore_DailyOnceMaps.Params3，每日一次探索点（科技公司）不限次
+                        new MetaItem { Section = "Explore", Key = "UnlockDailyOnce", Label = "探索解锁（每日一次探索点不限次）", Badge = "now", Type = "bool", Def = true }
                     }
                 }
             }
