@@ -170,7 +170,7 @@ internal static class ConfigBridge
                 mi.Groups.Add(gi);
             }
             if (mm.OvrHost != null) mi.Ovr = ReadOvr(cfg, mm.OvrHost);
-            if (mm.OvrHost != null) mi.Acts = ActionCatalog.Load(); // v2.1.1：动作目录（QuickAction 产出单源；缺文件=null 不输出→面板回退 ID 手输）
+            if (mm.OvrHost != null) mi.Acts = ActionCatalog.Load(); // v2.0.7：动作目录（QuickAction 产出单源；缺文件=null 不输出→面板回退 ID 手输）
             if (mm.BagOvrHost != null) mi.BagOvr = ReadBagOvr(cfg, mm.BagOvrHost);
             // v4 三标记（作者拍板）：⚠红=确定不可用（L1 严重冲突）、⚠橙=其余一切告警
             // （L2 碰撞/L3 叠加/版本不符）、↑黄=仅有新版本；↓/⊘/⟳/蓝 退役（待生效只留底条）。

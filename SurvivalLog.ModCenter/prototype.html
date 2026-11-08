@@ -107,7 +107,7 @@
 /* 覆盖清单 */
 #__mc_overlay .__mc-ovr-add{display:flex;gap:8px;align-items:center;padding:10px 4px 6px;flex-wrap:wrap;}
 #__mc_overlay .__mc-ovr-add input{width:120px;background:#0f1219;border:1px solid #2a2f3d;color:#e8e6e0;border-radius:6px;padding:5px 9px;font-size:13px;font-family:Consolas,monospace;}
-/* v2.1.1（作者令四稿）：动作覆盖行内两级可搜索下拉（自绘 dd 组件——原生 select 不支持搜索/两级弹出）。
+/* v2.0.7（作者令四稿）：动作覆盖行内两级可搜索下拉（自绘 dd 组件——原生 select 不支持搜索/两级弹出）。
 关闭态=按钮显示当前动作名；点开=第 1 级类型列表（组+数量）→ 选类型弹第 2 级该类型动作列表（顶部搜索框过滤+返回类型）；点动作即提交。列表开时才构建。 */
 #__mc_overlay .__mc-ovr-dd{position:relative;flex:1 1 auto;min-width:0;max-width:320px;}
 #__mc_overlay .__mc-ovr-dd-btn{width:100%;display:flex;align-items:center;justify-content:space-between;gap:6px;background:#0f1219;border:1px solid #2a2f3d;color:#e8e6e0;border-radius:6px;padding:5px 9px;font-size:13px;cursor:pointer;font-family:inherit;text-align:left;}
@@ -426,7 +426,7 @@ var MOCK = {
           { k: 'Speed.Combat',  l: '战斗类', t: 'int', v: 500, min: 0, max: 5000, st: 50, b: 'now' },
         ]},
       ],
-      /* v2.1.1 动作目录样例（真机=QuickActionCatalog.txt 全量约 3800 条；夹具每组 2 条演示下拉） */
+      /* v2.0.7 动作目录样例（真机=QuickActionCatalog.txt 全量约 3800 条；夹具每组 2 条演示下拉） */
       acts: [
         { id: 100003001, n: '看书', c: 5, ms: 2600 }, { id: 100003011, n: '看书', c: 5, ms: 2600 }, { id: 1915, n: '空调吹风', c: 5, ms: 5000 },
         { id: 100009001, n: '观察便签', c: 4, ms: 2000 }, { id: 9075, n: '上厕所', c: 4, ms: 1500 },
@@ -898,7 +898,7 @@ function itemHtml(m, it, gi, ii) {
     + '</div>';
 }
 
-/* v2.1.1 动作覆盖：行内两级可搜索下拉（acts，QuickAction v1.8.0+ 产 QuickActionCatalog.txt 单源，
+/* v2.0.7 动作覆盖：行内两级可搜索下拉（acts，QuickAction v1.8.0+ 产 QuickActionCatalog.txt 单源，
  * 守卫口径由对方过滤——列进来的动作覆盖一定生效，约 3800 条）。自绘 dd 组件：点开先选类型
  * （六组+数量）→ 弹该类型动作列表（搜索框过滤+返回类型）——不全平铺；点动作即提交（尾行新增
  * 默认 1000ms、已覆盖行换动作保留毫秒、重复拒绝）。列表开时才构建。无 acts 回退旧渲染 + ID 手输框。 */
@@ -1646,7 +1646,7 @@ function wireCfg(cfg) {
   cfg.addEventListener('click', function (e) {
     var t = e.target;
     if (!t.closest) return;
-    /* v2.1.1 dd 下拉：点击 dd 以外区域关闭已打开的动作弹出层 */
+    /* v2.0.7 dd 下拉：点击 dd 以外区域关闭已打开的动作弹出层 */
     if (!t.closest('.__mc-ovr-dd')) closeAllOvrDd();
     var ra = t.closest('[data-ract]');
     if (ra) {
@@ -1811,7 +1811,7 @@ function wireCfg(cfg) {
     if (!act) return;
     var m = curMod();
     if (!m) return;
-    /* v2.1.1 dd 下拉第 2 级搜索框：按动作名子串过滤（display 隐藏，保留滚动位置） */
+    /* v2.0.7 dd 下拉第 2 级搜索框：按动作名子串过滤（display 隐藏，保留滚动位置） */
     if (act === 'ovr-dd-search') {
       var sq = (el.value || '').trim().toLowerCase();
       var spop = el.closest('.__mc-ovr-dd-pop');

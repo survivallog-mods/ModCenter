@@ -69,7 +69,7 @@
  * MC_SET{guid,section,key,value}（section/key 从展示键 k 按首个 '.' 拆分——C# Match
  * 接受真实节名+主键/组合展示键/任一实写键）/ MC_TOGGLE_MOD{guid,enabled} / MC_OPEN{host}
  * / MC_CLOSE{host?,why?}（why='host-doc-gone' 为任务 8 孤儿看门狗补发）。ovr 清单序列化
- * （"id:ms,id:ms" 整串写 其他.Overrides）由本文件承担。acts=动作目录（v2.1.1，QuickAction
+ * （"id:ms,id:ms" 整串写 其他.Overrides）由本文件承担。acts=动作目录（v2.0.7，QuickAction
  * v1.8.0+ 产 QuickActionCatalog.txt）——动作覆盖新增走五分类下拉显示动作名，无 acts 回退 ID 手输。
  *
  * 全部元素 id/class 与样式 __mc 前缀且选择器锚定 #__mc_overlay（零泄漏）；不碰官方
@@ -180,7 +180,7 @@
     /* 覆盖清单 */
     + '#__mc_overlay .__mc-ovr-add{display:flex;gap:8px;align-items:center;padding:10px 4px 6px;flex-wrap:wrap;}'
     + '#__mc_overlay .__mc-ovr-add input{width:120px;background:#0f1219;border:1px solid #2a2f3d;color:#e8e6e0;border-radius:6px;padding:5px 9px;font-size:13px;font-family:Consolas,monospace;}'
-    /* v2.1.1（作者令四稿）：动作覆盖行内两级可搜索下拉（自绘 dd 组件——原生 select 不支持
+    /* v2.0.7（作者令四稿）：动作覆盖行内两级可搜索下拉（自绘 dd 组件——原生 select 不支持
      * 搜索/两级弹出）。关闭态=按钮显示当前动作名；点开=第 1 级类型列表（组+数量）→ 选类型
      * 弹第 2 级该类型动作列表（顶部搜索框过滤动作名 + 返回类型）；点动作即提交。列表开时才
      * 构建（按类型现取；单类型最多约 2700 项一次渲染无压力，搜索按 display 过滤）。 */
@@ -938,7 +938,7 @@
       + '</div>';
   }
 
-  /* ---- v2.1.1 动作覆盖：行内两级可搜索下拉（作者令四稿）----
+  /* ---- v2.0.7 动作覆盖：行内两级可搜索下拉（作者令四稿）----
    * m.acts=[{id,n,c,ms}]（QuickActionCatalog.txt，QuickAction v1.8.0+ 每会话产出，约 3800 条）。
    * 自绘 dd 组件：关闭态=按钮显示当前动作名；点开=第 1 级类型列表（六组+数量）→ 选类型弹
    * 第 2 级该类型动作列表（顶部搜索框过滤 + 返回类型）——不全平铺。点动作即提交（尾行新增
@@ -1772,7 +1772,7 @@
     cfg.addEventListener('click', function (e) {
       var t = e.target;
       if (!t.closest) return;
-      /* v2.1.1 dd 下拉：点击 dd 以外区域关闭已打开的动作弹出层 */
+      /* v2.0.7 dd 下拉：点击 dd 以外区域关闭已打开的动作弹出层 */
       if (!t.closest('.__mc-ovr-dd')) closeAllOvrDd();
       /* v3：仓库动作只保留 行内 更新·降级·安装 → 确认弹窗（back/chk/updall/repogoto 随
        * 仓库页退役；检查更新在头部按钮）。 */
@@ -1947,7 +1947,7 @@
       if (!act) return;
       var m = curMod();
       if (!m) return;
-      /* v2.1.1 dd 下拉第 2 级搜索框：按动作名子串过滤（display 隐藏，保留滚动位置） */
+      /* v2.0.7 dd 下拉第 2 级搜索框：按动作名子串过滤（display 隐藏，保留滚动位置） */
       if (act === 'ovr-dd-search') {
         var sq = (el.value || '').trim().toLowerCase();
         var spop = el.closest('.__mc-ovr-dd-pop');

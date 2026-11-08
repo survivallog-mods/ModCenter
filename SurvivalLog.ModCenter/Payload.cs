@@ -9,7 +9,7 @@ namespace SurvivalLog.ModCenter;
 /// Snapshot = {self:{ver,ics?}, mods:[ModInfo], tp:[ModInfo]}（tp 第三方通用页，任务 14 填，本任务空数组占位；
 /// self.ics v2.0.4 起=面板自身行仓库徽标，可选字段）；
 /// ModInfo = {guid,name,en,ver?,desc,enabled,tier?,groups:[{title,items:[Item]}]}（ver v2.0.6 起=插件版本，可选），ovr 类 mod（动作加速）另挂 ovr:[{id,ms}]
-/// 与 acts:[{id,n,c,ms}]（v2.1.1 动作目录下拉，QuickActionCatalog.txt 单源；null/空不输出）
+/// 与 acts:[{id,n,c,ms}]（v2.0.7 动作目录下拉，QuickActionCatalog.txt 单源；null/空不输出）
 /// （tier? 仅第三方 Tier 1 清单定制页输出 1，任务 15；省略 = Tier 0）；
 /// Item = {k,l,t,v,min?,max?,st?,b,note?,opts?}——与原型 v4 MODS 数组同名同义
 /// （docs/superpowers/specs/2026-10-24-modcenter-prototype.html）。
@@ -76,7 +76,7 @@ public sealed class ModInfo
     public int? Tier;    // 第三方接入档（任务 15）：null/省略 = Tier 0 通用页；1 = 清单定制页（fixture/面板判别）
     public List<GroupInfo> Groups = new();
     public List<OvrInfo> Ovr; // 仅动作加速挂（其他.Overrides 解析结果）；null 不输出该字段
-    public List<ActInfo> Acts; // 仅动作加速挂（QuickActionCatalog.txt 动作目录，v2.1.1 面板下拉）；null 不输出（旧 dll 无文件→面板回退 ID 手输）
+    public List<ActInfo> Acts; // 仅动作加速挂（QuickActionCatalog.txt 动作目录，v2.0.7 面板下拉）；null 不输出（旧 dll 无文件→面板回退 ID 手输）
     public List<BagOvrInfo> BagOvr; // 仅柜子容量挂（个性化 Global.BagOverrides 解析结果，T20）；null 不输出该字段
     public List<IcInfo> Ics; // 行内图标徽标（v2 任务 7）：null/空表不输出该字段（快照协议向后兼容——老 panel.js 无感）
 
@@ -110,7 +110,7 @@ public sealed class ModInfo
             }
             sb.Append(']');
         }
-        if (Acts != null && Acts.Count > 0) // v2.1.1：动作目录（QuickAction 产出，下拉按分类显示动作名；空/缺文件不输出——面板回退 ID 手输）
+        if (Acts != null && Acts.Count > 0) // v2.0.7：动作目录（QuickAction 产出，下拉按分类显示动作名；空/缺文件不输出——面板回退 ID 手输）
         {
             sb.Append(",\"acts\":[");
             for (var i = 0; i < Acts.Count; i++)
@@ -227,7 +227,7 @@ public sealed class OvrInfo
     public int Ms; // 毫秒
 }
 
-/// <summary>动作目录行（v2.1.1，动作加速详情页下拉）：id=动作 ID（ovr 写入值）、n=动作显示名、
+/// <summary>动作目录行（v2.0.7，动作加速详情页下拉）：id=动作 ID（ovr 写入值）、n=动作显示名、
 /// c=分类 1..6（面板按类型分组下拉；6=野外与其他=引用轴漏网的 Other 玩家动作）、ms=原耗时
 /// 毫秒（选项标签展示用）。来源 QuickActionCatalog.txt（QuickAction v1.8.0+ 写，守卫口径单源）；
 /// null/空=面板回退 ID 手输。</summary>
