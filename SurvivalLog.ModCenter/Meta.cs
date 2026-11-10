@@ -195,7 +195,7 @@ internal static class Meta
         {
             Guid = "com.local.survivallog.unlockhub",
             Name = "解锁中心", En = "UnlockHub",
-            Desc = "通用解锁合集：角色专属内容逐项解锁 + 交易解锁（货架买后即刷）+ 探索解锁（每日一次探索点不限次）；关闭即还原官方门槛。v1.8.0 前名「角色解锁 RoleUnlock」。",
+            Desc = "通用解锁合集：角色专属内容逐项解锁 + 交易解锁（货架买后即刷）+ 探索解锁（每日一次探索点不限次）+ 重生解锁（大重生机会基本不限次）+ 属性上限解锁（饱腹/心态/精力/生命封顶 500→可调）；关闭即还原官方门槛。v1.8.0 前名「角色解锁 RoleUnlock」。",
             Groups =
             {
                 new MetaGroup
@@ -235,6 +235,29 @@ internal static class Meta
                     {
                         // v1.9.0 新增（2026-11-08）：清空 Explore_DailyOnceMaps.Params3，每日一次探索点（科技公司）不限次
                         new MetaItem { Section = "Explore", Key = "UnlockDailyOnce", Label = "探索解锁（每日一次探索点不限次）", Badge = "now", Type = "bool", Def = true }
+                    }
+                },
+                new MetaGroup
+                {
+                    Title = "重生解锁",
+                    Items =
+                    {
+                        // v1.11.0 新增（2026-11-10）：postfix 改 RebirthMaxChances 读取结果 999，每次取值实时走 cfg → now
+                        new MetaItem { Section = "Rebirth", Key = "UnlockChances", Label = "重生解锁（大重生机会基本不限次）", Badge = "now", Type = "bool", Def = true,
+                            Note = "开启期间重生的次数照常记进存档，关掉后超官方上限的档回到无机会" }
+                    }
+                },
+                new MetaGroup
+                {
+                    Title = "属性上限解锁",
+                    Items =
+                    {
+                        // v1.12.0 新增（2026-11-10）：AttributeStandard 101/102/103/105 封顶 500→CapValue；
+                        // Attr.Max 进档时从表快照（同 Burden 口径）→ 已在场角色过图重进后生效，Badge=reload
+                        new MetaItem { Section = "Attribute", Key = "UnlockCap", Label = "属性上限解锁（饱腹/心态/精力/生命）", Badge = "reload", Type = "bool", Def = true,
+                            Note = "只解除封顶不白送数值；已在场角色过图重进后生效（新档即时）" },
+                        new MetaItem { Section = "Attribute", Key = "CapValue", Label = "属性封顶值", Badge = "reload", Type = "int", Def = 999, Min = 500, Max = 9999, St = 1,
+                            Note = "只在属性上限解锁开启时生效；改小后已堆高的上限要过图重进才压回" }
                     }
                 }
             }
