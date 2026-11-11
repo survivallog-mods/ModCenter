@@ -3,6 +3,20 @@
 > 本文件只记本 mod 的更新；套件/安装器版本史见总仓根 CHANGELOG.md。
 > 版本号单源：本仓 csproj `<Version>`（作者定义，硬规则 1）。
 
+## v2.0.11（2026-11-11，GitHub 限流提示带重置分钟数）
+
+- **403 限流提示升级为具体等待时间**：GitHub 匿名限额（60 次/h，按 IP）触发 HTTP 403 时，
+  toast 从"等几分钟再试"升级为**"约 N 分钟后重置，到点再试"**。链路：`RepoClient.GetString`
+  在 `EnsureSuccessStatusCode` 抛出**前**抓取响应头 `X-RateLimit-Reset`（api.github.com 每个
+  响应必带，403 也不例外；抛出后拿不到头，故传入 `RateWindow` 实例回填）→
+  `FetchResult/SuiteResult.ResetUnix` → `RepoUi.ResetUnix`（索引轮与逐仓回退两路 403 均覆盖，
+  多源取最晚）→ `RateWaitText` 换算分钟（向上取整、已过期钳 1）落 toast 与
+  `_repoFetchError`；头缺失/镜像域不透传时回退旧文案。
+- **面板限流误报修复**：手动「检查更新」等待结果的汇总 toast 中，"检查失败：网络或仓库
+  问题"补刀句加 `!event.rateLimited` 门（panel.js）——限流轮只弹上面的 C# 专门 toast，
+  不再同时误报"网络或仓库问题"（终审 F3 注释"403 已有 C# 专门 toast"口径的落地补齐）。
+- 启动 +10s 预检、手动 60 秒冷却等节流行为不变；无协议/面板结构变更（旧面板配新 dll 互通）。
+
 ## v2.0.10（2026-11-10，随 UnlockHub v1.11.0 重生解锁 + v1.12.0 属性上限解锁）
 
 - **注册 UnlockHub 两个新分组三键**：解锁中心页新增「重生解锁」——`Rebirth.UnlockChances`

@@ -79,12 +79,23 @@ public static class RepoClient
     }
 
     /// <summary>fetch 结果（T16/D）：Info=null 时 Status 区分失败原因——403=GitHub 限流，
-    /// 面板据此给专门提示（不显示成普通"检查失败"）；200=HTTP 成功但契约/资产不完整；0=网络/解析失败。</summary>
+    /// 面板据此给专门提示（不显示成普通"检查失败"）；200=HTTP 成功但契约/资产不完整；0=网络/解析失败。
+    /// v2.0.11：ResetUnix 携带 403 响应的 X-RateLimit-Reset（Unix 秒；0=响应未带）——
+    /// 调用方换算"约 N 分钟后重置"替代"请稍后再试"。</summary>
     public sealed class FetchResult
     {
         public UpdateInfo Info;
         public int Status;
         public string Error;
+        public long ResetUnix;
+    }
+
+    /// <summary>匿名限额窗口（v2.0.11）：api.github.com 每个响应（含 403）必带 X-RateLimit-* 头，
+    /// GetString 在 EnsureSuccessStatusCode 抛出**前**抓 Reset 落此——异常路径拿不到响应头，
+    /// 由调用方传入实例回填。</summary>
+    internal sealed class RateWindow
+    {
+        public long ResetUnix;
     }
 
     /// <summary>
@@ -93,10 +104,11 @@ public static class RepoClient
     /// </summary>
     public static async Task<FetchResult> FetchLatestEx(string repoName)
     {
+        var rl = new RateWindow();
         try
         {
             // 第一跳：latest release 元数据（镜像前缀只作用于 api.github.com/github.com 两族 URL）
-            var relJson = await GetString(MapUrl(OrgPrefix + repoName + "/releases/latest"), CheckTimeoutMs, api: true);
+            var relJson = await GetString(MapUrl(OrgPrefix + repoName + "/releases/latest"), CheckTimeoutMs, api: true, rl);
             using var doc = JsonDocument.Parse(relJson);
             var root = doc.RootElement;
             if (root.ValueKind != JsonValueKind.Object ||
@@ -141,9 +153,10 @@ public static class RepoClient
         catch (HttpRequestException e)
         {
             // T16/D：403 = GitHub 匿名限额（60 次/h）；其余 HTTP 状态也留痕。类内零重试。
+            // v2.0.11：rl.ResetUnix 已在抛前抓得（403 响应必带）。
             var status = e.StatusCode.HasValue ? (int)e.StatusCode.Value : 0;
             ModCenterPlugin.Log($"warn fetch {repoName} 失败: HTTP {status} {e.Message}");
-            return new FetchResult { Status = status, Error = e.Message };
+            return new FetchResult { Status = status, Error = e.Message, ResetUnix = rl.ResetUnix };
         }
         catch (Exception e)
         {
@@ -165,11 +178,13 @@ public static class RepoClient
 
     // ============ v2.0.6：聚合检查（spec 2026-11-07 单轮检查——13 次 API → 1 次） ============
 
-    /// <summary>聚合结果：Suite=null = 索引不可用（Status 区分 403 限流与其余失败）。</summary>
+    /// <summary>聚合结果：Suite=null = 索引不可用（Status 区分 403 限流与其余失败）。
+    /// v2.0.11：ResetUnix 同 <see cref="FetchResult"/>（403 收轮时的重置时刻）。</summary>
     public sealed class SuiteResult
     {
         public List<UpdateInfo> Suite; // 解析成功的行（缺行由调用方逐仓补查）；null = 索引不可用
         public int Status;             // 200=拿到（≥1 行）；403=匿名限流（不回退——逐仓必同 403）；0=其余失败（回退逐仓）
+        public long ResetUnix;         // Status=403 时的 X-RateLimit-Reset（Unix 秒；0=响应未带）
     }
 
     private const string SuiteJsonName = "suite.json";
@@ -182,9 +197,10 @@ public static class RepoClient
     /// <see cref="FetchLatestEx"/> 逐仓旧路径。类内零重试（同款纪律）。</summary>
     public static async Task<SuiteResult> FetchSuite()
     {
+        var rl = new RateWindow();
         try
         {
-            var relJson = await GetString(MapUrl(OrgPrefix + "index/releases/latest"), CheckTimeoutMs, api: true);
+            var relJson = await GetString(MapUrl(OrgPrefix + "index/releases/latest"), CheckTimeoutMs, api: true, rl);
             using var doc = JsonDocument.Parse(relJson);
             if (!doc.RootElement.TryGetProperty("assets", out var assets) || assets.ValueKind != JsonValueKind.Array)
                 return new SuiteResult { Status = 0 };
@@ -221,7 +237,7 @@ public static class RepoClient
         {
             var status = e.StatusCode.HasValue ? (int)e.StatusCode.Value : 0;
             ModCenterPlugin.Log($"warn fetch index 失败: HTTP {status} {e.Message}");
-            return new SuiteResult { Status = status };
+            return new SuiteResult { Status = status, ResetUnix = rl.ResetUnix };
         }
         catch (Exception e)
         {
@@ -302,13 +318,18 @@ public static class RepoClient
         return Convert.ToHexString(md5.ComputeHash(fs)).ToLowerInvariant();
     }
 
-    /// <summary>GET 文本（api=true 时附 GitHub API 必备 Accept 头；UA 已在客户端默认头）。</summary>
-    private static async Task<string> GetString(string url, int timeoutMs, bool api)
+    /// <summary>GET 文本（api=true 时附 GitHub API 必备 Accept 头；UA 已在客户端默认头）。
+    /// v2.0.11：win 非空时抓 X-RateLimit-Reset（EnsureSuccessStatusCode 抛出前——403 响应
+    /// 头只有此刻可得，调用方据此给"约 N 分钟后重置"提示）。</summary>
+    private static async Task<string> GetString(string url, int timeoutMs, bool api, RateWindow win = null)
     {
         using var cts = new CancellationTokenSource(timeoutMs);
         using var req = new HttpRequestMessage(HttpMethod.Get, url);
         if (api) req.Headers.TryAddWithoutValidation("Accept", "application/vnd.github+json");
         using var resp = await Http.SendAsync(req, cts.Token);
+        if (win != null && resp.Headers.TryGetValues("X-RateLimit-Reset", out var resets))
+            foreach (var v in resets)
+                if (long.TryParse(v, out var sec)) { win.ResetUnix = sec; break; }
         resp.EnsureSuccessStatusCode();
         return await resp.Content.ReadAsStringAsync(cts.Token);
     }

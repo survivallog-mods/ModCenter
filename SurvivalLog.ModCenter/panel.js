@@ -2291,12 +2291,13 @@
       else ST.dl = null;
       renderSide();
       /* v3：头部「检查更新」在等结果 → 拼汇总 toast（spec D8；C# 零改动）。
-       * 终审 F3：checking=本轮未完（等完成拍，不消费标记）；全失败/限流不得报"都是最新版"
-       * （403 已有 C# 专门 toast；全失败在此补一句）。 */
+       * 终审 F3：checking=本轮未完（等完成拍，不消费标记）；全失败/限流不得报"都是最新版"。
+       * v2.0.11：403 限流（rateLimited）只弹 C# 专门 toast（v2.0.11 起带"约 N 分钟后重置"），
+       * 此处 failAll 补刀句加 !rateLimited 门——限流不再误报"网络或仓库问题"。 */
       if (ST.chkWaiting && !event.checking) {
         if (chkTimer != null) { clearTimeout(chkTimer); chkTimer = null; }
         setChkBusy(false);
-        if (event.failAll) {
+        if (event.failAll && !event.rateLimited) {
           toast('\u68c0\u67e5\u5931\u8d25', 'info', true, '\u7f51\u7edc\u6216\u4ed3\u5e93\u95ee\u9898\uff0c\u7a0d\u540e\u518d\u8bd5');
         } else if (!event.rateLimited) {
           var c = repoCounts(), parts = [];

@@ -27,7 +27,8 @@ namespace SurvivalLog.ModCenter;
 /// v2 生命周期任务 8：更新链——触发点两处（作者拍板，替代旧"面板打开自动查"）：启动 +10s
 /// 预检一轮（Pump _bootDone，面板没开也跑）+ MC_CHK 手动刷新（60 秒冷却；MC_REPO_GET{force}
 /// 保留兼容）→ 后台 fetch（v2.0.6 起索引优先：index 仓 suite.json 1 次 API；缺行逐仓补/
-/// 不可用回退/403 收轮，见 RepoClient.FetchSuite）+ RepoDecision.Build（主线程收割推 MC_REPO_DATA +
+/// 不可用回退/403 收轮——v2.0.11 起 403 带 X-RateLimit-Reset 换算的"约 N 分钟后重置"提示，
+/// 见 RepoClient.FetchSuite）+ RepoDecision.Build（主线程收割推 MC_REPO_DATA +
 /// 快照侧栏 ↑黄/⚠橙 徽标）；MC_UPD/MC_INST 确认后走**串行**下载链（后台：下载（进度
 /// 250ms 节流推 MC_DL）→ zip MD5 对 update.json → 解包 BepInEx/plugins/*.dll 暂存 → 主线程
 /// PendingWriter.AddUpdate）→ 快照刷新（可动作徽标消失、底条出现该项）。GitHub 匿名 60 次/h：一轮
@@ -101,6 +102,7 @@ internal static class ConfigBridge
         public string Staged;                     // 3 ok（staging 内 dll 绝对路径）
         public int RateLimited;                   // 1：本轮 HTTP 403 仓数（T16/D 限流提示）
         public int OkCount;                       // 1：本轮成功拿到 update.json 的仓数
+        public long ResetUnix;                    // 1：403 限流重置时刻（Unix 秒；0=响应未带头）
     }
 
     private static readonly ConcurrentQueue<RepoUi> RepoQueue = new();
@@ -1150,6 +1152,16 @@ internal static class ConfigBridge
         return true;
     }
 
+    /// <summary>403 限流等待文案（v2.0.11）：X-RateLimit-Reset（Unix 秒）换算"约 N 分钟后重置"，
+    /// 分钟向上取整、已过期钳到 1；头缺失/0 回空串（调用方回退"请稍后再试"）。</summary>
+    private static string RateWaitText(long resetUnix)
+    {
+        if (resetUnix <= 0) return "";
+        var mins = (int)((resetUnix * 1000 - NowMs + 59999) / 60000); // ceil((reset-now)/60s)
+        if (mins < 1) mins = 1;
+        return "约 " + mins + " 分钟后重置";
+    }
+
     /// <summary>起一轮后台 fetch：本地快照/游戏基线主线程取好（IL2CPP/文件通道契约），
     /// _repoFetching 置位即推 checking 快照（fetch 期间 _repoRows 保持旧值，后台改自己的副本，
     /// 完成后主线程整体替换——零跨线程行读写）。异常路径经 Kind 5 收尾复位检查锁（T8 遗留修①）。</summary>
@@ -1165,10 +1177,12 @@ internal static class ConfigBridge
             {
                 var infos = new Dictionary<string, RepoClient.UpdateInfo>(StringComparer.Ordinal);
                 var rateLimited = 0;
+                var resetUnix = 0L; // v2.0.11：403 重置时刻（多源取最晚——同一匿名池，任一 403 响应带的都有效）
                 // v2.0.6：索引优先（spec 单轮检查）——1 次 API 拉 index 仓 suite.json 覆盖 13 仓；
                 // 索引缺行（发版后没跑 publish-index）逐仓补查；索引不可用整体回退逐仓旧路径；
                 // 索引 403 = 匿名池空——逐仓必同 403，直接按限流收轮不白烧 13 次。
                 var suite = await RepoClient.FetchSuite();
+                if (suite.Status == 403) resetUnix = suite.ResetUnix;
                 Dictionary<string, RepoClient.UpdateInfo> byMod = null;
                 if (suite.Suite != null)
                 {
@@ -1190,7 +1204,7 @@ internal static class ConfigBridge
                     { r.HttpStatus = 403; rateLimited = 1; r.Remote = null; r.Gamekb = null; continue; }
                     var res = await RepoClient.FetchLatestEx(r.RepoKey); // T16/D：带 HTTP 状态（403 限流）
                     r.HttpStatus = res.Status;
-                    if (res.Status == 403) rateLimited++;
+                    if (res.Status == 403) { rateLimited++; if (res.ResetUnix > resetUnix) resetUnix = res.ResetUnix; }
                     var info = res.Info;
                     if (info == null) { r.Remote = null; r.Gamekb = null; } // 失败留痕已在 RepoClient warn
                     else { r.Remote = info.Version; r.Gamekb = info.Gamekb; infos[r.RepoKey] = info; }
@@ -1199,7 +1213,7 @@ internal static class ConfigBridge
                 RepoQueue.Enqueue(new RepoUi
                 {
                     Kind = 1, Rows = rows, Infos = infos,
-                    RateLimited = rateLimited, OkCount = infos.Count,
+                    RateLimited = rateLimited, OkCount = infos.Count, ResetUnix = resetUnix,
                 });
             }
             catch (Exception e) // T8 遗留修①：异常也收尾——Kind 5 回主线程复位 _repoFetching（防永久"检查中"）
@@ -1368,8 +1382,11 @@ internal static class ConfigBridge
                 if (_repoRateLimited)
                 {
                     // T16/D：403 不显示成普通"检查失败"——一次专门 toast（v4 白话）。
-                    if (ui.OkCount == 0) _repoFetchError = "GitHub 限流（HTTP 403），请稍后再试";
-                    McToast("检查太频繁（GitHub 限流）", "err", "等几分钟再试");
+                    // v2.0.11：带 X-RateLimit-Reset 换算的"约 N 分钟后重置"（头缺失回退旧文案）。
+                    var wait = RateWaitText(ui.ResetUnix);
+                    if (ui.OkCount == 0)
+                        _repoFetchError = wait.Length > 0 ? "GitHub 限流（HTTP 403），" + wait : "GitHub 限流（HTTP 403），请稍后再试";
+                    McToast("检查太频繁（GitHub 限流）", "err", wait.Length > 0 ? wait + "，到点再试" : "等几分钟再试");
                 }
                 PushRender(BuildSnapshot().ToJson()); // 侧栏 ↑黄/⚠橙 徽标（快照协议承载）
                 PushRepoData();
