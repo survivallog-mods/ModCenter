@@ -81,6 +81,12 @@ internal static class ConfigBridge
     private static string _pendSig;        // 摘要签名（变化才推送）；null=首拍未同步（只同步不推，MC_OPEN 会补推）
     private static float _pendAcc;         // Pump 2s 节拍累加器
 
+    // ---- v2.2.0：cfg 参数修改会话级跟踪（待生效明细 cfg 档数据源）----
+    // key = "<guid小写>:<展示键>"，value = badge（reload|reboot）。只在面板写路径记录（HandleSet /
+    // 第三方启停）；badge=now 不记（立即生效），cfg 缺省不记（未知时机）。重启后新会话为空 =
+    // "生效后自动清空"，零新增清理逻辑。cfg 已落盘无法自动回滚——撤销（MC_PENDING_UNDO）不含它。
+    private static readonly Dictionary<string, string> _cfgTouched = new(StringComparer.OrdinalIgnoreCase);
+
     // ---- v2 任务 13：一键重启（MC_RESTART）——拉起成功后延迟一拍再退出，让面板 toast 先上屏 ----
     private static float _restartQuitAge = -1f; // -1=空闲；>=0=已请求重启，累加到 RestartQuitDelay 即 Application.Quit
     private static bool _restartRequested;      // 已拉起分离等待链（进程内只许一条，防连点双拉起/双开）
@@ -242,7 +248,14 @@ internal static class ConfigBridge
         if (mm == null)
         {
             var tp = FindTp(guidOrName);
-            if (tp != null) { SetTpEnabled(tp, enabled); return; }
+            if (tp != null)
+            {
+                SetTpEnabled(tp, enabled);
+                // v2.2.0：第三方启停 = 重启级（dll 改名真禁用）——进 cfg 会话跟踪（底条/明细可见）
+                _cfgTouched[tp.Metadata.GUID.ToLowerInvariant() + ":" + (enabled ? "启用" : "停用")] = "reboot";
+                PushPendingSummary();
+                return;
+            }
             if (DllDisabler.TrySetAbsent(guidOrName, enabled)) return; // 任务 16：缺席行（dll 已禁用）启用路由
             Log("toggle 拒绝：未知插件 " + guidOrName); return;
         }
@@ -963,15 +976,18 @@ internal static class ConfigBridge
                + string.Join("\u0001", gs.Select(PendLabel));
     }
 
-    /// <summary>推 MC_PENDING_SUMMARY（__mcEvent）：{type,n,labels[],applied?}。n/labels 只计
-    /// 待生效档（中性档不计入，任务 10 T9 改进项）；applied=中性档标签（有才带，面板弱化呈现）。
-    /// 条数&gt;0 或 applied 在场面板显底部待生效条。</summary>
+    /// <summary>推 MC_PENDING_SUMMARY（__mcEvent）：{type,n,labels[],applied?,items[]}。
+    /// n/labels 只计 pending.json 档（中性档不计入，任务 10 T9 改进项；**不含 cfg 项**——语义
+    /// 冻结给旧面板）；applied=中性档标签（有才带，面板弱化呈现）。
+    /// items（v2.2.0 待生效明细，新面板底条可点开弹窗渲染）：pending 档（kind 按 verb）+
+    /// 未应用 order 档 + cfg 会话档（_cfgTouched 按 guid+badge 聚合）。条件 n&gt;0 或
+    /// applied 在场或 items 非空 → 面板显底部待生效条。</summary>
     private static void PushPendingSummary()
     {
         var gs = PendGroups();
         var real = gs.Where(g => !g.Neutral).ToList();
         var applied = gs.FirstOrDefault(g => g.Neutral);
-        var sb = new StringBuilder(128);
+        var sb = new StringBuilder(256);
         sb.Append("{\"type\":\"MC_PENDING_SUMMARY\",\"n\":")
           .Append(real.Count.ToString(CultureInfo.InvariantCulture)).Append(",\"labels\":[");
         for (var i = 0; i < real.Count; i++)
@@ -981,8 +997,62 @@ internal static class ConfigBridge
         }
         sb.Append(']');
         if (applied != null) sb.Append(",\"applied\":").Append(JsonW.Str(applied.FixedLabel));
-        sb.Append('}');
+
+        // ---- items（v2.2.0）：明细行 {guid,mod,kind,label,badge} ----
+        var items = new List<(string guid, string mod, string kind, string label, string badge)>();
+        foreach (var g in real)
+        {
+            var kind = PendKindOf(g);
+            if (kind == null) continue; // order 档走下方专门行（FixedLabel 判定）
+            items.Add((g.RowKey, g.Name, kind, PendLabel(g), "reboot"));
+        }
+        if (_pendOrder.Count > 0 && !OrderEqualsDefault(_pendOrder) && !(applied != null))
+            items.Add((null, null, "order", "加载顺序调整", "reboot"));
+        // cfg 会话档：按 (guid, badge) 聚合——reload/reboot 分行（明细里分别提示读档/重启生效）
+        if (_cfgTouched.Count > 0)
+        {
+            var agg = new Dictionary<string, (int cnt, string mod)>(StringComparer.OrdinalIgnoreCase);
+            foreach (var kv in _cfgTouched)
+            {
+                var gi = kv.Key.Substring(0, Math.Max(0, kv.Key.IndexOf(':')));
+                var ak = gi + "\u0001" + kv.Value;
+                if (!agg.TryGetValue(ak, out var v)) v = (0, null);
+                agg[ak] = (v.cnt + 1, v.mod ?? PendDisplayName(gi));
+            }
+            foreach (var kv in agg)
+            {
+                var parts = kv.Key.Split('\u0001');
+                var isReboot = parts[1] == "reboot";
+                items.Add((parts[0], kv.Value.mod, "cfg",
+                    kv.Value.cnt.ToString(CultureInfo.InvariantCulture) + " 项参数待" + (isReboot ? "重启生效" : "读档生效"),
+                    parts[1]));
+            }
+        }
+        sb.Append(",\"items\":[");
+        for (var i = 0; i < items.Count; i++)
+        {
+            if (i > 0) sb.Append(',');
+            var it = items[i];
+            sb.Append("{\"guid\":").Append(it.guid == null ? "null" : JsonW.Str(it.guid))
+              .Append(",\"mod\":").Append(it.mod == null ? "null" : JsonW.Str(it.mod))
+              .Append(",\"kind\":").Append(JsonW.Str(it.kind))
+              .Append(",\"label\":").Append(JsonW.Str(it.label))
+              .Append(",\"badge\":").Append(JsonW.Str(it.badge))
+              .Append('}');
+        }
+        sb.Append("]}");
         PushEvent(sb.ToString());
+    }
+
+    /// <summary>pending 档 → items.kind 映射（v2.2.0）：更新/安装/卸载/启停；order 档（无 verbs）
+    /// 返回 null（调用方专门组行）。</summary>
+    private static string PendKindOf(PendGroup g)
+    {
+        if (g.Verbs.Contains("卸载")) return "uninstall";
+        if (g.Verbs.Contains("更新")) return "update";
+        if (g.Verbs.Contains("安装")) return "install";
+        if (g.Verbs.Contains("停用") || g.Verbs.Contains("启用")) return "toggle";
+        return g.FixedLabel != null ? null : "update";
     }
 
     // ============ 待生效条动作（v2 任务 13：撤销全部待生效 / 一键重启） ============
@@ -1019,7 +1089,8 @@ internal static class ConfigBridge
         _pendSig = PendingSig();
         PushRender(BuildSnapshot().ToJson()); // 待生效徽标同拍消失（BuildSnapshot 内部再强制重读）
         PushPendingSummary();                 // 底条隐藏（n=0 且无 applied）
-        McToast("已撤销全部待生效操作", "now", "什么都没变；加载顺序也恢复默认");
+        McToast("已撤销更新/卸载/排序", "now",
+            _cfgTouched.Count > 0 ? "参数修改不回滚——如需改回请在面板再手动调整" : "什么都没变；加载顺序也恢复默认");
     }
 
     /// <summary>
@@ -2409,7 +2480,16 @@ internal static class ConfigBridge
         var k = it != null ? it.K : DisplayK(section, key);
         var badge = it != null ? it.Badge : (ThirdParty.BadgeOf(guid, DisplayK(section, key)) ?? "cfg");
         if (ok)
+        {
+            // v2.2.0：reload/reboot 档参数写入进会话级待生效跟踪（now=立即生效不记；cfg=未知时机
+            // 不记）——底条/明细弹窗即时呈现"参数修改待读档/重启生效"，重启后新会话自动清空。
+            if (badge == "reload" || badge == "reboot")
+            {
+                _cfgTouched[guid.ToLowerInvariant() + ":" + k] = badge;
+                PushPendingSummary(); // 直推（pending.json 未变，Pump 签名巡检不会双推）
+            }
             PushEvent("{\"type\":\"MC_SET_OK\",\"k\":" + JsonW.Str(k) + ",\"badge\":" + JsonW.Str(badge) + "}");
+        }
         else
             PushEvent("{\"type\":\"MC_SET_FAIL\",\"k\":" + JsonW.Str(k)
                 + ",\"err\":\"write rejected（详见 LogOutput）\"}");
