@@ -4,3 +4,4 @@ release/
 .superpowers/
 .playwright-mcp/
 .zcode/
+coscli_output/
