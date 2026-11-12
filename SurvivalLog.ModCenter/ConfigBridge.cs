@@ -1471,8 +1471,9 @@ internal static class ConfigBridge
                 // v2.2.0：手动检查完成且有可更新行 → 推可用更新列表（面板弹勾选弹窗）。
                 // 仅 Update 态且无 pending 意图（Install 归安装确认弹窗、待重启行放着只会误导）；
                 // 预检轮不推（只标行，现状不变）——弹窗被关/面板未开事件被 PushJs 丢弃可接受，
-                // 再入口 = 仓库页「检查更新」60s 冷却重查。
-                if (ui.Manual && ui.OkCount > 0)
+                // 再入口 = 仓库页「检查更新」60s 冷却重查。下载链进行中不推（终审判定：弹窗会
+                // 顶掉进度弹窗，勾选也会被链闸弹回——检查数据本身照常生效，只让位弹窗）。
+                if (ui.Manual && ui.OkCount > 0 && !_repoChain)
                 {
                     var pend = RepoPendingGuids();
                     var upd = new UpdatesReady();

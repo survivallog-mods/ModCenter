@@ -822,7 +822,12 @@
       /* v2 任务 9（裁定 4）：排序模式行点击不选行（不进 mod 详情/不弹窗） */
       if (row) {
         if (ST.ord) return;
-        ST.sel = row.getAttribute('data-guid'); renderSide(); renderCfg();
+        var g = row.getAttribute('data-guid');
+        /* v2.2.0 G4：未安装行（仓库 Install 态且查到远端）点行直达安装确认弹窗（含功能说明），
+         * 不进详情页——详情页对未安装 mod 无本地信息可展示（终审 Important 修） */
+        var rr = repoRowOfGuid(g);
+        if (rr && rr.local == null && rr.remote != null && !rr.pending) { openRepoModal(rr); return; }
+        ST.sel = g; renderSide(); renderCfg();
       }
     });
 
@@ -1170,6 +1175,12 @@
       h += '<div class="__mc-kv"><span class="__mc-kk">\u66f4\u65b0</span>'
         + '<button type="button" class="__mc-btn ' + cls + ' __mc-btn-mini" data-ract="upd" data-repo="' + esc(r.repoKey) + '">' + esc(label) + '</button>'
         + '<span style="font-size:11px;color:#6b7180">' + esc(ver) + '</span></div>';
+      /* v2.2.0 G5：详情页维护区带「更新内容」摘要（notes 前 2 行；完整说明在更新确认弹窗） */
+      if (r.notes) {
+        var nl = String(r.notes).split(/\r?\n/).filter(function (x) { return x.trim(); }).slice(0, 2);
+        h += '<div class="__mc-kv"><span class="__mc-kk">\u66f4\u65b0\u5185\u5bb9</span>'
+          + '<span style="font-size:11px;color:#8a90a0;flex:1">' + nl.map(esc).join('<br>') + '</span></div>';
+      }
     }
     if (!m.missing) {
       h += '<div class="__mc-kv"><span class="__mc-kk">\u5378\u8f7d</span>'
@@ -1777,7 +1788,13 @@
   }
 
   function openUpdListModal(rows) {
-    if (!rows || !rows.length || !openModal(updListModalHtml(rows))) return;
+    if (!rows || !rows.length) return;
+    /* 有在开弹窗（卸载确认/冲突详情/下载进度等）不顶掉——降级 toast，再入口=侧栏图标/重查 */
+    if (modalOpen()) {
+      toastRaw('\u6709\u53ef\u7528\u66f4\u65b0', '\u5171 ' + rows.length + ' \u4e2a mod \u53ef\u66f4\u65b0\uff0c\u5173\u6389\u5f53\u524d\u7a97\u53e3\u540e\u91cd\u65b0\u68c0\u67e5\u53ef\u89c1\u5217\u8868', 'info');
+      return;
+    }
+    openModal(updListModalHtml(rows)); /* openModal 无返回值——成功与否以 S.mdl 判定（终审 Critical 修） */
     var mdl = S.mdl;
     if (!mdl) return;
     var boxes = mdl.querySelectorAll('input[data-updsel]');
