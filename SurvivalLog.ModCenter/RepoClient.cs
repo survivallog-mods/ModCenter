@@ -9,11 +9,17 @@ using System.Threading.Tasks;
 namespace SurvivalLog.ModCenter;
 
 /// <summary>
-/// 网络层 GitHub 仓库客户端（v2 生命周期任务 5）：更新源契约 = 拆仓设计 §6/§7（已冻结）——
+/// 网络层更新源客户端（v2 生命周期任务 5）：更新源契约 = 拆仓设计 §6/§7（已冻结）——
 /// <c>GET https://api.github.com/repos/survivallog-mods/{repo}/releases/latest</c> → release
 /// JSON 的 assets 数组里找名为 <c>update.json</c> 的资产 → 下载（browser_download_url）→
 /// 解析五字段 {mod, version, asset, md5, gamekb}；zip 资产名 = update.json.asset 字段值。
 /// 供 T6 决策层 / T8 面板仓库页消费（接口签名按任务 brief 冻结，勿改）。
+///
+/// v2.1.0 COS 主源：检查/下载前置腾讯云 COS 公有读桶（<see cref="CosBase"/>，cfg Network.CosBase）——
+/// suite 轮 1 次直拉桶根 suite.json、逐仓 1 次直拉 mods/&lt;repo&gt;/update.json（同五字段契约，
+/// AssetUrl 指向桶内 zip）；国内直连、无 GitHub 匿名 60 次/h 限额。COS 任何失败（网络/404/解析）
+/// 静默回退下方 GitHub 旧链路（403 限流语义只在 GitHub 路径出现）。MirrorPrefix 镜像只映射
+/// github.com 两族 URL，COS URL 原样直连。
 ///
 /// 线程纪律（控制器裁定 1）：本类全部 HTTP 调用只在后台线程跑（调用方 Task.Run 起任务，
 /// Ticker 主线程收割——探针参考 ConfigBridge.Pump 模式），任何同步阻塞主线程 = 缺陷。
@@ -66,6 +72,20 @@ public static class RepoClient
         }
     }
 
+    /// <summary>COS 主源基址（cfg Network.CosBase，v2.1.0）：非空时检查/下载前置桶路径
+    /// （suite.json / mods/&lt;repo&gt;/update.json / 桶内 zip），失败回退 GitHub。空串/全斜杠 = 完全走
+    /// GitHub（玩家逃生门）。已 Trim + 去尾斜杠（拼接处直接 <c>base + "/mods/..."</c>）。</summary>
+    internal static string CosBase
+    {
+        get
+        {
+            var v = ModCenterPlugin.NetworkCosBase?.Value;
+            if (string.IsNullOrEmpty(v)) return null;
+            v = v.Trim().TrimEnd('/');
+            return v.Length == 0 ? null : v;
+        }
+    }
+
     /// <summary>更新信息（拆仓设计 §6 五字段 + zip 资产直连 URL——URL 已含镜像映射前的原始形态，
     /// 映射在 <see cref="DownloadAsset"/> 内做，两次调用间改 cfg 即时生效）。</summary>
     public sealed class UpdateInfo
@@ -101,9 +121,20 @@ public static class RepoClient
     /// <summary>
     /// 拉取某仓最新 Release 的更新信息（T16/D 带状态版）：成功返回 Info；HTTP 403 时
     /// Status=403（GitHub 匿名限额）；其他失败 Status=0 或 200（契约不完整）。不抛出、不重试。
+    /// v2.1.0：CosBase 非空时先走桶内 mods/&lt;repo&gt;/update.json（1 次直拉），命中即返回
+    /// Status=200（COS 公有读无 403 语义）；未命中回退 GitHub 两跳。
     /// </summary>
     public static async Task<FetchResult> FetchLatestEx(string repoName)
     {
+        // v2.1.0 COS 主源：桶内 update.json 与 GitHub 版同五字段契约；AssetUrl 指向桶内 zip。
+        // 任何失败（404=该 mod 尚未发 COS 版/网络/解析）返回 null 落 GitHub 旧路径（warn 留痕）。
+        if (CosBase != null)
+        {
+            var cosInfo = await TryFetchCosJson(CosBase + "/mods/" + repoName + "/update.json", repoName);
+            if (cosInfo != null)
+                return new FetchResult { Info = cosInfo, Status = 200 };
+        }
+
         var rl = new RateWindow();
         try
         {
@@ -194,9 +225,35 @@ public static class RepoClient
     /// update.json 五字段同构 + assetUrl；发布侧 = 套件根 publish-index.ps1 聚合脚本）。
     /// 失败语义：403 = 限流（Status=403、Suite=null——逐仓回退必同样 403，不白烧 13 次）；
     /// 其余（404 未建仓/资产缺失/超时/JSON 坏/行字段缺失）Status=0、Suite=null → 调用方回退
-    /// <see cref="FetchLatestEx"/> 逐仓旧路径。类内零重试（同款纪律）。</summary>
+    /// <see cref="FetchLatestEx"/> 逐仓旧路径。类内零重试（同款纪律）。
+    /// v2.1.0：CosBase 非空时先直拉桶根 suite.json（同一份文件双发，无 API 消耗），
+    /// 任何失败回退本 GitHub 两跳路径。</summary>
     public static async Task<SuiteResult> FetchSuite()
     {
+        // v2.1.0 COS 主源：桶根 1 次直拉（CheckTimeout 同约束）；解析 null（结构不符/零行）
+        // 或异常（网络/JSON 坏）都落 GitHub index 回退——warn 一行留痕。
+        if (CosBase != null)
+        {
+            try
+            {
+                var cosJson = await GetString(CosBase + "/suite.json", CheckTimeoutMs, api: false);
+                var parsed = ParseSuiteJson(cosJson);
+                if (parsed != null)
+                {
+                    // 下载也走桶：assetUrl 统一重写为桶内 zip 直连（suite.json 文件本身可能还是
+                    // GitHub 形态——publish-index 未切/双发过渡期；重写幂等，以桶内布局为准）
+                    foreach (var i in parsed.Suite)
+                        i.AssetUrl = CosBase + "/mods/" + i.Mod + "/" + i.Asset;
+                    return parsed;
+                }
+                ModCenterPlugin.Log("warn fetch cos suite 解析不符（零行/结构坏），回退 GitHub index");
+            }
+            catch (Exception e)
+            {
+                ModCenterPlugin.Log($"warn fetch cos suite 失败: {e.GetType().Name} {e.Message}，回退 GitHub index");
+            }
+        }
+
         var rl = new RateWindow();
         try
         {
@@ -212,26 +269,7 @@ public static class RepoClient
             if (suiteUrl == null) return new SuiteResult { Status = 0 }; // 索引仓无 suite.json（未跑 publish-index）
 
             var json = await GetString(MapUrl(suiteUrl), CheckTimeoutMs, api: false);
-            using var sdoc = JsonDocument.Parse(json);
-            if (!sdoc.RootElement.TryGetProperty("mods", out var mods) || mods.ValueKind != JsonValueKind.Array)
-                return new SuiteResult { Status = 0 };
-            var list = new List<UpdateInfo>();
-            foreach (var m in mods.EnumerateArray())
-            {
-                if (m.ValueKind != JsonValueKind.Object) continue;
-                var info = new UpdateInfo
-                {
-                    Mod = GetStr(m, "mod"), Version = GetStr(m, "version"), Asset = GetStr(m, "asset"),
-                    Md5 = GetStr(m, "md5"), Gamekb = GetStr(m, "gamekb"), AssetUrl = GetStr(m, "assetUrl"),
-                };
-                if (string.IsNullOrEmpty(info.Mod) || string.IsNullOrEmpty(info.Version) ||
-                    string.IsNullOrEmpty(info.Asset) || string.IsNullOrEmpty(info.Md5) ||
-                    string.IsNullOrEmpty(info.Gamekb) || string.IsNullOrEmpty(info.AssetUrl))
-                    continue; // 行契约不完整：丢行（调用方逐仓补查该行）
-                list.Add(info);
-            }
-            if (list.Count == 0) return new SuiteResult { Status = 0 };
-            return new SuiteResult { Suite = list, Status = 200 };
+            return ParseSuiteJson(json) ?? new SuiteResult { Status = 0 };
         }
         catch (HttpRequestException e)
         {
@@ -243,6 +281,69 @@ public static class RepoClient
         {
             ModCenterPlugin.Log($"warn fetch index 失败: {e.GetType().Name} {e.Message}");
             return new SuiteResult { Status = 0 };
+        }
+    }
+
+    /// <summary>解析 suite.json 聚合文件（v2.1.0 抽出共用——COS 桶根与 GitHub index 仓是
+    /// publish-index.ps1 双发的同一份文件，字节同构）：mods 数组逐行五字段 + assetUrl 校验，
+    /// 行契约不完整丢行（调用方逐仓补查）；至少 1 行成功返回 SuiteResult(Status=200)，
+    /// 结构不符（非对象/无 mods 数组）或零行返回 null（调用方按源降级：COS→回退 GitHub，
+    /// GitHub→Status=0）。JSON 语法坏抛 JsonException，由调用方 catch。</summary>
+    private static SuiteResult ParseSuiteJson(string json)
+    {
+        using var doc = JsonDocument.Parse(json);
+        if (!doc.RootElement.TryGetProperty("mods", out var mods) || mods.ValueKind != JsonValueKind.Array)
+            return null;
+        var list = new List<UpdateInfo>();
+        foreach (var m in mods.EnumerateArray())
+        {
+            if (m.ValueKind != JsonValueKind.Object) continue;
+            var info = new UpdateInfo
+            {
+                Mod = GetStr(m, "mod"), Version = GetStr(m, "version"), Asset = GetStr(m, "asset"),
+                Md5 = GetStr(m, "md5"), Gamekb = GetStr(m, "gamekb"), AssetUrl = GetStr(m, "assetUrl"),
+            };
+            if (string.IsNullOrEmpty(info.Mod) || string.IsNullOrEmpty(info.Version) ||
+                string.IsNullOrEmpty(info.Asset) || string.IsNullOrEmpty(info.Md5) ||
+                string.IsNullOrEmpty(info.Gamekb) || string.IsNullOrEmpty(info.AssetUrl))
+                continue; // 行契约不完整：丢行（调用方逐仓补查该行）
+            list.Add(info);
+        }
+        return list.Count == 0 ? null : new SuiteResult { Suite = list, Status = 200 };
+    }
+
+    /// <summary>COS 单仓直拉（v2.1.0）：GET 桶内 update.json（与 GitHub release 资产同一份五字段
+    /// 契约文件——release.ps1 双发）→ 命中时 AssetUrl 重写为桶内 zip 直连
+    /// （&lt;CosBase&gt;/mods/&lt;repo&gt;/&lt;asset&gt;，资产名 [A-Za-z0-9._] 免编码；repo 名来自
+    /// RepoDecision 内部清单，受控输入）。任何失败（404=该 mod 尚未发 COS 版/超时/JSON 坏/
+    /// 字段缺失）返回 null——调用方回退 GitHub 两跳，warn 一行留痕。不抛出、不重试。</summary>
+    private static async Task<UpdateInfo> TryFetchCosJson(string url, string repoName)
+    {
+        try
+        {
+            var json = await GetString(url, CheckTimeoutMs, api: false);
+            using var doc = JsonDocument.Parse(json);
+            var u = doc.RootElement;
+            if (u.ValueKind != JsonValueKind.Object) return null;
+            var info = new UpdateInfo
+            {
+                Mod = GetStr(u, "mod"),
+                Version = GetStr(u, "version"),
+                Asset = GetStr(u, "asset"),
+                Md5 = GetStr(u, "md5"),
+                Gamekb = GetStr(u, "gamekb"),
+            };
+            if (string.IsNullOrEmpty(info.Mod) || string.IsNullOrEmpty(info.Version) ||
+                string.IsNullOrEmpty(info.Asset) || string.IsNullOrEmpty(info.Md5) ||
+                string.IsNullOrEmpty(info.Gamekb))
+                return null; // 五字段任一缺失 = 契约不完整
+            info.AssetUrl = CosBase + "/mods/" + repoName + "/" + info.Asset;
+            return info;
+        }
+        catch (Exception e)
+        {
+            ModCenterPlugin.Log($"warn fetch cos {repoName} 失败: {e.GetType().Name} {e.Message}");
+            return null;
         }
     }
 

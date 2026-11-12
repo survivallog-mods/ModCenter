@@ -3,6 +3,24 @@
 > 本文件只记本 mod 的更新；套件/安装器版本史见总仓根 CHANGELOG.md。
 > 版本号单源：本仓 csproj `<Version>`（作者定义，硬规则 1）。
 
+## v2.1.0（2026-11-12，热更新迁腾讯云 COS——检查/下载国内直连，GitHub 全量回退保留）
+
+- **更新源前置腾讯云 COS（主源）**：检查更新与下载 zip 优先走公有读桶
+  `survival-log-1302318873`（ap-shanghai）——suite 轮 1 次直拉桶根 `suite.json`、逐仓 1 次
+  直拉 `mods/<mod>/update.json`（与 GitHub release 资产同一份五字段契约文件）、下载走桶内
+  zip 直连（`assetUrl` 重写/聚合侧直写桶地址）。国内直连、无 GitHub 匿名 60 次/h 限额、
+  无 api→资产两跳——"检查失败/限流请稍后再试"从根上消失。
+- **GitHub 全量回退链保留**：COS 任何失败（网络/404/解析）自动回退原 GitHub 链路
+  （index 仓 suite → 逐仓 latest 两跳），403 限流提示语义不变（只在回退轮出现）；桶欠费/
+  故障不影响可用性，老版本插件继续走 GitHub 不受影响。
+- **新 cfg 键 `Network.CosBase`**（默认桶地址）：将来桶迁移/换 CDN 域名只改配置不改代码；
+  置空 = 完全走 GitHub（逃生门）。`MirrorPrefix` 镜像语义不变（只映射 github.com 两族
+  URL，COS 直连不经镜像）。
+- 发布侧：各仓 `release.ps1` 发版后自动双发 zip+update.json 入桶（失败不炸发版，醒目提示
+  补救）；`publish-index.ps1` 聚合 `assetUrl` 直写桶地址并双发桶根 `suite.json`（老版本
+  客户端从 GitHub 拿到同一文件后下载也自动走 COS）；存量 10 mod 资产已一次性迁移入桶
+  （`migrate-cos.ps1`，幂等可重跑补漏）。
+
 ## v2.0.11（2026-11-11，GitHub 限流提示带重置分钟数）
 
 - **403 限流提示升级为具体等待时间**：GitHub 匿名限额（60 次/h，按 IP）触发 HTTP 403 时，

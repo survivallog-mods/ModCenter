@@ -31,7 +31,7 @@ public sealed class ModCenterPlugin : BasePlugin
 {
     public const string Guid = "com.local.survivallog.modcenter";
     public const string Name = "ModCenter";
-    public const string Version = "2.0.11"; // 版本号 csproj 单源（<Version>），此处与 csproj 同步
+    public const string Version = "2.1.0"; // 版本号 csproj 单源（<Version>），此处与 csproj 同步
 
     public static ModCenterPlugin Instance { get; private set; }
 
@@ -51,6 +51,7 @@ public sealed class ModCenterPlugin : BasePlugin
     // DESIGN §6.11：本机直连可达，gh-proxy.com 双端点可用作示例；ghproxy.net/ghfast.top 只代理
     // 下载不代理 api.github.com，不能作本键取值）。
     internal static ConfigEntry<string> NetworkMirrorPrefix;
+    internal static ConfigEntry<string> NetworkCosBase;            // v2.1.0：COS 主源基址（空=仅 GitHub）
     internal static ConfigEntry<int> NetworkCheckTimeoutMs;    // 默认 5000
     internal static ConfigEntry<int> NetworkDownloadTimeoutMs; // 默认 60000
 
@@ -88,6 +89,12 @@ public sealed class ModCenterPlugin : BasePlugin
             "直连可用就不要填；镜像服务会迁移失效，换了只改这里不改代码。");
         NetworkCheckTimeoutMs = Config.Bind("Network", "CheckTimeoutMs", 5000,
             "检查更新（latest 元数据 + update.json 两跳）的单次超时，毫秒。超时即判失败降级，不重试。");
+        // v2.1.0：COS 主源（国内直连、无匿名限额）；检查/下载先走 COS，失败自动回退 GitHub 旧链路。
+        // 玩家一般不用动；将来桶迁移/换 CDN 域名只改这里不改代码。留空 = 完全走 GitHub。
+        NetworkCosBase = Config.Bind("Network", "CosBase",
+            "https://survival-log-1302318873.cos.ap-shanghai.myqcloud.com",
+            "更新源 COS 基址（主源）。检查更新与下载 zip 优先走这里（桶内 suite.json 与 mods/<mod>/update.json），\n" +
+            "失败自动回退 GitHub。形如 'https://<bucket>.cos.<region>.myqcloud.com'；换 CDN 域名时改这里。");
         NetworkDownloadTimeoutMs = Config.Bind("Network", "DownloadTimeoutMs", 60000,
             "下载 zip 资产的超时，毫秒。超时即失败降级（半成品 .part 会被清理），不重试。");
 
