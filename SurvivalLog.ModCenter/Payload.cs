@@ -295,6 +295,7 @@ public sealed class RepoRowInfo
     public string KbWhy;   // 上述告警原因全文；空不输出
     public bool Pending;   // 已有待生效 install/replace 意图
     public int? HttpStatus; // T16/D：仅 403（GitHub 限流）输出，供行内专门文案
+    public string Notes;   // v2.2.0：远端版本发版说明（update.json.notes，CHANGELOG 节原文）；空不输出（旧源无字段，面板降级）
 
     internal void Write(StringBuilder sb)
     {
@@ -313,7 +314,31 @@ public sealed class RepoRowInfo
         if (!string.IsNullOrEmpty(KbWhy)) sb.Append(",\"kbwhy\":").Append(JsonW.Str(KbWhy));
         if (Pending) sb.Append(",\"pending\":true");
         if (HttpStatus == 403) sb.Append(",\"httpStatus\":403"); // T16/D：GitHub 限流专门提示
+        if (!string.IsNullOrEmpty(Notes)) sb.Append(",\"notes\":").Append(JsonW.Str(Notes)); // v2.2.0：JsonW.Str 转义 "/\//换行/制表/控制字符
         sb.Append('}');
+    }
+}
+
+/// <summary>可用更新列表事件（v2.2.0，MC_UPDATES_READY 推送体）：手动检查完成后存在
+/// Update 态行时推——面板弹勾选列表（发版说明可展开 + 一键更新所选 MC_UPD_SELECTED）。
+/// 行复用 <see cref="RepoRowInfo"/>（name/local/remote/notes 已含）。启动预检不推（只标行）。</summary>
+public sealed class UpdatesReady
+{
+    public List<RepoRowInfo> Rows = new();
+
+    public string ToJson()
+    {
+        var sb = new StringBuilder(1024);
+        sb.Append("{\"type\":\"MC_UPDATES_READY\",\"rows\":[");
+        var first = true;
+        foreach (var r in Rows)
+        {
+            if (!first) sb.Append(',');
+            first = false;
+            r.Write(sb);
+        }
+        sb.Append("]}");
+        return sb.ToString();
     }
 }
 

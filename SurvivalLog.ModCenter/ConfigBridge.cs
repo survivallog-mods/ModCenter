@@ -92,6 +92,7 @@ internal static class ConfigBridge
         public int Kind;                          // 1=fetch 完成 2=下载进度 3=单仓链结果 4=链收尾 5=fetch 异常收尾（T9 顺手修）
         public List<RepoRow> Rows;                // 1
         public Dictionary<string, RepoClient.UpdateInfo> Infos; // 1
+        public bool Manual;                       // 1：v2.2.0 手动检查轮（收割后推 MC_UPDATES_READY）；预检 false
         public string RepoKey;                    // 2/3
         public int Pct;                           // 2
         public string Stage;                      // 2: down|check|unzip|write
@@ -1116,7 +1117,7 @@ internal static class ConfigBridge
                 }
             }
         }
-        StartRepoFetch();
+        StartRepoFetch(force); // force=手动（MC_CHK）→ manual=true；预检 HandleRepoGet(false) → false
     }
 
     /// <summary>最近一轮是否全失败（12 行 Remote 皆 null 或 fetch 异常）——入口卡重试判定（必修 8）。</summary>
@@ -1141,8 +1142,9 @@ internal static class ConfigBridge
 
     /// <summary>起一轮后台 fetch：本地快照/游戏基线主线程取好（IL2CPP/文件通道契约），
     /// _repoFetching 置位即推 checking 快照（fetch 期间 _repoRows 保持旧值，后台改自己的副本，
-    /// 完成后主线程整体替换——零跨线程行读写）。异常路径经 Kind 5 收尾复位检查锁（T8 遗留修①）。</summary>
-    private static void StartRepoFetch()
+    /// 完成后主线程整体替换——零跨线程行读写）。异常路径经 Kind 5 收尾复位检查锁（T8 遗留修①）。
+    /// v2.2.0：manual=手动检查轮（收割后推 MC_UPDATES_READY 可用更新列表）；预检传 false。</summary>
+    private static void StartRepoFetch(bool manual)
     {
         var rows = RepoDecision.SnapshotLocal(); // 主线程（IL2CPPChainloader 契约）
         var local = GameVersion.ReadCached() ?? GameVersion.ReadLocal(); // 文件通道线程无关，结果缓存
@@ -1189,7 +1191,7 @@ internal static class ConfigBridge
                 RepoDecision.Build(rows, local); // 纯函数，后台可调
                 RepoQueue.Enqueue(new RepoUi
                 {
-                    Kind = 1, Rows = rows, Infos = infos,
+                    Kind = 1, Rows = rows, Infos = infos, Manual = manual,
                     RateLimited = rateLimited, OkCount = infos.Count, ResetUnix = resetUnix,
                 });
             }
@@ -1221,19 +1223,46 @@ internal static class ConfigBridge
             return;
         }
         var pend = RepoPendingGuids();
-        List<RepoRow> targets;
+        RepoRow row = null;
+        foreach (var r in _repoRows)
+            if (string.Equals(r.RepoKey, repoKey, StringComparison.OrdinalIgnoreCase)) { row = r; break; }
+        if (row == null) { Log("repo upd 拒绝：未知仓键 " + repoKey); return; }
+        if (!RepoActionable(row, pend, out var why))
+        {
+            McToast(row.Name + "：现在没有可做的", "info", why);
+            return;
+        }
+        StartRepoChain(new List<RepoRow> { row });
+    }
+
+    /// <summary>批量更新所选（v2.2.0，MC_UPD_SELECTED {repos[]}——可用更新弹窗勾选确认入口）：
+    /// 逐仓 RepoActionable 校验（不可动作仓 toast 原因跳过，不中断整批），空批拒绝；
+    /// 串行链闸/下载链与单仓 MC_UPD 完全共用。</summary>
+    private static void HandleRepoUpdSelected(List<string> repos)
+    {
+        if (repos == null || repos.Count == 0) return;
+        if (_repoChain) { McToast("已有下载在进行", "info", "一次只处理一个，下完再点"); return; }
+        if (_repoFetching) { McToast("正在检查更新", "info", "查完就能更新"); return; }
+        if (_repoRows == null) { McToast("还没检查过更新", "info", "先点「检查更新」"); return; }
+        var pend = RepoPendingGuids();
+        var targets = new List<RepoRow>();
+        foreach (var key in repos)
         {
             RepoRow row = null;
             foreach (var r in _repoRows)
-                if (string.Equals(r.RepoKey, repoKey, StringComparison.OrdinalIgnoreCase)) { row = r; break; }
-            if (row == null) { Log("repo upd 拒绝：未知仓键 " + repoKey); return; }
-            if (!RepoActionable(row, pend, out var why))
-            {
-                McToast(row.Name + "：现在没有可做的", "info", why);
-                return;
-            }
-            targets = new List<RepoRow> { row };
+                if (string.Equals(r.RepoKey, key, StringComparison.OrdinalIgnoreCase)) { row = r; break; }
+            if (row == null) { Log("repo upd-sel 跳过：未知仓键 " + key); continue; }
+            if (!RepoActionable(row, pend, out var why)) { McToast(row.Name + " 跳过", "info", why); continue; }
+            targets.Add(row);
         }
+        if (targets.Count == 0) { McToast("所选都没有可更新的", "info", "重新检查更新后再试"); return; }
+        StartRepoChain(targets);
+    }
+
+    /// <summary>下载链启动（单仓/批量共用，v2.2.0 从 HandleRepoUpd 抽出）：闸置位 + 卸载竞态闸
+    /// （必修 1）+ jobs 组装 + 后台串行链（RunRepoChainAsync：下载/MD5/解包/pending 写入全复用）。</summary>
+    private static void StartRepoChain(List<RepoRow> targets)
+    {
         _repoChain = true;
         _chainGuids.Clear();
         foreach (var t in targets)
@@ -1366,8 +1395,27 @@ internal static class ConfigBridge
                         _repoFetchError = wait.Length > 0 ? "GitHub 限流（HTTP 403），" + wait : "GitHub 限流（HTTP 403），请稍后再试";
                     McToast("检查太频繁（GitHub 限流）", "err", wait.Length > 0 ? wait + "，到点再试" : "等几分钟再试");
                 }
-                PushRender(BuildSnapshot().ToJson()); // 侧栏 ↑黄/⚠橙 徽标（快照协议承载）
+                PushRender(BuildSnapshot().ToJson()); // 侧栏 ↑黄 徽标（快照协议承载；v2.2.0 ⚠橙 随 gamekb 门退役）
                 PushRepoData();
+                // v2.2.0：手动检查完成且有可更新行 → 推可用更新列表（面板弹勾选弹窗）。
+                // 仅 Update 态且无 pending 意图（Install 归安装确认弹窗、待重启行放着只会误导）；
+                // 预检轮不推（只标行，现状不变）——弹窗被关/面板未开事件被 PushJs 丢弃可接受，
+                // 再入口 = 仓库页「检查更新」60s 冷却重查。
+                if (ui.Manual && ui.OkCount > 0)
+                {
+                    var pend = RepoPendingGuids();
+                    var upd = new UpdatesReady();
+                    foreach (var r in ui.Rows)
+                        if (r.State == RepoState.Update && !pend.Contains(r.Guid.ToLowerInvariant())
+                            && ui.Infos != null && ui.Infos.ContainsKey(r.RepoKey))
+                            upd.Rows.Add(new RepoRowInfo
+                            {
+                                Name = r.Name, Status = r.Status, Local = r.Local, Remote = r.Remote,
+                                RepoKey = r.RepoKey, Guid = r.Guid,
+                                Notes = ui.Infos[r.RepoKey].Notes,
+                            });
+                    if (upd.Rows.Count > 0) PushEvent(upd.ToJson());
+                }
                 break;
             case 2:
                 _dlKey = ui.RepoKey; _dlPct = ui.Pct; _dlStage = ui.Stage;
@@ -1464,6 +1512,7 @@ internal static class ConfigBridge
                     VerNote = r.VerNote, Kbw = r.Kbw, KbWhy = r.KbWhy,
                     Pending = pend.Contains(r.Guid.ToLowerInvariant()),
                     HttpStatus = r.HttpStatus, // T16/D：403 限流行内专门提示
+                    Notes = _repoInfos.TryGetValue(r.RepoKey, out var ni) ? ni.Notes : null, // v2.2.0：远端发版说明（旧源无 = null）
                 });
             // 终审必修 8：全失败（12 行 Remote 皆 null）或 fetch 异常 → 入口卡"检查失败（点击重试）"；
             // 行级"检查失败"由 Remote=null 渲染，不受影响。
@@ -2300,6 +2349,9 @@ internal static class ConfigBridge
                         case "MC_UPD":
                             HandleRepoUpd(GetStr(el, "repoKey"));
                             break;
+                        case "MC_UPD_SELECTED": // v2.2.0：可用更新弹窗「更新所选」（勾选批量）
+                            HandleRepoUpdSelected(GetStrArr(el, "repos"));
+                            break;
                         case "MC_INST":
                             HandleRepoUpd(GetStr(el, "repoKey"));
                             break;
@@ -2390,6 +2442,17 @@ internal static class ConfigBridge
 
     private static string GetStr(JsonElement el, string prop) =>
         el.TryGetProperty(prop, out var v) && v.ValueKind == JsonValueKind.String ? v.GetString() : null;
+
+    /// <summary>字符串数组字段解析（v2.2.0，MC_UPD_SELECTED repos[] 用）：缺失/非数组 = 空表。</summary>
+    private static List<string> GetStrArr(JsonElement el, string prop)
+    {
+        var list = new List<string>();
+        if (!el.TryGetProperty(prop, out var v) || v.ValueKind != JsonValueKind.Array) return list;
+        foreach (var item in v.EnumerateArray())
+            if (item.ValueKind == JsonValueKind.String && !string.IsNullOrEmpty(item.GetString()))
+                list.Add(item.GetString());
+        return list;
+    }
 
     // ---- C# → JS 推送（Root 上下文；panel.js 存根先存 __mcLastSnapshot/__mcLastEvent，任务 7 长成渲染） ----
 
