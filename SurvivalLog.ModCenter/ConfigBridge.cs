@@ -1067,10 +1067,9 @@ internal static class ConfigBridge
         return set;
     }
 
-    /// <summary>侧栏仓库态徽标（v4 三标记；BuildSnapshot 消费）。无远端（未查/检查失败）或已有
-    /// 待生效意图的行返回 null。归级：Update/Warn → ↑黄（有新版本）；Warn/Kbw → 再挂 ⚠橙
-    /// （版本告警）；Ok+Kbw（同版本但 gamekb 不符）→ ⚠橙；其余（含本地比远端新，v4.1 起静默）
-    /// 零标记。</summary>
+    /// <summary>侧栏仓库态徽标（v4 单标记；BuildSnapshot 消费）。无远端（未查/检查失败）或已有
+    /// 待生效意图的行返回 null。归级（v2.2.0 gamekb 门退役——⚠橙/Kbw/Warn 全下线，只剩 ↑黄）：
+    /// Update → ↑黄（有新版本）；其余（含本地比远端新，v4.1 起静默）零标记。</summary>
     private static List<IcInfo> RepoIcsOf(string guid, HashSet<string> repoPend)
     {
         if (_repoRows == null) return null;
@@ -1080,21 +1079,8 @@ internal static class ConfigBridge
         if (row == null || string.IsNullOrEmpty(row.Remote)) return null;
         if (repoPend.Contains(guid.ToLowerInvariant())) return null;
         var ics = new List<IcInfo>();
-        switch (row.State)
-        {
-            case RepoState.Update:
-                ics.Add(UpIc());
-                break;
-            case RepoState.Warn:
-                ics.Add(UpIc());
-                ics.Add(KbIc()); // 有更新 + 新版可能不适配：↑黄 + ⚠橙 并挂
-                break;
-            case RepoState.Ok:
-                if (row.Kbw) ics.Add(KbIc()); // 同版本但 gamekb 不符：行内仍给 ⚠橙
-                break;
-            default:
-                break; // Install=未装（侧栏行内零徽标，维护区按钮承载）
-        }
+        if (row.State == RepoState.Update) ics.Add(UpIc());
+        // Warn/Kbw 分支 v2.2.0 退役：决策层不再产出（RepoDecision.Build 三态收敛）
         return ics.Count > 0 ? ics : null;
     }
 
@@ -1103,15 +1089,6 @@ internal static class ConfigBridge
     {
         K = "yellow",
         Tip = "有新版本，点击升级",
-        Click = "upd",
-    };
-
-    /// <summary>⚠橙 版本告警徽标（点击走更新确认窗，风险红字在弹窗）。
-    /// 同版本 Ok+Kbw 态 = 现装版本可能不适配（更新到同版本可修复）；Warn 态 = 新版可能不适配。</summary>
-    private static IcInfo KbIc() => new()
-    {
-        K = "orange",
-        Tip = "可能不支持当前游戏版本，点击修复",
         Click = "upd",
     };
 
@@ -1269,7 +1246,8 @@ internal static class ConfigBridge
 
     /// <summary>行可动作判定：fetch 成功（Remote/信息在）且无待生效意图，且 tag 方向成立——
     /// v4.1 作者拍板：只做 release tag 版本比较，本地比 tag 高（超前构建）一律拒，杜绝变相
-    /// 降级入口；同版本放行仅覆盖 ⚠橙 版本告警行的"更新到同版本"修复路径（spec D3/D8）。</summary>
+    /// 降级入口；v2.2.0 gamekb 门退役：同版本也拒（旧"更新到同版本"是 ⚠橙 行修复路径，
+    /// 该行不复存在，同版本覆盖 = 同 zip 反复下载，无意义）。</summary>
     private static bool RepoActionable(RepoRow r, HashSet<string> pend, out string why)
     {
         why = null;
@@ -1277,9 +1255,9 @@ internal static class ConfigBridge
         if (!_repoInfos.ContainsKey(r.RepoKey)) { why = "版本信息过期了，先重新检查更新"; return false; }
         if (pend.Contains(r.Guid.ToLowerInvariant())) { why = "它已有排队中的操作，重启游戏后应用"; return false; }
         if (r.Local != null
-            && RepoDecision.CompareVersions(r.Local, r.Remote) is > 0)
+            && RepoDecision.CompareVersions(r.Local, r.Remote) is >= 0)
         {
-            why = "本地版本比仓库新，不用动";
+            why = "本地版本不低于仓库，不用动";
             return false;
         }
         return true;

@@ -651,72 +651,52 @@ internal static class RepoProbe
             var dist = Distribution(_rows);
             P($"A 分布: {dist}");
 
-            // ---- B 通道失败降级（Step 4：强制 GameVersion 返 null → 不误报 Warn + "未校验"标注）----
-            P("--- B 通道失败降级（基线强制 null，D8 Step 4） ---");
+            // ---- B 通道失败降级（v2.2.0 gamekb 门退役：决策不再消费基线——通道状态与三态无关，
+            //      恒等断言：零 Warn、零 VerNote/Kbw 残留）----
+            P("--- B 通道失败降级（基线强制 null；gamekb 门退役后决策不看基线） ---");
             var unverified = GameVersion.Local.Unverified("探针强制通道失败（Step 4 降级实测）");
             RepoDecision.Build(_rows, unverified);
             foreach (var r in _rows) P(RowLine(r));
             var bWarn = _rows.Count(r => r.State == RepoState.Warn);
-            var bNotes = _rows.Count(r => !string.IsNullOrEmpty(r.VerNote));
-            var bFetchOk = _rows.Count(r => !string.IsNullOrEmpty(r.Remote) && !string.IsNullOrEmpty(r.Gamekb));
-            var bPass = bWarn == 0 && bNotes == bFetchOk && bFetchOk > 0;
-            P($"B 断言: warn={bWarn}（期望 0 不误报） 未校验标注={bNotes} 行（期望 = fetch 成功且带 gamekb 的 {bFetchOk} 行） → {(bPass ? "PASS" : "FAIL")}");
+            var bNotes = _rows.Count(r => !string.IsNullOrEmpty(r.VerNote) || r.Kbw);
+            var bPass = bWarn == 0 && bNotes == 0;
+            P($"B 断言: warn={bWarn}（期望 0） 退役字段残留={bNotes}（期望 0 恒空） → {(bPass ? "PASS" : "FAIL")}");
             pass &= bPass;
 
-            // ---- C 合成分支自证（合成输入走同一 Build 路径；不碰本机枚举/网络）----
-            P("--- C 分支自证（合成输入，非本机枚举/非网络；五态各至少一行） ---");
+            // ---- C 合成分支自证（合成输入走同一 Build 路径；不碰本机枚举/网络；三态各至少一行）----
+            P("--- C 分支自证（合成输入，非本机枚举/非网络；三态 + gamekb 无关性） ---");
             var gk = _rows.Find(x => !string.IsNullOrEmpty(x.Gamekb))?.Gamekb ?? "2026-10-23_26157732";
-            var gkBad = "2000-01-01_1"; // 与任何真 buildid 都不等的合成快照名
+            var gkBad = "2000-01-01_1"; // 与任何真 buildid 都不等的合成快照名——v2.2.0 决策不看（无关性自证）
             var cases = new List<SynthCase>
             {
-                Synth("未装+基线匹配",         null,    "1.7.0", gk,     RepoState.Install),
-                Synth("旧版+基线匹配",         "1.0.0", "1.7.0", gk,     RepoState.Update),
-                Synth("同版+基线匹配",         "1.7.0", "1.7.0", gk,     RepoState.Ok),
-                Synth("同版+基线不匹配（Kbw）", "1.7.0", "1.7.0", gkBad, RepoState.Ok),
-                Synth("本地高（v4.1 静默）",   "9.9.9", "1.7.0", gk,     RepoState.Ok),
-                Synth("未装+基线不匹配（D8）",  null,    "1.7.0", gkBad,  RepoState.Warn),
-                Synth("旧版+基线不匹配（D8）",  "1.0.0", "1.7.0", gkBad,  RepoState.Warn),
-                Synth("快照名形态异常",         "1.0.0", "1.7.0", "2000-01-01_pre1", RepoState.Warn),
-                Synth("fetch 失败路径",        "1.7.0", null,    null,   RepoState.Ok),
+                Synth("未装",                       null,    "1.7.0", gk,     RepoState.Install),
+                Synth("旧版",                       "1.0.0", "1.7.0", gk,     RepoState.Update),
+                Synth("同版",                       "1.7.0", "1.7.0", gk,     RepoState.Ok),
+                Synth("本地高（v4.1 静默）",         "9.9.9", "1.7.0", gk,     RepoState.Ok),
+                Synth("未装+基线不匹配（v2.2.0 无关）", null,    "1.7.0", gkBad, RepoState.Install),
+                Synth("旧版+基线不匹配（v2.2.0 无关）", "1.0.0", "1.7.0", gkBad, RepoState.Update),
+                Synth("同版+基线不匹配（v2.2.0 无关）", "1.7.0", "1.7.0", gkBad, RepoState.Ok),
+                Synth("快照名形态异常（v2.2.0 无关）",  "1.0.0", "1.7.0", "2000-01-01_pre1", RepoState.Update),
+                Synth("fetch 失败路径",              "1.7.0", null,    null,   RepoState.Ok),
             };
-            // 基线不可用时期望翻转：不匹配两行不再 Warn（保持 Install/Update + 未校验标注）
             var cPass = true;
-            if (_local.Baseline != null)
-            {
-                RepoDecision.Build(cases.ConvertAll(c => c.Row), _local);
-                cPass &= AssertRows(cases);
-            }
-            else
-            {
-                foreach (var c in cases)
-                {
-                    if (c.Expected == RepoState.Warn)
-                        c.Expected = c.Row.Local == null ? RepoState.Install : RepoState.Update; // 通道不可用：不判 Warn
-                }
-                RepoDecision.Build(cases.ConvertAll(c => c.Row), unverified);
-                cPass &= AssertRows(cases);
-            }
-            // 追加：基线不可用专项（Install/Update + 未校验标注，不误报 Warn）
-            var cases2 = new List<SynthCase>
-            {
-                Synth("未装+不匹配+通道失败", null,    "1.7.0", gkBad, RepoState.Install),
-                Synth("旧版+不匹配+通道失败", "1.0.0", "1.7.0", gkBad, RepoState.Update),
-            };
-            RepoDecision.Build(cases2.ConvertAll(c => c.Row), unverified);
-            foreach (var c in cases2)
-            {
-                var ok = c.Row.State == c.Expected && string.IsNullOrEmpty(c.Row.Why) && !string.IsNullOrEmpty(c.Row.VerNote);
-                P($"{SynthLine(c)} → 期望 {c.Expected}+未校验标注 {(ok ? "PASS" : "FAIL")}");
-                cPass &= ok;
-            }
+            RepoDecision.Build(cases.ConvertAll(c => c.Row), _local);
+            cPass &= AssertRows(cases);
+            // 基线不可用再跑一遍同批（决策与基线无关的直接证明——两轮结果必须一致）
+            var statesLocal = cases.ConvertAll(c => c.Row.State.ToString());
+            RepoDecision.Build(cases.ConvertAll(c => c.Row), unverified);
+            var statesUnverified = cases.ConvertAll(c => c.Row.State.ToString());
+            var same = statesLocal.SequenceEqual(statesUnverified);
+            P($"C 基线无关性: 真基线/强制 null 两轮态序列一致 → {(same ? "PASS" : "FAIL")}");
+            cPass &= same;
             var cRows = cases.ConvertAll(c => c.Row);
             var cDist = Distribution(cRows);
-            var fiveOk = CountState(cRows, RepoState.Ok) >= 1 && CountState(cRows, RepoState.Update) >= 1 &&
-                         CountState(cRows, RepoState.Warn) >= 1 &&
-                         CountState(cRows, RepoState.Install) >= 1
-                         && CountState(cRows, RepoState.Downgrade) == 0; // v4.1：降级不再产出（本地高=Ok）
-            P($"C 四态覆盖+零降级: {cDist} → {(fiveOk ? "PASS" : "FAIL（基线不可用机器上期望翻转，见上）")}");
-            cPass &= _local.Baseline != null && fiveOk;
+            var threeOk = CountState(cRows, RepoState.Ok) >= 1 && CountState(cRows, RepoState.Update) >= 1 &&
+                          CountState(cRows, RepoState.Install) >= 1 &&
+                          CountState(cRows, RepoState.Warn) == 0 &&
+                          CountState(cRows, RepoState.Downgrade) == 0; // v2.2.0：Warn 不再产出（gamekb 门退役）
+            P($"C 三态覆盖+零 Warn/降级: {cDist} → {(threeOk ? "PASS" : "FAIL")}");
+            cPass &= threeOk;
             pass &= cPass;
 
             // ---- D PendingWriter 合并语义（临时文件；真 pending.json 绝不写入假意图）----
@@ -752,8 +732,8 @@ internal static class RepoProbe
                 P("D 清理: selftest-pending.json 已删（真 pending.json 全程零触碰）");
             }
 
-            Summary = $"DONE A[{dist}] fetchFail={fetchFail} | B 通道降级 {(bPass ? "PASS" : "FAIL")}（warn=0 未校验={bNotes}行） | " +
-                      $"C 五态分支 {(cPass ? "PASS" : "FAIL")} | D 合并语义 {(dOk ? "PASS" : "FAIL")}（探针一轮终态）";
+            Summary = $"DONE A[{dist}] fetchFail={fetchFail} | B 通道无关 {(bPass ? "PASS" : "FAIL")}（warn=0 退役字段恒空） | " +
+                      $"C 三态分支 {(cPass ? "PASS" : "FAIL")} | D 合并语义 {(dOk ? "PASS" : "FAIL")}（探针一轮终态）";
         }
         catch (Exception e)
         {

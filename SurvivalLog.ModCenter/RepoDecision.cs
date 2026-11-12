@@ -28,10 +28,10 @@ public sealed class RepoRow
     public string Guid;    // 套件插件 GUID（com.local.survivallog.<小写仓键>）
 
     // ---- 冻结面之外的增量字段（T8 决策/PendingWriter 消费，不破坏冻结签名）----
-    public string Gamekb;  // 远端 gamekb 快照名（update.json.gamekb，fetch 时附带）
-    public string VerNote; // gamekb 未校验注记（D8："未校验游戏版本：…"）；基线可用 = 空
-    public bool Kbw;       // 终审必修 6：同版本 Ok 行 gamekb 不符（不改 State，行内 ⚠橙 + 行级原因；本地更高不参与）
-    public string KbWhy;   // 上述告警原因全文；空 = 无
+    public string Gamekb;  // 远端 gamekb 快照名（update.json.gamekb，fetch 时附带；v2.2.0 起决策不再消费，协议字段保留）
+    public string VerNote; // v2.2.0 gamekb 门退役：恒空（协议字段保留防新旧面板互炸）
+    public bool Kbw;       // v2.2.0 gamekb 门退役：恒 false（同上）
+    public string KbWhy;   // v2.2.0 gamekb 门退役：恒空（同上）
     public int? HttpStatus; // T16/D：本轮 fetch 的 HTTP 状态（403=GitHub 限流；面板专门提示）
 
     /// <summary>面板态字符串（控制器裁定 2 固定口径，小写）。</summary>
@@ -39,14 +39,14 @@ public sealed class RepoRow
 }
 
 /// <summary>
-/// 仓库决策层（ModCenter v2 生命周期任务 6）：13 仓清单 + 本地插件快照 + 五态决策。
-/// 决策口径（v4.1 作者拍板：只做 release tag 版本比较，降级全面退役）：
+/// 仓库决策层（ModCenter v2 生命周期任务 6）：10 仓清单 + 本地插件快照 + 三态决策。
+/// 决策口径（v4.1 作者拍板 + v2.2.0 gamekb 门退役）：
 /// - 远端 tag &gt; 本地 = Update；未安装 = Install；相等或本地更高（超前构建）= Ok 静默
 ///   （不提示、无任何动作入口）；fetch 失败（Remote=null）= Ok + Remote null（面板按
 ///   "检查失败"渲染，不虚报）。
-/// - gamekb 告警（D8）：远端 gamekb ≠ 本地基线 → Warn（Install/Update 态）或
-///   Kbw 标记（同版本 Ok 态——保持原态，行内 ⚠橙 仍给；本地更高不参与）；
-///   基线不可用（通道失败/无法映射）→ 不判 Warn/Kbw，VerNote="未校验游戏版本：…"。
+/// - gamekb 数据仍随 fetch 附带进 RepoRow（协议字段保留），但决策零消费——v2.2.0 作者
+///   拍板：制作基线与玩家游戏版本不一致不构成告警（更新到同版本只是同 zip 反复覆盖，
+///   死循环无意义）；Warn/Kbw/VerNote 恒空（字段保留防新旧面板互炸）。
 /// <see cref="Build"/> 为纯函数（不碰 IO/interop，任意线程可调）；本地枚举在
 /// <see cref="SnapshotLocal"/>（主线程，IL2CPPChainloader 契约）。
 /// </summary>
@@ -118,9 +118,10 @@ public static class RepoDecision
             }
 
             // 版本基态（v4.1 作者拍板：只做 release tag 版本比较，tag 大于本地才有 Update；
-            // 本地更高（开发机构建超前 release）= Ok 静默——降级态/降级提示全面退役）
+            // 本地更高（开发机构建超前 release）= Ok 静默——降级态/降级提示全面退役）。
+            // v2.2.0 gamekb 门退役（作者拍板）：制作基线≠游戏版本不一致就不可用，旧门只会引向
+            // "更新到同版本"死循环（同 zip 反复覆盖）；决策回归纯版本三态，gamekb 数据仅存协议。
             RepoState basis;
-            bool sameVersion = false;
             if (row.Local == null)
             {
                 basis = RepoState.Install;
@@ -128,41 +129,10 @@ public static class RepoDecision
             else
             {
                 var cmp = CompareVersions(row.Local, row.Remote);
-                if (cmp != null && cmp < 0) basis = RepoState.Update;   // tag > 本地 → 有更新
-                else
-                {
-                    basis = RepoState.Ok; // 相等 / 本地更高 / 远端不可解析（自家管线不会发生）
-                    sameVersion = cmp == 0;
-                }
+                basis = cmp != null && cmp < 0 ? RepoState.Update : RepoState.Ok;
+                // 相等 / 本地更高 / 远端不可解析（自家管线不会发生）一律 Ok
             }
             row.State = basis;
-
-            // gamekb 门（D8 告警不拦截）：fetch 成功且带 gamekb 的行参与。
-            // v4.1：本地比远端新（sameVersion=false 的 Ok）不参与——旧 release 的 gamekb
-            // 对超前构建无意义，标了只会引向变相降级入口。
-            if (!string.IsNullOrEmpty(row.Gamekb) && (basis != RepoState.Ok || sameVersion))
-            {
-                if (local.Baseline == null)
-                {
-                    // 通道失败/无法映射：不判 Warn，标"未校验游戏版本"（注记不改 State，任何基态可携带）
-                    row.VerNote = "未校验游戏版本：" + (local.Note ?? "本地基线不可用") + "（不判兼容告警）";
-                }
-                else
-                {
-                    var why = GameVersion.GamekbMismatchReason(row.Gamekb, local);
-                    if (why != null)
-                    {
-                        // 同版本（Ok）但 gamekb 不符：保持原态 + Kbw 标记，面板行内给 ⚠橙（v4）。
-                        row.Kbw = true;
-                        row.KbWhy = why;
-                        if (basis is RepoState.Install or RepoState.Update)
-                        {
-                            row.State = RepoState.Warn; // Warn 覆盖可动作态（要装/更的东西适配构建不一致才是告警主场景）
-                            row.Why = why;
-                        }
-                    }
-                }
-            }
         }
         return src;
     }
