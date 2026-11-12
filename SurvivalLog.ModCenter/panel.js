@@ -446,7 +446,7 @@
      * 拉起失败不退出——不假装成功）。 */
     pendEl.addEventListener('click', function (e) {
       var b = e.target && e.target.closest ? e.target.closest('[data-x]') : null;
-      if (!b) return;
+      if (!b) { openPendModal(); return; } /* v2.2.0：条身点击 → 待生效明细弹窗（两钮不动） */
       var x = b.getAttribute('data-x');
       if (x === 'undo') { window.__mcOutbox.push({ type: 'MC_PENDING_UNDO' }); return; }
       if (x === 'reboot') openRebootModal();
@@ -1705,22 +1705,101 @@
   }
 
   function updModalRealHtml(r) {
-    var isWarn = r.status === 'warn';
     var isInst = r.local == null || r.status === 'install';
     var verb = repoVerbOf(r);
     var h = '<h3>' + chipHtml('blue', icSvg('up')) + verb + ' \u00b7 ' + esc(r.name) + '</h3>'
       + '<div class="__mc-kv" style="padding:2px 0 0"><span class="__mc-kvv">' + esc(r.local || '\u672a\u5b89\u88c5') + '</span>'
       + '<span style="color:#6b7180">\u2192</span>'
       + '<span class="__mc-kvv" style="color:#60a5fa;font-size:14px">' + esc(r.remote) + '</span></div>';
-    if (isWarn) h += '<div class="__mc-risk">\u26a0 ' + esc(r.why || '\u8be5\u7248\u672c\u53ef\u80fd\u4e0d\u9002\u914d\u5f53\u524d\u6e38\u620f') + '\uff0c\u6709\u95ea\u9000\u98ce\u9669\uff0c\u786e\u5b9a\u8981\u7ee7\u7eed\u5417\uff1f</div>';
-    else if (r.kbw && r.kbwhy) h += '<div class="__mc-risk">\u26a0 ' + esc(r.kbwhy) + '\uff0c\u6709\u95ea\u9000\u98ce\u9669\uff0c\u786e\u5b9a\u8981\u7ee7\u7eed\u5417\uff1f</div>';
-    if (r.verNote) h += '<div class="__mc-m-sec"><div class="__mc-m-txt" style="font-size:11px;color:#8a90a0">\u24d8 \u672a\u80fd\u6821\u9a8c\u6e38\u620f\u7248\u672c</div></div>';
+    /* v2.2.0：warn/kbw/verNote 红字与"未校验"注记随 gamekb 门退役（C# 恒空）。
+     * 安装态 → 功能说明（USAGE 复用，用户自行决定是否装，G4）；更新态 → 更新内容（notes，G5）。 */
+    if (isInst) h += usageIntroHtml(r.guid);
+    else if (r.notes) h += notesSecHtml(r.notes);
     h += '<div class="__mc-m-sec"><div class="__mc-m-txt">\u4e0b\u8f7d\u5e76\u6821\u9a8c\u540e\u6682\u5b58\uff0c<b style="color:#e8e6e0">\u91cd\u542f\u6e38\u620f</b>\u65f6\u81ea\u52a8\u66ff\u6362\uff08\u4e0d\u4fdd\u7559\u65e7\u7248\uff09\u3002</div></div>'
       + '<div class="__mc-m-acts"><button type="button" class="__mc-btn __mc-btn-mini" data-mact="close">\u53d6\u6d88</button>'
       + '<button type="button" class="__mc-btn ' + (isInst ? '__mc-btn-blue' : '__mc-btn-pri')
       + '" data-mact="doupd" data-repo="' + esc(r.repoKey) + '">'
       + esc(verb === '\u5b89\u88c5' ? '\u5b89\u88c5 ' : verb + '\u5230 ') + esc(r.remote) + '</button></div>';
     return h;
+  }
+
+  /* ---- v2.2.0：notes 发版说明渲染（CHANGELOG 节原文按行拆 <br>，不做 md 解析）+
+   * 安装态功能说明（USAGE.i 一句话 + 第一段前 3 条——用户自行决定是否安装，G4；
+   * 无 USAGE 的 guid 给通用兜底一句话）。 ---- */
+  function notesLinesHtml(notes) {
+    var lines = String(notes || '').split(/\r?\n/), h = '';
+    for (var i = 0; i < lines.length; i++)
+      h += (i > 0 ? '<br>' : '') + esc(lines[i]);
+    return h;
+  }
+
+  function notesSecHtml(notes) {
+    return '<div class="__mc-m-sec"><div class="__mc-m-h">\u66f4\u65b0\u5185\u5bb9</div>'
+      + '<div class="__mc-m-txt" style="font-size:11px;line-height:1.6">' + notesLinesHtml(notes) + '</div></div>';
+  }
+
+  function usageIntroHtml(guid) {
+    var u = USAGE[guid];
+    if (!u) return '<div class="__mc-m-sec"><div class="__mc-m-h">\u529f\u80fd\u8bf4\u660e</div>'
+      + '<div class="__mc-m-txt">\u751f\u5b58\u65e5\u5fd7\u5957\u4ef6\u6a21\u7ec4\uff08\u672c\u5730\u7ef4\u62a4\uff09\uff0c\u88c5\u597d\u5373\u751f\u6548\uff0c\u53c2\u6570\u5728\u914d\u7f6e\u9875\u8c03\u6574\u3002</div></div>';
+    var h = '<div class="__mc-m-sec"><div class="__mc-m-h">\u529f\u80fd\u8bf4\u660e</div>'
+      + '<div class="__mc-m-txt">' + esc(u.i);
+    var ls = u.secs && u.secs.length ? u.secs[0].ls : [];
+    var n = Math.min(3, ls.length);
+    for (var i = 0; i < n; i++) h += '<br>' + (i + 1) + '. ' + esc(ls[i]);
+    return h + '</div></div>';
+  }
+
+  /* ---- v2.2.0：可用更新列表弹窗（MC_UPDATES_READY——手动检查完成后弹）：
+   * 勾选（默认全选）+ 版本对比 + details 展开发版说明 + 「更新所选」→ MC_UPD_SELECTED。
+   * 零勾选禁用主钮（不发消息）；弹窗被关 = 放弃，再入口 = 头部「检查更新」60s 冷却重查。 ---- */
+  function updListModalHtml(rows) {
+    var h = '<h3>' + chipHtml('blue', icSvg('up')) + '\u53ef\u7528\u66f4\u65b0</h3>'
+      + '<div class="__mc-m-sub">\u52fe\u9009\u8981\u66f4\u65b0\u7684 mod\uff0c\u5c55\u5f00\u53ef\u770b\u53d1\u7248\u8bf4\u660e\uff1b\u4e0b\u8f7d\u5b8c\u91cd\u542f\u6e38\u620f\u540e\u4e00\u5e76\u751f\u6548\u3002</div>'
+      + '<div class="__mc-m-sec">';
+    for (var i = 0; i < rows.length; i++) {
+      var r = rows[i];
+      h += '<div style="padding:6px 0;border-bottom:1px solid rgba(255,255,255,.06)">'
+        + '<label style="display:flex;align-items:center;gap:8px;cursor:pointer">'
+        + '<input type="checkbox" data-updsel="' + esc(r.repoKey) + '" checked>'
+        + '<b style="color:#e8e6e0">' + esc(r.name) + '</b>'
+        + '<span style="color:#8a90a0;font-size:11px">v' + esc(r.local || '?') + '</span>'
+        + '<span style="color:#6b7180">\u2192</span>'
+        + '<span style="color:#60a5fa;font-size:12px">v' + esc(r.remote) + '</span></label>';
+      if (r.notes) h += '<details style="margin:4px 0 0 26px"><summary style="cursor:pointer;color:#8a90a0;font-size:11px;user-select:none">\u53d1\u7248\u8bf4\u660e</summary>'
+        + '<div class="__mc-m-txt" style="font-size:11px;line-height:1.6;padding:4px 0 2px">' + notesLinesHtml(r.notes) + '</div></details>';
+      h += '</div>';
+    }
+    h += '</div>'
+      + '<div class="__mc-m-acts"><button type="button" class="__mc-btn __mc-btn-mini" data-mact="close">\u53d6\u6d88</button>'
+      + '<button type="button" class="__mc-btn __mc-btn-pri" data-mact="updgo" id="__mc_updgo">\u66f4\u65b0\u6240\u9009 (' + rows.length + ')</button></div>';
+    return h;
+  }
+
+  function openUpdListModal(rows) {
+    if (!rows || !rows.length || !openModal(updListModalHtml(rows))) return;
+    var mdl = S.mdl;
+    if (!mdl) return;
+    var boxes = mdl.querySelectorAll('input[data-updsel]');
+    var go = mdl.querySelector('#__mc_updgo');
+    if (!go) return;
+    function sync() {
+      var n = 0;
+      for (var i = 0; i < boxes.length; i++) if (boxes[i].checked) n++;
+      go.textContent = '\u66f4\u65b0\u6240\u9009 (' + n + ')';
+      go.disabled = n === 0; /* 零勾选禁用——不发消息 */
+    }
+    for (var i = 0; i < boxes.length; i++) boxes[i].addEventListener('change', sync);
+    go.addEventListener('click', function (e) {
+      e.stopPropagation();
+      var sel = [];
+      for (var j = 0; j < boxes.length; j++)
+        if (boxes[j].checked) sel.push(boxes[j].getAttribute('data-updsel'));
+      if (!sel.length) return;
+      window.__mcOutbox.push({ type: 'MC_UPD_SELECTED', repos: sel });
+      closeModal();
+      toastRaw('\u5f00\u59cb\u66f4\u65b0', '\u6240\u9009 ' + sel.length + ' \u4e2a mod \u4f9d\u6b21\u4e0b\u8f7d\uff0c\u5b8c\u6210\u540e\u91cd\u542f\u751f\u6548', 'info');
+    });
   }
 
   /* 确认后的进度态弹窗（MC_DL 就地更新，不重建弹窗；v3 精简） */
@@ -1802,26 +1881,60 @@
     return !!(S.mbg && S.mbg.className.indexOf('__mc-show') !== -1);
   }
 
-  /* 底部待生效条（MC_PENDING_SUMMARY{n,labels,applied?}；n>0 或 applied 在场显示——原型
-   * renderPending 同款文案。T10（T9 改进项）：applied=中性档（"自定义加载序生效中"=本靴已
-   * 应用）——不计入待生效计数、弱化样式（__mc-weak 灰上缘）、不缀"重启后应用"）。 */
+  /* 底部待生效条（MC_PENDING_SUMMARY{n,labels,applied?,items?}；显示 = labels/applied/items
+   * 任一在场——v2.2.0 items 含 cfg 会话档（参数修改）。计数优先 items（含参数项）。
+   * T10（T9 改进项）：applied=中性档（"自定义加载序生效中"=本靴已应用）——不计入待生效
+   * 计数、弱化样式（__mc-weak 灰上缘）、不缀"重启后应用"）。条身可点 → 明细弹窗。 */
   function renderPending() {
     if (!S.pendEl || !S.pendEl.isConnected) return;
     var p = ST.pend;
     var labels = p && p.labels ? p.labels : [];
     var applied = p && p.applied ? p.applied : null;
-    if (!labels.length && !applied) {
+    var items = p && p.items ? p.items : [];
+    if (!labels.length && !applied && !items.length) {
       S.pendEl.className = '__mc-pending';
       return;
     }
-    S.pendEl.className = '__mc-pending __mc-show' + (labels.length ? '' : ' __mc-weak');
+    S.pendEl.className = '__mc-pending __mc-show' + (labels.length || items.length ? '' : ' __mc-weak');
     if (!S.pendTx) return;
     var h = '';
-    if (labels.length)
-      h += esc('\u5f85\u751f\u6548 ' + labels.length + ' \u9879\uff08' + labels.join(' \u00b7 ') + '\uff09\u00b7 \u91cd\u542f\u6e38\u620f\u540e\u5e94\u7528');
+    var n = items.length || labels.length; /* 新协议 items（含 cfg）优先；旧协议回退 labels */
+    if (n)
+      h += esc('\u5f85\u751f\u6548 ' + n + ' \u9879\uff08' + (labels.length ? labels.join(' \u00b7 ') : '\u53c2\u6570\u4fee\u6539') + '\uff09\u00b7 \u70b9\u51fb\u67e5\u770b\u660e\u7ec6');
     if (applied)
       h += (h ? ' \u00b7 ' : '') + '<span style="color:#8a90a0">' + esc(applied) + '</span>';
     S.pendTx.innerHTML = h;
+  }
+
+  /* v2.2.0：待生效明细弹窗（底条点击）——items 分组行渲染（mod + 操作说明 + 生效时机徽标：
+   * reload=读档后生效 / reboot·其余=重启后生效）；cfg 行不参与撤销（已落盘，撤销钮语义在
+   * 底条弹窗外）。旧协议（无 items）降级渲染 labels 文本。 */
+  function openPendModal() {
+    var p = ST.pend;
+    if (!p) return;
+    var items = p.items || [];
+    var h = '<h3>' + chipHtml('amber', icSvg('pend')) + '\u5f85\u751f\u6548\u660e\u7ec6</h3>'
+      + '<div class="__mc-m-sub">\u91cd\u542f\u6e38\u620f\u540e\u7edf\u4e00\u5e94\u7528\uff1b\u53c2\u6570\u7c7b\u6309\u63d0\u793a\u8bfb\u6863\u6216\u91cd\u542f\u751f\u6548\u3002</div>';
+    if (items.length) {
+      h += '<div class="__mc-m-sec">';
+      for (var i = 0; i < items.length; i++) {
+        var it = items[i];
+        var badgeTx = it.badge === 'reload' ? '\u8bfb\u6863\u540e\u751f\u6548' : '\u91cd\u542f\u540e\u751f\u6548';
+        var badgeColor = it.badge === 'reload' ? '#5eead4' : '#fbbf24';
+        h += '<div style="display:flex;align-items:center;gap:8px;padding:5px 0;border-bottom:1px solid rgba(255,255,255,.06)">'
+          + '<b style="color:#e8e6e0;min-width:64px">' + esc(it.mod || (it.kind === 'order' ? '\u5168\u5c40' : '\uff1f')) + '</b>'
+          + '<span style="color:#b6bccb;font-size:11px;flex:1">' + esc(it.label) + '</span>'
+          + '<span style="font-size:10px;color:' + badgeColor + ';white-space:nowrap">' + badgeTx + '</span></div>';
+      }
+      h += '</div>'
+        + '<div class="__mc-m-txt" style="font-size:11px;color:#8a90a0;padding:4px 0">\u64a4\u9500\u53ea\u4f5c\u7528\u4e8e\u66f4\u65b0/\u5378\u8f7d/\u6392\u5e8f\uff1b\u53c2\u6570\u4fee\u6539\u4e0d\u56de\u6eda\uff0c\u9700\u624b\u52a8\u6539\u56de\u3002</div>';
+    } else {
+      var labels2 = p.labels || [];
+      h += '<div class="__mc-m-sec"><div class="__mc-m-txt">'
+        + (labels2.length ? esc(labels2.join(' \u00b7 ')) : esc(p.applied || '\u2014')) + '</div></div>';
+    }
+    h += '<div class="__mc-m-acts"><button type="button" class="__mc-btn __mc-btn-mini" data-mact="close">\u5173\u95ed</button></div>';
+    openModal(h);
   }
 
   /* v2 任务 13：一键重启确认弹窗（原型无此弹窗，文案自定；brief 逐字口径
@@ -2303,7 +2416,7 @@
           var c = repoCounts(), parts = [];
           if (c.upd) parts.push(c.upd + ' \u4e2a\u53ef\u66f4\u65b0');
           if (c.inst) parts.push(c.inst + ' \u4e2a\u53ef\u5b89\u88c5');
-          if (c.warn) parts.push(c.warn + ' \u4e2a\u7248\u672c\u5f85\u786e\u8ba4');
+          /* v2.2.0：warn 计数随 gamekb 门退役（C# 不再产出 warn 态），汇总句删除 */
           toastRaw(parts.length ? '\u68c0\u67e5\u5b8c\u6210\uff1a' + parts.join('\u3001') : '\u68c0\u67e5\u5b8c\u6210\uff1a\u90fd\u662f\u6700\u65b0\u7248',
             parts.length ? '\u5217\u8868\u91cc\u5df2\u7528\u56fe\u6807\u6807\u51fa\uff0c\u70b9\u56fe\u6807\u5c31\u80fd\u5347\u7ea7' : '', 'info');
         }
@@ -2311,6 +2424,10 @@
     }
     /* v2 任务 8：下载链进度/结果（MC_DL：down|check|unzip|write|ok|err） */
     if (event && event.type === 'MC_DL') onDlEvent(event);
+    /* v2.2.0：可用更新列表（MC_UPDATES_READY——手动检查完成且有 Update 态行时 C# 推）。
+     * 事件到达 = 面板活着（PushJs 面板关闭时静默丢弃）→ 直接弹勾选列表；被关放弃，
+     * 再入口 = 头部「检查更新」60s 冷却重查。 */
+    if (event && event.type === 'MC_UPDATES_READY') openUpdListModal(event.rows);
     /* v2 任务 10：卸载明细（MC_UNINST_DATA）→ 占位壳换真值确认弹窗 */
     if (event && event.type === 'MC_UNINST_DATA') onUninstData(event);
     /* v2 任务 11：冲突详情（MC_CF_DATA）→ 占位壳换真卡片（L1 卡片 + L3 同域卡） */
