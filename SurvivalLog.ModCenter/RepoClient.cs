@@ -87,7 +87,9 @@ public static class RepoClient
     }
 
     /// <summary>更新信息（拆仓设计 §6 五字段 + zip 资产直连 URL——URL 已含镜像映射前的原始形态，
-    /// 映射在 <see cref="DownloadAsset"/> 内做，两次调用间改 cfg 即时生效）。</summary>
+    /// 映射在 <see cref="DownloadAsset"/> 内做，两次调用间改 cfg 即时生效）。
+    /// v2.2.0：+Notes 发版说明（CHANGELOG 本版节原文，发布侧自动带；**可选字段**——旧源缺失
+    /// = null，面板降级不显示，不参与完整性校验）。</summary>
     public sealed class UpdateInfo
     {
         public string Mod;      // mod id（如 "RobotSpeed"）
@@ -96,6 +98,7 @@ public static class RepoClient
         public string Md5;      // zip 的 MD5（小写十六进制；校验属调用方，T8 消费）
         public string Gamekb;   // 构建依据的 gamekb 快照版本（"适配到此"，T6 决策用）
         public string AssetUrl; // zip 的 browser_download_url（github.com 原始 URL）
+        public string Notes;    // 发版说明（v2.2.0 可选：CHANGELOG 节原文，多行 markdown）
     }
 
     /// <summary>fetch 结果（T16/D）：Info=null 时 Status 区分失败原因——403=GitHub 限流，
@@ -171,6 +174,7 @@ public static class RepoClient
                 Asset = GetStr(u, "asset"),
                 Md5 = GetStr(u, "md5"),
                 Gamekb = GetStr(u, "gamekb"),
+                Notes = GetStr(u, "notes"), // v2.2.0 可选：GitHub 资产同带（发布侧双载体）
             };
             if (string.IsNullOrEmpty(info.Mod) || string.IsNullOrEmpty(info.Version) ||
                 string.IsNullOrEmpty(info.Asset) || string.IsNullOrEmpty(info.Md5) ||
@@ -302,6 +306,7 @@ public static class RepoClient
             {
                 Mod = GetStr(m, "mod"), Version = GetStr(m, "version"), Asset = GetStr(m, "asset"),
                 Md5 = GetStr(m, "md5"), Gamekb = GetStr(m, "gamekb"), AssetUrl = GetStr(m, "assetUrl"),
+                Notes = GetStr(m, "notes"), // v2.2.0 可选：不参与丢行判定
             };
             if (string.IsNullOrEmpty(info.Mod) || string.IsNullOrEmpty(info.Version) ||
                 string.IsNullOrEmpty(info.Asset) || string.IsNullOrEmpty(info.Md5) ||
@@ -332,6 +337,7 @@ public static class RepoClient
                 Asset = GetStr(u, "asset"),
                 Md5 = GetStr(u, "md5"),
                 Gamekb = GetStr(u, "gamekb"),
+                Notes = GetStr(u, "notes"), // v2.2.0 可选：不参与五字段完整性校验
             };
             if (string.IsNullOrEmpty(info.Mod) || string.IsNullOrEmpty(info.Version) ||
                 string.IsNullOrEmpty(info.Asset) || string.IsNullOrEmpty(info.Md5) ||
