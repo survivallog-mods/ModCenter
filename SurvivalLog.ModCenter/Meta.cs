@@ -150,31 +150,33 @@ internal static class Meta
         {
             Guid = "com.local.survivallog.cabineteverywhere",
             Name = "更好的储物柜", En = "CabinetEverywhere",
-            Desc = "全容器作为制作/烹饪/酿造等取料源直达；柜子页签标签筛选与场景固定视图。高度修改：24 包逐包可调（0=恢复原生），宽度恒 12；缩高放不下的物品掉在脚下。",
+            Desc = "全容器作为制作/烹饪/酿造等取料源直达；柜子页签标签筛选与场景固定视图。高度修改：25 包逐包可调（0=恢复原生），宽度恒 12（材料架恒 20）；缩高放不下的物品掉在脚下。",
             Groups =
             {
-                // 高度修改批（2026-11-07，spec 2026-11-07-bag-height-design §4.1 逐字）：
+                // 高度修改批（2026-11-07，spec 2026-11-07-bag-height-design §4.1 逐字；
+                // 2026-11-12 材料架批补 Height_110009——宽恒 20 例外，见键 Note；
+                // 2026-11-14 上限内建：背包 30/柜子 100（mod 侧常量夹持），MaxHeight 键退役）：
                 // 15 键 [Rail]，全部默认 0=恢复原生；Type=int 反射桥直写 SettingChanged→帧级生效。
                 new MetaGroup
                 {
-                    Title = "高度修改（宽度恒 12，0=恢复原生）",
+                    Title = "高度修改（0=恢复原生；上限内建不可改——背包≤30、柜子/抽屉≤100；宽度恒 12，材料架恒 20）",
                     Items =
                     {
-                        new MetaItem { Section = "Rail", Key = "BackpackHeight", Label = "背包高度", Badge = "now", Type = "int", Def = 0, Min = 0, Max = 50, St = 1, Note = "普通/登山/仓管背包共 9 包统一行数（原生 18）；天赋加行照常" },
-                        new MetaItem { Section = "Rail", Key = "Height_110002", Label = "小型置物架", Badge = "now", Type = "int", Def = 0, Min = 0, Max = 50, St = 1, Note = "原生 8" },
-                        new MetaItem { Section = "Rail", Key = "Height_110001", Label = "中型置物架", Badge = "now", Type = "int", Def = 0, Min = 0, Max = 50, St = 1, Note = "65 家具共用（含工具柜70006/烧烤架）；原生 10" },
-                        new MetaItem { Section = "Rail", Key = "Height_110000", Label = "大型置物架", Badge = "now", Type = "int", Def = 0, Min = 0, Max = 50, St = 1, Note = "原生 10" },
-                        new MetaItem { Section = "Rail", Key = "Height_110008", Label = "超大型置物架", Badge = "now", Type = "int", Def = 0, Min = 0, Max = 50, St = 1, Note = "原生 12" },
-                        new MetaItem { Section = "Rail", Key = "Height_10007", Label = "工具柜", Badge = "now", Type = "int", Def = 0, Min = 0, Max = 50, St = 1, Note = "家具 406；原生 7" },
-                        new MetaItem { Section = "Rail", Key = "Height_1004", Label = "双门冰箱", Badge = "now", Type = "int", Def = 0, Min = 0, Max = 50, St = 1, Note = "12 家具共用（冰柜/食堂冰箱/冷饮柜/医用冷藏柜等）；原生 7" },
-                        new MetaItem { Section = "Rail", Key = "Height_115000", Label = "双开门冰箱", Badge = "now", Type = "int", Def = 0, Min = 0, Max = 50, St = 1, Note = "原生 7" },
-                        new MetaItem { Section = "Rail", Key = "Height_115001", Label = "冰柜", Badge = "now", Type = "int", Def = 0, Min = 0, Max = 50, St = 1, Note = "5 家具共用（含豪华版双门冰箱）；原生 10" },
-                        new MetaItem { Section = "Rail", Key = "Height_115005", Label = "大容量冰柜", Badge = "now", Type = "int", Def = 0, Min = 0, Max = 50, St = 1, Note = "原生 10" },
-                        new MetaItem { Section = "Rail", Key = "Height_1021", Label = "自行车车筐", Badge = "now", Type = "int", Def = 0, Min = 0, Max = 50, St = 1, Note = "原生 4" },
-                        new MetaItem { Section = "Rail", Key = "Height_1022", Label = "小汽车后备箱", Badge = "now", Type = "int", Def = 0, Min = 0, Max = 50, St = 1, Note = "原生 8" },
-                        new MetaItem { Section = "Rail", Key = "Height_1023", Label = "SUV后备箱", Badge = "now", Type = "int", Def = 0, Min = 0, Max = 50, St = 1, Note = "与门口塑料袋共用；原生 10" },
-                        new MetaItem { Section = "Rail", Key = "DrawerHeight", Label = "工作台抽屉", Badge = "now", Type = "int", Def = 0, Min = 0, Max = 50, St = 1, Note = "基准行数：三档=H/H+1/H+2（升级加行保留）；原生链 5/6/7" },
-                        new MetaItem { Section = "Rail", Key = "MaxHeight", Label = "高度上限", Badge = "now", Type = "int", Def = 50, Min = 0, Max = 200, St = 1, Note = "逐包夹持；0=不封顶自担" }
+                        new MetaItem { Section = "Rail", Key = "BackpackHeight", Label = "背包高度", Badge = "now", Type = "int", Def = 0, Min = 0, Max = 30, St = 1, Note = "普通/登山/仓管背包共 9 包统一行数（原生 18）；天赋加行照常；上限 30" },
+                        new MetaItem { Section = "Rail", Key = "Height_110002", Label = "小型置物架", Badge = "now", Type = "int", Def = 0, Min = 0, Max = 100, St = 1, Note = "原生 8" },
+                        new MetaItem { Section = "Rail", Key = "Height_110001", Label = "中型置物架", Badge = "now", Type = "int", Def = 0, Min = 0, Max = 100, St = 1, Note = "65 家具共用（含工具柜70006/烧烤架）；原生 10" },
+                        new MetaItem { Section = "Rail", Key = "Height_110000", Label = "大型置物架", Badge = "now", Type = "int", Def = 0, Min = 0, Max = 100, St = 1, Note = "原生 10" },
+                        new MetaItem { Section = "Rail", Key = "Height_110008", Label = "超大型置物架", Badge = "now", Type = "int", Def = 0, Min = 0, Max = 100, St = 1, Note = "原生 12" },
+                        new MetaItem { Section = "Rail", Key = "Height_10007", Label = "工具柜", Badge = "now", Type = "int", Def = 0, Min = 0, Max = 100, St = 1, Note = "家具 406；原生 7" },
+                        new MetaItem { Section = "Rail", Key = "Height_1004", Label = "双门冰箱", Badge = "now", Type = "int", Def = 0, Min = 0, Max = 100, St = 1, Note = "12 家具共用（冰柜/食堂冰箱/冷饮柜/医用冷藏柜等）；原生 7" },
+                        new MetaItem { Section = "Rail", Key = "Height_115000", Label = "双开门冰箱", Badge = "now", Type = "int", Def = 0, Min = 0, Max = 100, St = 1, Note = "原生 7" },
+                        new MetaItem { Section = "Rail", Key = "Height_115001", Label = "冰柜", Badge = "now", Type = "int", Def = 0, Min = 0, Max = 100, St = 1, Note = "5 家具共用（含豪华版双门冰箱）；原生 10" },
+                        new MetaItem { Section = "Rail", Key = "Height_115005", Label = "大容量冰柜", Badge = "now", Type = "int", Def = 0, Min = 0, Max = 100, St = 1, Note = "原生 10" },
+                        new MetaItem { Section = "Rail", Key = "Height_1021", Label = "自行车车筐", Badge = "now", Type = "int", Def = 0, Min = 0, Max = 100, St = 1, Note = "原生 4" },
+                        new MetaItem { Section = "Rail", Key = "Height_1022", Label = "小汽车后备箱", Badge = "now", Type = "int", Def = 0, Min = 0, Max = 100, St = 1, Note = "原生 8" },
+                        new MetaItem { Section = "Rail", Key = "Height_1023", Label = "SUV后备箱", Badge = "now", Type = "int", Def = 0, Min = 0, Max = 100, St = 1, Note = "与门口塑料袋共用；原生 10" },
+                        new MetaItem { Section = "Rail", Key = "Height_110009", Label = "材料架", Badge = "now", Type = "int", Def = 0, Min = 0, Max = 100, St = 1, Note = "材料种类行数（每种一行）；原生 12。宽恒 20=每行件数不可改；超过 12 行右栏纵向滚动" },
+                        new MetaItem { Section = "Rail", Key = "DrawerHeight", Label = "工作台抽屉", Badge = "now", Type = "int", Def = 0, Min = 0, Max = 100, St = 1, Note = "基准行数：三档=H/H+1/H+2（升级加行保留）；原生链 5/6/7；逐档夹 100" }
                     }
                 },
                 // 负重批（2026-11-07 作者令）：背包负重调整新增 + 原独立 mod CabinetBurden 并回；
