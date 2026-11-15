@@ -734,8 +734,21 @@ internal static class ConfigBridge
             var tail = mm.Guid.Substring(mm.Guid.LastIndexOf('.') + 1);
             if (string.Equals(tail, guidOrName, StringComparison.OrdinalIgnoreCase)) return EffectiveOf(mm);
         }
+        // mcSpec 2 阶段 3：Meta 表仅剩临时登记——迁移成员经 roster 合成基线路由（投影同源；
+        // 短名/尾段匹配语义与上方 Meta 循环一致）
+        foreach (var r in Meta.Roster)
+        {
+            if (string.Equals(r.Guid, guidOrName, StringComparison.OrdinalIgnoreCase)) return EffectiveOf(RosterBase(r));
+            if (string.Equals(r.En, guidOrName, StringComparison.OrdinalIgnoreCase)) return EffectiveOf(RosterBase(r));
+            var tail = r.Guid.Substring(r.Guid.LastIndexOf('.') + 1);
+            if (string.Equals(tail, guidOrName, StringComparison.OrdinalIgnoreCase)) return EffectiveOf(RosterBase(r));
+        }
         return null;
     }
+
+    /// <summary>roster 行 → 合成基线 MetaMod（在链走清单投影的入口；未安装时仅供路由键）。</summary>
+    private static MetaMod RosterBase(Meta.RosterEntry r) =>
+        new() { Guid = r.Guid, Name = r.Name, En = r.En, Desc = r.Desc };
 
     /// <summary>mcSpec 2：写路径与快照同源投影——TrySet/SetModEnabled 的白名单/启停键随清单生效
     /// （有清单=清单键集；无=Meta 冻结表原样）。主线程（HandleSet/SetModEnabled 均 Pump 上下文）。</summary>
@@ -1007,6 +1020,8 @@ internal static class ConfigBridge
     {
         foreach (var mm in Meta.Mods)
             if (string.Equals(mm.Guid, guidLower, StringComparison.OrdinalIgnoreCase)) return mm.Name;
+        var pr = Meta.RosterOf(guidLower); // mcSpec 2 阶段 3：未安装成员的待生效明细显示名（roster 补位）
+        if (pr != null) return pr.Name;
         if (string.Equals(guidLower, ModCenterPlugin.Guid, StringComparison.OrdinalIgnoreCase))
             return "Mod 管理中心"; // 与 HandleOrderGet 的自身显示名一致
         foreach (var p in LoadedPlugins())
@@ -1768,6 +1783,7 @@ internal static class ConfigBridge
 
         var nameOf = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
         foreach (var mm in Meta.Mods) nameOf[mm.Guid] = mm.Name;
+        foreach (var r in Meta.Roster) nameOf[r.Guid] = r.Name; // mcSpec 2 阶段 3：roster 补位（未安装行也进排序名单）
         var plugins = LoadedPlugins();
 
         var sb = new StringBuilder(2048);
@@ -2162,7 +2178,8 @@ internal static class ConfigBridge
         if (string.IsNullOrEmpty(guid)) return null;
         foreach (var mm in Meta.Mods)
             if (string.Equals(mm.Guid, guid, StringComparison.OrdinalIgnoreCase)) return mm;
-        return null;
+        var r = Meta.RosterOf(guid); // mcSpec 2 阶段 3：冲突行中文名/Who 匹配 En——roster 合成基线补位
+        return r != null ? RosterBase(r) : null;
     }
 
     /// <summary>该行应展示的 L1 条目：①本行自身命中（GUID→dll 兜底，见 Meta.MatchL1）；

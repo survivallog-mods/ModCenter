@@ -337,8 +337,18 @@ internal static class ThirdParty
         if (cfg == null || plugins == null) return mm; // dll 不在链上（路由③由调用方处理）或枚举不可用
         if (!plugins.TryGetValue(mm.Guid, out var pi) || pi?.Instance == null) return mm;
         man = ManifestOf(pi);
-        return man == null ? mm : Project(mm, man);
+        if (man == null)
+        {
+            // 阶段 3（spec §5）：在链套件无清单 = 旧版 dll——页面退化为仅启停；一次性日志防刷屏
+            // （本方法只在主线程调用）。DailySurprise 等临时登记不在 roster，不误报。
+            if (Meta.RosterOf(mm.Guid) != null && NoManifestLog.Add(mm.Guid))
+                Log($"清单缺失 {mm.En}：在链但无有效 modcenter.json（旧版 dll？）——面板退化为仅启停，更新该 mod 获得配置页");
+            return mm;
+        }
+        return Project(mm, man);
     }
+
+    private static readonly HashSet<string> NoManifestLog = new();
 
     /// <summary>纯投影（自检可离线调）：McManifest → MetaMod。display/en/summary 缺项回退基线 mm；
     /// groups/items 按 order 稳定排序；lists→OvrHost/BagOvrHost；enabled→EnabledSection/Key
