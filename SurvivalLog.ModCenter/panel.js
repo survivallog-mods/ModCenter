@@ -627,10 +627,13 @@
         + (ST.sel === m.guid ? ' __mc-sel' : '') + '" data-interactive data-guid="' + esc(m.guid) + '">'
         + '<span class="__mc-st"></span><span class="__mc-nm">' + esc(m.name) + '</span>'
         + icsHtml(m)
-        /* 必修 7：dll 不在场（未安装）→ 开关锁定，去仓库安装走详情页入口 */
+        /* 必修 7：dll 不在场（未安装）→ 开关锁定，去仓库安装走详情页入口；
+         * mcSpec 2：清单 enabled:"none" → 无总开关，行恒亮锁定（不发 MC_TOGGLE_MOD） */
         + (m.missing
           ? '<span class="__mc-mini-sw __mc-lock" title="\u672a\u5b89\u88c5\uff1a\u8fdb\u8be6\u60c5\u9875\u5728\u300c\u7ef4\u62a4\u300d\u5b89\u88c5"></span>'
-          : swBtn(m.enabled, ' data-act="toggle" data-guid="' + esc(m.guid) + '"')) + '</div>';
+          : (m.noToggle
+            ? '<span class="__mc-mini-sw __mc-on __mc-lock" title="\u8be5 mod \u65e0\u603b\u5f00\u5173\uff1a\u4fdd\u6301\u5f00\u542f\uff0c\u9762\u677f\u4e0d\u652f\u6301\u542f\u505c"></span>'
+            : swBtn(m.enabled, ' data-act="toggle" data-guid="' + esc(m.guid) + '"'))) + '</div>';
     }
     h += '<div class="__mc-cat">\u9762\u677f\u81ea\u8eab</div>';
     /* v2.0.4：自身行挂仓库徽标（快照 self.ics；data-guid 用真实 GUID——findMod 路由到
@@ -1197,8 +1200,15 @@
     { id: 2002,   n: '\u5564\u9152\u7bb1', h: 3 },
     { id: 3003,   n: '\u7eb8\u7bb1\u5806/\u624b\u63a8\u8f66', h: 6 }
   ];
-  function ucbCabOf(id) {
-    for (var i = 0; i < UNCOMMON_CABS.length; i++) if (UNCOMMON_CABS[i].id === id) return UNCOMMON_CABS[i];
+  /* mcSpec 2：ucb 白名单双源——快照 item.cabs（清单声明，{id,name,native}→{id,n,h}）优先，
+   * UNCOMMON_CABS 静态表兜底（旧 dll Meta 路径不带 cabs；阶段 3 删表）。 */
+  function ucbCabs(it) {
+    if (it && it.cabs && it.cabs.length)
+      return it.cabs.map(function (c) { return { id: c.id, n: c.name, h: c.native }; });
+    return UNCOMMON_CABS;
+  }
+  function ucbCabOf(cabs, id) {
+    for (var i = 0; i < cabs.length; i++) if (cabs[i].id === id) return cabs[i];
     return null;
   }
   function ucbItemOf(m) {
@@ -1236,23 +1246,25 @@
   function ucbDdShow(widget, m) {
     var pop = widget.querySelector('.__mc-ovr-dd-pop');
     var it = ucbItemOf(m);
+    var cabs = ucbCabs(it); // mcSpec 2：cabs 双源（快照优先/静态表兜底）
     var have = {};
     ucbParse(it ? it.v : '').forEach(function (o) { have[o.id] = true; });
     var h = '';
-    for (var i = 0; i < UNCOMMON_CABS.length; i++)
-      if (!have[UNCOMMON_CABS[i].id])
-        h += '<div class="__mc-ovr-dd-item __mc-ovr-dd-opt" data-act="ucb-dd-opt" data-id="' + UNCOMMON_CABS[i].id + '">'
-          + esc(UNCOMMON_CABS[i].n) + '<span class="__mc-ovr-dd-cnt">\u539f\u751f ' + UNCOMMON_CABS[i].h + '</span></div>';
-    pop.innerHTML = h || '<div class="__mc-ovr-dd-item" style="color:#6b7180">\u5168\u90e8 13 \u79cd\u67dc\u5b50\u5df2\u5728\u5217</div>';
+    for (var i = 0; i < cabs.length; i++)
+      if (!have[cabs[i].id])
+        h += '<div class="__mc-ovr-dd-item __mc-ovr-dd-opt" data-act="ucb-dd-opt" data-id="' + cabs[i].id + '">'
+          + esc(cabs[i].n) + '<span class="__mc-ovr-dd-cnt">\u539f\u751f ' + cabs[i].h + '</span></div>';
+    pop.innerHTML = h || '<div class="__mc-ovr-dd-item" style="color:#6b7180">\u5168\u90e8 ' + cabs.length + ' \u79cd\u67dc\u5b50\u5df2\u5728\u5217</div>';
     pop.hidden = false;
     ovrDdPlace(widget);
   }
   /* 行渲染（itemHtml 的 t=ucb 分支调用；一组多行：已配置行×N + 尾部添加行） */
   function ucbHtml(m, it) {
     var rows = ucbParse(it.v);
+    var cabs = ucbCabs(it); // mcSpec 2：cabs 双源
     var h = '';
     for (var i = 0; i < rows.length; i++) {
-      var cab = ucbCabOf(rows[i].id);
+      var cab = ucbCabOf(cabs, rows[i].id);
       var name = cab ? cab.n : ('\u67dc\u5b50 #' + rows[i].id); // 白名单外手输残串：照列可删（C# 侧已忽略）
       h += '<div class="__mc-item">'
         + '<div class="__mc-info">'
@@ -1551,8 +1563,14 @@
     ] },
   };
   /* 标题行右侧「使用说明」按钮（无说明的 mod 不渲染；button 天然进 clickThrough 白名单） */
-  function usageBtnHtml(guid) {
-    if (!USAGE[guid]) return '';
+  /* mcSpec 2：使用说明双源——快照 mod.usage（清单内嵌）优先，USAGE 静态表兜底（迁移过渡，
+   * 阶段 3 清表仅剩 __self）；两者皆无 = 按钮不渲染（现状同形）。 */
+  function usageOf(guid, m) {
+    if (m && m.usage) return m.usage;
+    return USAGE[guid] || null;
+  }
+  function usageBtnHtml(guid, m) {
+    if (!usageOf(guid, m)) return '';
     return '<span class="__mc-sp"></span>'
       + '<button type="button" class="__mc-btn __mc-btn-mini" data-act="usage" data-guid="' + esc(guid) + '">\u4f7f\u7528\u8bf4\u660e</button>';
   }
@@ -1573,7 +1591,7 @@
   /* 按钮点击（wireCfg data-act=usage 分支调用）：名字运行时取
    * （自身=SELF_NAME；mod=findMod；陈旧 guid 兜底显示原串），静态内容直接开弹窗。 */
   function openUsageModal(guid) {
-    var u = USAGE[guid];
+    var u = usageOf(guid, findMod(guid)); // __self 不在 mods → findMod 虚拟行无 usage → 走 USAGE 表（永久静态）
     if (!u) return;
     var name = guid === SELF_GUID ? SELF_NAME : ((findMod(guid) || {}).name || guid);
     openModal(usageModalHtml(name, u));
@@ -1611,7 +1629,7 @@
       : (m.missing
         ? '\u672a\u5b89\u88c5\uff1a\u6b64\u9875\u53ea\u8bfb\u3002\u53ef\u5728\u4e0b\u65b9\u300c\u7ef4\u62a4\u300d\u5b89\u88c5\u3002'
         : '\u5df2\u505c\u7528\uff1a\u6539\u52a8\u4ecd\u4f1a\u4fdd\u5b58\uff0c\u91cd\u65b0\u542f\u7528\u540e\u751f\u6548\u3002');
-    var h = shellWarnHtml() + '<div class="__mc-mod-title"><h2>' + esc(m.name) + '</h2><span class="__mc-en">' + esc(m.en) + '</span>' + verHtml(m.ver) + usageBtnHtml(m.guid) + '</div>'
+    var h = shellWarnHtml() + '<div class="__mc-mod-title"><h2>' + esc(m.name) + '</h2><span class="__mc-en">' + esc(m.en) + '</span>' + verHtml(m.ver) + usageBtnHtml(m.guid, m) + '</div>'
       + '<div class="__mc-mod-desc">' + esc(m.desc) + '</div>'
       + '<div class="__mc-stop-banner' + (m.enabled ? '' : ' __mc-show') + '">' + banner + '</div>';
     for (var gi = 0; gi < m.groups.length; gi++) {
@@ -1622,7 +1640,12 @@
       if (gh) h += '<div class="__mc-grp"><h3>' + esc(m.groups[gi].title) + '</h3>' + gh + '</div>';   // 全隐组连标题一起隐
     }
     if (m.groups.length === 0) {
-      h += '<div class="__mc-grp"><h3>\u914d\u7f6e</h3>'
+      /* mcSpec 2：未安装最小行（roster 路由③）——不渲染置灰控件壳，给安装引导
+       * （安装入口在下方维护区，G4 直达语义不变）；已装空组=仅启停形态文案照旧 */
+      h += m.missing
+        ? '<div class="__mc-grp"><h3>\u5b89\u88c5</h3>'
+        + '<div class="__mc-ovr-empty">\u672a\u5b89\u88c5\uff1a\u6b64\u9875\u6682\u65e0\u53ef\u914d\u7f6e\u9879\u3002\u53bb\u4e0b\u65b9\u300c\u7ef4\u62a4\u300d\u533a\u5b89\u88c5\540e\uff0c\u914d\u7f6e\u9879\u4f1a\u5728\u8fd9\u91cc\u51fa\u73b0\u3002</div></div>'
+        : '<div class="__mc-grp"><h3>\u914d\u7f6e</h3>'
         + '<div class="__mc-ovr-empty">\u8be5 mod \u53ea\u6709\u542f\u7528 / \u505c\u7528\uff0c\u6ca1\u6709\u5176\u4ed6\u8bbe\u7f6e\u3002</div></div>';
     }
     if (m.ovr) h += ovrHtml(m);
@@ -1876,7 +1899,7 @@
   }
 
   function usageIntroHtml(guid) {
-    var u = USAGE[guid];
+    var u = usageOf(guid, findMod(guid)); // mcSpec 2：已装 mod 用清单 usage；未装/未迁移回 USAGE 表
     if (!u) return '<div class="__mc-m-sec"><div class="__mc-m-h">\u529f\u80fd\u8bf4\u660e</div>'
       + '<div class="__mc-m-txt">\u751f\u5b58\u65e5\u5fd7\u5957\u4ef6\u6a21\u7ec4\uff08\u672c\u5730\u7ef4\u62a4\uff09\uff0c\u88c5\u597d\u5373\u751f\u6548\uff0c\u53c2\u6570\u5728\u914d\u7f6e\u9875\u8c03\u6574\u3002</div></div>';
     var h = '<div class="__mc-m-sec"><div class="__mc-m-h">\u529f\u80fd\u8bf4\u660e</div>'
@@ -2157,6 +2180,7 @@
     if (guid === '__self') return; // 防呆：面板不可停用自身
     var m = findMod(guid);
     if (!m) return;
+    if (m.noToggle) return; // mcSpec 2：无总开关（锁定开关本不发，防御兼容路径）
     m.enabled = !m.enabled;
     renderSide(); renderCfg();
     window.__mcOutbox.push({ type: 'MC_TOGGLE_MOD', guid: guid, enabled: m.enabled });
@@ -2372,7 +2396,7 @@
         var ucbIt = ucbItemOf(m);
         if (!ucbIt) return;
         var ucbId = +ucbO.getAttribute('data-id');
-        var ucbCab = ucbCabOf(ucbId);
+        var ucbCab = ucbCabOf(ucbCabs(ucbIt), ucbId);
         closeAllOvrDd();
         var ucbList = ucbParse(ucbIt.v);
         if (ucbList.some(function (o) { return o.id === ucbId; })) {
@@ -2393,7 +2417,7 @@
         var ucbIt2 = ucbItemOf(m);
         if (!ucbIt2) return;
         var ucbGone = +ucbD.getAttribute('data-id');
-        var ucbGoneCab = ucbCabOf(ucbGone);
+        var ucbGoneCab = ucbCabOf(ucbCabs(ucbIt2), ucbGone);
         ucbIt2.v = ucbSerialize(ucbParse(ucbIt2.v).filter(function (o) { return o.id !== ucbGone; }));
         renderCfg();
         ucbCommit(m, ucbIt2);
@@ -2499,7 +2523,7 @@
         uo.h = uv;
         uIt.v = ucbSerialize(uList);
         syncSibling(el, uv);
-        var uCab = ucbCabOf(uId);
+        var uCab = ucbCabOf(ucbCabs(uIt), uId);
         var uCk = el.closest('.__mc-item');
         if (uCk) {
           var uCkEl = uCk.querySelector('.__mc-ck');
