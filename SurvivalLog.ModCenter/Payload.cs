@@ -74,6 +74,8 @@ public sealed class ModInfo
     public bool? Absent; // 第三方缺席行（任务 16）：dll 已禁用未加载（面板补行供再启用；套件 null 不输出）
     public bool Missing; // 套件行 cfg==null（dll 不在场=已卸载/未安装）——面板呈现"未安装/去仓库安装"态（终审必修 7）
     public int? Tier;    // 第三方接入档（任务 15）：null/省略 = Tier 0 通用页；1 = 清单定制页（fixture/面板判别）
+    public bool? NoToggle; // mcSpec 2（spec 2026-11-15 §1）：清单 enabled:"none" 无总开关——面板行开关锁定态；null/省略不输出
+    public string UsageJson; // mcSpec 2：使用说明预序列化 JSON（形状 {"i":..,"secs":[{"h":..,"ls":[..]}]}，JsonW.UsageJsonOf 构造）；null 不输出（panel USAGE 表兜底过渡，阶段 3 退役）
     public List<GroupInfo> Groups = new();
     public List<OvrInfo> Ovr; // 仅动作加速挂（其他.Overrides 解析结果）；null 不输出该字段
     public List<ActInfo> Acts; // 仅动作加速挂（QuickActionCatalog.txt 动作目录，v2.0.7 面板下拉）；null 不输出（旧 dll 无文件→面板回退 ID 手输）
@@ -90,6 +92,7 @@ public sealed class ModInfo
           .Append(",\"enabled\":").Append(Enabled ? "true" : "false");
         if (Soft == true) sb.Append(",\"soft\":true");       // 任务 16：软停语义标记（仅第三方输出）
         if (Absent == true) sb.Append(",\"absent\":true");   // 任务 16：dll 已禁用缺席行（仅第三方输出）
+        if (NoToggle == true) sb.Append(",\"noToggle\":true"); // mcSpec 2：无总开关（面板锁定行开关）
         if (Missing) sb.Append(",\"missing\":true");         // 终审必修 7：套件行 dll 不在场（未安装态）
         if (Tier != null) sb.Append(",\"tier\":").Append(Tier.Value.ToString(System.Globalization.CultureInfo.InvariantCulture));
         sb.Append(",\"groups\":[");
@@ -145,6 +148,7 @@ public sealed class ModInfo
             }
             sb.Append(']');
         }
+        if (!string.IsNullOrEmpty(UsageJson)) sb.Append(",\"usage\":").Append(UsageJson); // mcSpec 2：使用说明（预序列化）
         sb.Append('}');
     }
 }
@@ -181,6 +185,15 @@ public sealed class ItemInfo
     public List<string> Opts; // sel 选项（enum 名/白名单值/Meta 兜底）
     public string VisK; // 条件显示宿主项完整展示键（如 "General.Difficulty"；null=恒显示）
     public string VisV; // 宿主项当前值==VisV 才显示（string 比较，panel 侧即时判定）
+    public List<CabInfo> Cabs; // mcSpec 2：ucb 柜子白名单（清单 cabs 透传，面板下拉数据源）；null/空不输出
+
+    /// <summary>ucb 柜子白名单行（mcSpec 2，spec 2026-11-15 §1）：id=BagId、name=显示名、native=原生行数。</summary>
+    public sealed class CabInfo
+    {
+        public long Id;
+        public string Name;
+        public double Native;
+    }
 
     internal void Write(StringBuilder sb)
     {
@@ -195,6 +208,18 @@ public sealed class ItemInfo
         if (Fail != null) sb.Append(",\"fail\":").Append(JsonW.Str(Fail)); // Tier 2 failed 状态（任务 16）
         if (Note != null) sb.Append(",\"note\":").Append(JsonW.Str(Note));
         if (VisK != null) sb.Append(",\"vk\":").Append(JsonW.Str(VisK)).Append(",\"vv\":").Append(JsonW.Str(VisV));
+        if (Cabs != null && Cabs.Count > 0) // mcSpec 2：ucb 白名单（空不输出——旧面板无感）
+        {
+            sb.Append(",\"cabs\":[");
+            for (var i = 0; i < Cabs.Count; i++)
+            {
+                if (i > 0) sb.Append(',');
+                sb.Append("{\"id\":").Append(Cabs[i].Id.ToString(CultureInfo.InvariantCulture))
+                  .Append(",\"name\":").Append(JsonW.Str(Cabs[i].Name))
+                  .Append(",\"native\":").Append(JsonW.Num(Cabs[i].Native)).Append('}');
+            }
+            sb.Append(']');
+        }
         if (Opts != null && Opts.Count > 0)
         {
             sb.Append(",\"opts\":[");
@@ -523,9 +548,58 @@ public sealed class PatchScanItem
 }
 
 /// <summary>手写 JSON 片段工具（转义 + 不变文化数字）。</summary>
-internal static class JsonW
-{
-    internal static string Str(string s)
+    internal static class JsonW
+    {
+        /// <summary>mcSpec 2 使用说明预序列化：{"i":intro,"secs":[{"h":heading,"ls":[bullets]}]}（形状镜像 panel USAGE 表
+        /// 内部结构，Task 5 面板仅换数据源）；intro/分段缺失逐级省略字段；全空返回 null（ModInfo.UsageJson 不输出）。</summary>
+        internal static string UsageJsonOf(string intro, IEnumerable<(string Heading, IEnumerable<string> Bullets)> secs)
+        {
+            var hasIntro = !string.IsNullOrEmpty(intro);
+            var hasSecs = false;
+            if (secs != null)
+                foreach (var _ in secs) { hasSecs = true; break; }
+            if (!hasIntro && !hasSecs) return null;
+            var sb = new StringBuilder(128);
+            sb.Append('{');
+            if (hasIntro) sb.Append("\"i\":").Append(Str(intro));
+            if (hasSecs)
+            {
+                if (hasIntro) sb.Append(',');
+                sb.Append("\"secs\":[");
+                var first = true;
+                foreach (var (h, ls) in secs)
+                {
+                    if (!first) sb.Append(',');
+                    first = false;
+                    sb.Append("{");
+                    if (!string.IsNullOrEmpty(h)) sb.Append("\"h\":").Append(Str(h));
+                    if (ls != null)
+                    {
+                        var any = false;
+                        foreach (var _ in ls) { any = true; break; }
+                        if (any)
+                        {
+                            if (!string.IsNullOrEmpty(h)) sb.Append(',');
+                            sb.Append("\"ls\":[");
+                            var f2 = true;
+                            foreach (var b in ls)
+                            {
+                                if (!f2) sb.Append(',');
+                                f2 = false;
+                                sb.Append(Str(b));
+                            }
+                            sb.Append(']');
+                        }
+                    }
+                    sb.Append('}');
+                }
+                sb.Append(']');
+            }
+            sb.Append('}');
+            return sb.ToString();
+        }
+
+        internal static string Str(string s)
     {
         if (string.IsNullOrEmpty(s)) return "\"\"";
         var sb = new StringBuilder(s.Length + 8);
