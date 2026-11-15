@@ -933,6 +933,8 @@
   }
 
   function itemHtml(m, it, gi, ii) {
+    /* 不常用柜子清单（2026-11-15）：一组多行（已配置行+尾部添加行），不走单项壳 */
+    if (it.t === 'ucb') return ucbHtml(m, it);
     var bd = badgeOf(it.b);
     /* 任务 16：Tier 2 failed 状态（QueryStates 回报）→ 项置灰锁控件 + 红字原因（指南 §4.1）；
      * 必修 7：未安装页面（m.missing）整页控件只读（dll 不在场，写入必被拒）。 */
@@ -1149,6 +1151,107 @@
       }
     }
     return h + '</div>';
+  }
+
+  /* ---- 不常用柜子高度（2026-11-15，CabinetEverywhere Rail.UncommonHeights ↔ Type=ucb 项）----
+   * 动作覆盖同款交互裁剪版：尾部下拉选柜子→自动加一行（默认原生行数）→滑条/数值调高→
+   * ✕ 删行=恢复原生。只开高度（宽恒 12）。状态单源=锚项 it.v 整串（"id:h,…"），改动即
+   * 重序列化写回 it.v 并 MC_SET（C# TrySet 绑定 string entry→SettingChanged 帧级生效）。
+   * 名单 13 包与 CabinetEverywhere RailUi.UncommonBagIds 同源（gamekb 2026-11-12 交叉实证：
+   * 可购纯家用储物柜，零场景件/零机器；柜子1/2/3、箱子族3002 等混场景件的包不收）。 */
+  var UCB_SECTION = 'Rail', UCB_KEY = 'UncommonHeights';
+  var UNCOMMON_CABS = [
+    { id: 1006,   n: '\u77ee\u67dc\uff08\u62bd\u5c49\u67dc\uff09', h: 6 },   // 矮柜（抽屉柜）
+    { id: 10002,  n: '\u91d1\u5c5e\u67dc', h: 8 },                            // 金属柜（含普通储物柜）
+    { id: 10005,  n: '\u91d1\u5c5e\u67dc\uff08\u751f\u9508\uff09', h: 6 },   // 金属柜（生锈）
+    { id: 10006,  n: '\u94c1\u76ae\u67dc\uff08\u51f9\u9677\uff09', h: 10 },  // 铁皮柜（凹陷）
+    { id: 10008,  n: '\u91d1\u5c5e\u67dc\uff08\u53d8\u4f53\uff09', h: 8 },   // 金属柜（变体）
+    { id: 10009,  n: '\u50a8\u7269\u67dc\uff08\u53d8\u4f53\uff09', h: 4 },   // 储物柜（变体）
+    { id: 110003, n: '\u5e8a\u5934\u67dc', h: 6 },
+    { id: 110004, n: '\u5927\u8863\u67dc', h: 10 },
+    { id: 110005, n: '\u7384\u5173\u53f0', h: 7 },
+    { id: 110006, n: '\u5c0f\u8863\u67dc', h: 3 },
+    { id: 10003,  n: '\u5de5\u5177\u7bb1', h: 3 },
+    { id: 2002,   n: '\u5564\u9152\u7bb1', h: 3 },
+    { id: 3003,   n: '\u7eb8\u7bb1\u5806/\u624b\u63a8\u8f66', h: 6 }
+  ];
+  function ucbCabOf(id) {
+    for (var i = 0; i < UNCOMMON_CABS.length; i++) if (UNCOMMON_CABS[i].id === id) return UNCOMMON_CABS[i];
+    return null;
+  }
+  function ucbItemOf(m) {
+    for (var g = 0; g < m.groups.length; g++)
+      for (var i = 0; i < m.groups[g].items.length; i++)
+        if (m.groups[g].items[i].t === 'ucb') return m.groups[g].items[i];
+    return null;
+  }
+  function ucbParse(v) {
+    var list = [];
+    (v || '').split(',').forEach(function (seg) {
+      seg = seg.trim();
+      if (!seg) return;
+      var ix = seg.indexOf(':');
+      if (ix <= 0) return;
+      var id = parseInt(seg.substring(0, ix), 10), h = parseInt(seg.substring(ix + 1), 10);
+      if (!isNaN(id) && id > 0 && !isNaN(h)) list.push({ id: id, h: h });
+    });
+    return list;
+  }
+  function ucbSerialize(list) {
+    return list.slice().sort(function (a, b) { return a.id - b.id; })
+      .map(function (o) { return o.id + ':' + o.h; }).join(',');
+  }
+  function ucbCommit(m, it) {
+    window.__mcOutbox.push({ type: 'MC_SET', guid: m.guid, section: UCB_SECTION, key: UCB_KEY, value: it.v });
+  }
+  /* 尾部下拉（复用 ovr-dd 组件壳/CSS：单级列表，无搜索——13 项直列；已配置的不再列出） */
+  function ucbDdHtml() {
+    return '<div class="__mc-ovr-dd">'
+      + '<button type="button" class="__mc-ovr-dd-btn __mc-ovr-dd-ph" data-act="ucb-dd-toggle">\u9009\u62e9\u67dc\u5b50\u2026<span class="__mc-ovr-dd-caret">\u25be</span></button>'
+      + '<div class="__mc-ovr-dd-pop" hidden></div>'
+      + '</div>';
+  }
+  function ucbDdShow(widget, m) {
+    var pop = widget.querySelector('.__mc-ovr-dd-pop');
+    var it = ucbItemOf(m);
+    var have = {};
+    ucbParse(it ? it.v : '').forEach(function (o) { have[o.id] = true; });
+    var h = '';
+    for (var i = 0; i < UNCOMMON_CABS.length; i++)
+      if (!have[UNCOMMON_CABS[i].id])
+        h += '<div class="__mc-ovr-dd-item __mc-ovr-dd-opt" data-act="ucb-dd-opt" data-id="' + UNCOMMON_CABS[i].id + '">'
+          + esc(UNCOMMON_CABS[i].n) + '<span class="__mc-ovr-dd-cnt">\u539f\u751f ' + UNCOMMON_CABS[i].h + '</span></div>';
+    pop.innerHTML = h || '<div class="__mc-ovr-dd-item" style="color:#6b7180">\u5168\u90e8 13 \u79cd\u67dc\u5b50\u5df2\u5728\u5217</div>';
+    pop.hidden = false;
+    ovrDdPlace(widget);
+  }
+  /* 行渲染（itemHtml 的 t=ucb 分支调用；一组多行：已配置行×N + 尾部添加行） */
+  function ucbHtml(m, it) {
+    var rows = ucbParse(it.v);
+    var h = '';
+    for (var i = 0; i < rows.length; i++) {
+      var cab = ucbCabOf(rows[i].id);
+      var name = cab ? cab.n : ('\u67dc\u5b50 #' + rows[i].id); // 白名单外手输残串：照列可删（C# 侧已忽略）
+      h += '<div class="__mc-item">'
+        + '<div class="__mc-info">'
+        + '<div class="__mc-lb">' + esc(name) + '\uff08\u539f\u751f ' + (cab ? cab.h : '?') + ' \u884c\uff09</div>'
+        + '<div class="__mc-ck">' + UCB_SECTION + '.' + UCB_KEY + ' \u00b7 ' + rows[i].id + ':' + rows[i].h + '</div>'
+        + '</div>'
+        + '<div class="__mc-ctl">'
+        + '<input type="range" min="1" max="100" step="1" value="' + rows[i].h + '" data-act="ucb-set" data-id="' + rows[i].id + '">'
+        + '<input type="text" class="__mc-numbox" inputmode="numeric" data-num="int" value="' + rows[i].h + '" data-act="ucb-set" data-id="' + rows[i].id + '">'
+        + '</div>'
+        + '<div class="__mc-badge __mc-b-now">\u26a1 \u7acb\u5373\u751f\u6548</div>'
+        + '<button type="button" class="__mc-del" data-act="ucb-del" data-id="' + rows[i].id + '" title="\u5220\u9664\u5373\u6062\u590d\u539f\u751f\u9ad8\u5ea6">\u2715</button>'
+        + '</div>';
+    }
+    if (!rows.length)
+      h += '<div class="__mc-ovr-empty">\u6682\u65e0\u6761\u76ee\u3002\u4e0b\u62c9\u9009\u62e9\u8981\u8c03\u9ad8\u5ea6\u7684\u67dc\u5b50\uff0c\u9009\u5b8c\u81ea\u52a8\u52a0\u4e00\u884c\uff08\u9ed8\u8ba4\u539f\u751f\u884c\u6570\uff09\u3002</div>';
+    h += '<div class="__mc-item">'
+      + '<div class="__mc-info">' + ucbDdHtml() + '</div>'
+      + '<div class="__mc-ctl"><span class="__mc-ovr-hint">\u9009\u5b8c\u67dc\u5b50\u81ea\u52a8\u6dfb\u52a0\uff08\u9ed8\u8ba4\u539f\u751f\u884c\u6570\uff0c\u53ef\u518d\u8c03\uff1b\u5220\u9664\u5373\u6062\u590d\u539f\u751f\uff09</span></div>'
+      + '</div>';
+    return h;
   }
 
   /* ================= v2 任务 10：卸载动作区 + 确认弹窗（原型 delHtml 照抄） ================= */
@@ -2227,6 +2330,51 @@
           bovCommit(m);
           toast('\u5df2\u5220\u9664\uff1a' + m.name + ' \u00b7 \u67dc\u5b50 #' + bgone, 'now');
         }
+        return;
+      }
+      /* 不常用柜子：尾部下拉 开/关（复用 ovr-dd 弹层关闭纪律——同时只有一个开） */
+      var ucbT = t.closest('[data-act="ucb-dd-toggle"]');
+      if (ucbT) {
+        var ucbW = ucbT.closest('.__mc-ovr-dd');
+        var ucbPop = ucbW.querySelector('.__mc-ovr-dd-pop');
+        var ucbWasOpen = !ucbPop.hidden;
+        closeAllOvrDd();
+        if (!ucbWasOpen) ucbDdShow(ucbW, m);
+        return;
+      }
+      /* 不常用柜子：下拉选中 → 加一行（默认原生行数；已在列=提示） */
+      var ucbO = t.closest('[data-act="ucb-dd-opt"]');
+      if (ucbO) {
+        var ucbIt = ucbItemOf(m);
+        if (!ucbIt) return;
+        var ucbId = +ucbO.getAttribute('data-id');
+        var ucbCab = ucbCabOf(ucbId);
+        closeAllOvrDd();
+        var ucbList = ucbParse(ucbIt.v);
+        if (ucbList.some(function (o) { return o.id === ucbId; })) {
+          toast('\u8be5\u67dc\u5b50\u5df2\u5728\u5217\uff0c\u53ef\u76f4\u63a5\u62d6\u6ed1\u6761\u8c03\u6574');
+          renderCfg();
+          return;
+        }
+        ucbList.push({ id: ucbId, h: ucbCab ? ucbCab.h : 6 });
+        ucbIt.v = ucbSerialize(ucbList);
+        renderCfg();
+        ucbCommit(m, ucbIt);
+        toast('\u5df2\u6dfb\u52a0\uff1a' + m.name + ' \u00b7 ' + (ucbCab ? ucbCab.n : '#' + ucbId) + '\uff08\u9ed8\u8ba4\u539f\u751f ' + (ucbCab ? ucbCab.h : '?') + ' \u884c\uff0c\u6ed1\u6761\u53ef\u8c03\uff09', 'now');
+        return;
+      }
+      /* 不常用柜子：删除行=恢复原生（清单移除该 id，引擎写回原生高） */
+      var ucbD = t.closest('[data-act="ucb-del"]');
+      if (ucbD) {
+        var ucbIt2 = ucbItemOf(m);
+        if (!ucbIt2) return;
+        var ucbGone = +ucbD.getAttribute('data-id');
+        var ucbGoneCab = ucbCabOf(ucbGone);
+        ucbIt2.v = ucbSerialize(ucbParse(ucbIt2.v).filter(function (o) { return o.id !== ucbGone; }));
+        renderCfg();
+        ucbCommit(m, ucbIt2);
+        toast('\u5df2\u5220\u9664\uff1a' + m.name + ' \u00b7 ' + (ucbGoneCab ? ucbGoneCab.n : '#' + ucbGone) + ' \u2192 \u6062\u590d\u539f\u751f\u9ad8\u5ea6', 'now');
+        return;
       }
     });
 
@@ -2311,6 +2459,30 @@
         if (String(bv) !== el.value) el.value = String(bv); // 钳制值回写显示
         throttleSend('bov' + el.getAttribute('data-idx') + bk, function () { bovCommit(m); });
         toast('\u5df2\u4fdd\u5b58\uff1a' + m.name + ' \u00b7 \u67dc\u5b50 #' + bo.id + ' ' + (bk === 'w' ? '\u5bbd' : '\u9ad8') + ' = ' + bv, 'now');
+        return;
+      }
+      /* 不常用柜子：行高滑条/数值（1..100 钳制；行存在=已配置，恢复原生走删除行） */
+      if (act === 'ucb-set') {
+        var uIt = ucbItemOf(m);
+        if (!uIt) return;
+        var uId = +el.getAttribute('data-id');
+        var uo = null, uList = ucbParse(uIt.v);
+        for (var ui = 0; ui < uList.length; ui++) if (uList[ui].id === uId) { uo = uList[ui]; break; }
+        if (!uo) return;
+        var uv = parseFloat(el.value);
+        if (isNaN(uv)) return; // 数值框清空中途不发
+        uv = Math.round(Math.max(1, Math.min(100, uv)));
+        uo.h = uv;
+        uIt.v = ucbSerialize(uList);
+        syncSibling(el, uv);
+        var uCab = ucbCabOf(uId);
+        var uCk = el.closest('.__mc-item');
+        if (uCk) {
+          var uCkEl = uCk.querySelector('.__mc-ck');
+          if (uCkEl) uCkEl.textContent = UCB_SECTION + '.' + UCB_KEY + ' \u00b7 ' + uId + ':' + uv;
+        }
+        throttleSend('ucb' + uId, function () { ucbCommit(m, uIt); });
+        toast('\u5df2\u4fdd\u5b58\uff1a' + m.name + ' \u00b7 ' + (uCab ? uCab.n : '#' + uId) + ' \u9ad8 = ' + uv + ' \u884c', 'now');
         return;
       }
       if (act !== 'set') return;

@@ -307,6 +307,8 @@ internal static class ConfigBridge
         if (ii.Opts == null && it.Opts != null) ii.Opts = it.Opts.ToList();
         // string 型 entry 无选项来源时按文本框渲染（任务 14；套件现役 string 项均带 Opts→sel 不受影响）
         if (ii.T == "sel" && ii.Opts == null && e1 != null && e1.SettingType == typeof(string)) ii.T = "str";
+        // 不常用柜子清单（2026-11-15）：Type=ucb 元数据直通面板（下拉行渲染），值照常走 V 整串读写
+        if (string.Equals(it.Type, "ucb", StringComparison.Ordinal)) ii.T = "ucb";
         ii.Note = it.Note ?? (it.Linked ? LinkedNote(cfg, it) : null);
         return ii;
     }

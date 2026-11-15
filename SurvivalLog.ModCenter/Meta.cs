@@ -179,6 +179,19 @@ internal static class Meta
                         new MetaItem { Section = "Rail", Key = "DrawerHeight", Label = "工作台抽屉", Badge = "now", Type = "int", Def = 0, Min = 0, Max = 100, St = 1, Note = "基准行数：三档=H/H+1/H+2（升级加行保留）；原生链 5/6/7；逐档夹 100" }
                     }
                 },
+                // 不常用柜子高度批（2026-11-15，作者令：下拉选择添加一行，删除=恢复原生；只开高度）。
+                // Type=ucb=面板下拉行渲染（panel.js ucbHtml：尾部下拉选柜子→加行滑调→✕ 删行还原），
+                // 值=整串 "BagId:行数,…"（提交走常规 MC_SET→TrySet 绑定 string entry）。
+                // 白名单 13 包与 CabinetEverywhere RailUi.UncommonBagIds 同源同步（gamekb 2026-11-12
+                // 全量交叉实证：可购纯家用储物柜，零场景件/零机器；游戏更新加新柜子两处一起改）。
+                new MetaGroup
+                {
+                    Title = "不常用柜子高度（下拉选择添加；删除即恢复原生；上限 100）",
+                    Items =
+                    {
+                        new MetaItem { Section = "Rail", Key = "UncommonHeights", Label = "不常用柜子清单", Badge = "now", Type = "ucb", Def = "" }
+                    }
+                },
                 // 负重批（2026-11-07 作者令）：背包负重调整新增 + 原独立 mod CabinetBurden 并回；
                 // Burden 是 BagComponent.OnInit 快照——改值/切换后需重进存档对已存在容器/已穿背包生效（Badge=reload）。
                 new MetaGroup
