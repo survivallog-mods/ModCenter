@@ -158,43 +158,60 @@ internal static class ConfigBridge
                 ? "启动清理组件缺失（patchers\\MCShell.dll）：更新/安装/卸载/停用/排序不会生效。请用安装器或完整包补装。"
                 : null,
         };
-        foreach (var orig in Meta.Mods)
+        foreach (var orig in EnumeratePageMods())
         {
             var cfg = CfgOf(orig.Guid);
-            // mcSpec 2 路由①/②（spec 2026-11-15 §4.2）：dll 在链上且有有效清单 → 清单投影表
-            // （配置变更零接触 ModCenter）；无清单 → orig 原样（路由② Meta 冻结兜底，行为不变）。
-            // dll 不在 → 路由③ roster 最小行（任务 4 接管；当前仍走本循环 Missing 形态）。
-            var mm = ThirdParty.EffectOf(orig, cfg, plugMap, out var man);
-            var mi = new ModInfo
+            // mcSpec 2 路由①/②/③（spec 2026-11-15 §4.2/§4.4）：
+            // ① dll 在链上且有有效清单 → 清单投影表（配置变更零接触 ModCenter）；
+            // ② dll 在链上无清单 → orig 原样（Meta 冻结兜底，行为不变）；
+            // ③ dll 不在且在 roster → 最小行（名字+简介+去仓库安装直达，无置灰配置页——作者确认的退化形态；
+            //    DailySurprise 不在 roster → 落回②的 Missing 形态=现行 Meta 灰页）。
+            ModInfo mi;
+            MetaMod mm;
+            ThirdParty.McManifest man = null;
+            if (cfg == null && Meta.RosterOf(orig.Guid) is { } rosterHit)
             {
-                Guid = mm.Guid, Name = mm.Name, En = mm.En, Desc = mm.Desc,
-                Ver = PluginVerOf(plugMap, mm.Guid), // v2.0.6：详情页标题行版本（未安装 null）
-                // 插件不在链上（dll 级缺失/已卸载）视为未安装：面板呈现"未安装/去仓库安装"态，
-                // 详情控件不可写（必修 7；与"已停用"严格分流——停用有 cfg 可写，未安装没有）
-                Missing = cfg == null,
-                // 在场以该 mod 自己的 General.Enabled 为准
-                // （任务 13 真值源；entry 缺失=旧版 dll，按 Bind 默认 true 兜底）
-                Enabled = cfg != null && ReadModEnabled(mm, cfg, out _)
-            };
-            foreach (var mg in mm.Groups)
-            {
-                var gi = new GroupInfo { Title = mg.Title };
-                foreach (var it in mg.Items)
+                mm = orig; // ics 公共段沿用 orig.Guid
+                mi = new ModInfo
                 {
-                    var ii = BuildItem(cfg, it);
-                    if (ii != null) gi.Items.Add(ii); // mcSpec 2：RequireEntry 项 entry 缺失 → 隐藏（spec §3 无兜底→隐藏）
-                }
-                mi.Groups.Add(gi);
+                    Guid = rosterHit.Guid, Name = rosterHit.Name, En = rosterHit.En, Desc = rosterHit.Desc,
+                    Enabled = false, Missing = true, // Ver=null（PluginVerOf 对缺席插件本就 null）
+                };
             }
-            if (mm.OvrHost != null) mi.Ovr = ReadOvr(cfg, mm.OvrHost);
-            if (mm.OvrHost != null) mi.Acts = ActionCatalog.Load(); // v2.0.7：动作目录（QuickAction 产出单源；缺文件=null 不输出→面板回退 ID 手输）
-            if (mm.BagOvrHost != null) mi.BagOvr = ReadBagOvr(cfg, mm.BagOvrHost);
-            if (man != null) // mcSpec 2：使用说明/无总开关附挂（Payload 只增字段，空不输出；panel 兜底过渡见 spec §4.5）
+            else
             {
-                if (man.Usage != null)
-                    mi.UsageJson = JsonW.UsageJsonOf(man.Usage.Intro,
-                        man.Usage.Sections.Select(s => (s.Heading, (IEnumerable<string>)s.Bullets)));
-                if (man.Enabled != null && man.Enabled.None) mi.NoToggle = true;
+                mm = ThirdParty.EffectOf(orig, cfg, plugMap, out man);
+                mi = new ModInfo
+                {
+                    Guid = mm.Guid, Name = mm.Name, En = mm.En, Desc = mm.Desc,
+                    Ver = PluginVerOf(plugMap, mm.Guid), // v2.0.6：详情页标题行版本（未安装 null）
+                    // 插件不在链上（dll 级缺失/已卸载）视为未安装：面板呈现"未安装/去仓库安装"态，
+                    // 详情控件不可写（必修 7；与"已停用"严格分流——停用有 cfg 可写，未安装没有）
+                    Missing = cfg == null,
+                    // 在场以该 mod 自己的 General.Enabled 为准
+                    // （任务 13 真值源；entry 缺失=旧版 dll，按 Bind 默认 true 兜底）
+                    Enabled = cfg != null && ReadModEnabled(mm, cfg, out _)
+                };
+                foreach (var mg in mm.Groups)
+                {
+                    var gi = new GroupInfo { Title = mg.Title };
+                    foreach (var it in mg.Items)
+                    {
+                        var ii = BuildItem(cfg, it);
+                        if (ii != null) gi.Items.Add(ii); // mcSpec 2：RequireEntry 项 entry 缺失 → 隐藏（spec §3 无兜底→隐藏）
+                    }
+                    mi.Groups.Add(gi);
+                }
+                if (mm.OvrHost != null) mi.Ovr = ReadOvr(cfg, mm.OvrHost);
+                if (mm.OvrHost != null) mi.Acts = ActionCatalog.Load(); // v2.0.7：动作目录（QuickAction 产出单源；缺文件=null 不输出→面板回退 ID 手输）
+                if (mm.BagOvrHost != null) mi.BagOvr = ReadBagOvr(cfg, mm.BagOvrHost);
+                if (man != null) // mcSpec 2：使用说明/无总开关附挂（Payload 只增字段，空不输出；panel 兜底过渡见 spec §4.5）
+                {
+                    if (man.Usage != null)
+                        mi.UsageJson = JsonW.UsageJsonOf(man.Usage.Intro,
+                            man.Usage.Sections.Select(s => (s.Heading, (IEnumerable<string>)s.Bullets)));
+                    if (man.Enabled != null && man.Enabled.None) mi.NoToggle = true;
+                }
             }
             // v4 三标记（作者拍板）：⚠红=确定不可用（L1 严重冲突）、⚠橙=其余一切告警
             // （L2 碰撞/L3 叠加/版本不符）、↑黄=仅有新版本；↓/⊘/⟳/蓝 退役（待生效只留底条）。
@@ -211,6 +228,21 @@ internal static class ConfigBridge
         }
         BuildTp(snap, cfRows); // 任务 14：Tier 0 第三方通用页
         return snap;
+    }
+
+    /// <summary>套件页面迭代源：Meta.Mods（冻结表）+ roster 增量（guid 不在 Meta 的迁移成员——
+    /// 阶段 3 Meta 九表删除后 roster 合成基线成为在链清单页的唯一入口；同 guid Meta 优先去重）。</summary>
+    private static IEnumerable<MetaMod> EnumeratePageMods()
+    {
+        foreach (var mm in Meta.Mods) yield return mm;
+        foreach (var r in Meta.Roster)
+        {
+            var inMeta = false;
+            foreach (var mm in Meta.Mods)
+                if (string.Equals(mm.Guid, r.Guid, StringComparison.OrdinalIgnoreCase)) { inMeta = true; break; }
+            if (!inMeta)
+                yield return new MetaMod { Guid = r.Guid, Name = r.Name, En = r.En, Desc = r.Desc };
+        }
     }
 
     /// <summary>

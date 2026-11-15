@@ -626,6 +626,52 @@ internal static class Meta
         return null;
     }
 
+    // ============ 套件成员册 roster（mcSpec 2，spec 2026-11-15 §4.4） ============
+
+    /// <summary>roster 行：迁移名单内 mod 的"dll 缺席"兜底身份（guid=主键，仓键=
+    /// RepoDecision.GuidOf 反查，En 与仓键同名不重复存）。Name/En/Desc 从 Meta.Mods 对应
+    /// 条目逐字转写；迁移完成 Meta 九表删除后即唯一身份来源。</summary>
+    internal sealed class RosterEntry
+    {
+        public string Guid;
+        public string En;
+        public string Name;
+        public string Desc;
+    }
+
+    /// <summary>9 名迁移成员（DailySurprise 临时登记不进——走 Meta 冻结路径）。
+    /// 仅"新增套件 mod"时改动（彼时本就要注册仓库）。</summary>
+    internal static readonly List<RosterEntry> Roster = new()
+    {
+        new() { Guid = "com.local.survivallog.fridgechill", En = "FridgeChill", Name = "保鲜增强",
+            Desc = "冰箱/保鲜类容器食材保鲜时长倍率；天赋保鲜上限可调。" },
+        new() { Guid = "com.local.survivallog.quickaction", En = "QuickAction", Name = "动作加速",
+            Desc = "全游戏动作耗时按分类统一加速（毫秒，0=官方原值）；单个动作可加覆盖单独调。" },
+        new() { Guid = "com.local.survivallog.cabineteverywhere", En = "CabinetEverywhere", Name = "更好的储物柜",
+            Desc = "全容器作为制作/烹饪/酿造等取料源直达；柜子页签标签筛选与场景固定视图。高度修改：25 包逐包可调（0=恢复原生），宽度恒 12（材料架恒 20）；缩高放不下的物品掉在脚下。" },
+        new() { Guid = "com.local.survivallog.unlockhub", En = "UnlockHub", Name = "解锁中心",
+            Desc = "通用解锁合集：角色专属内容逐项解锁 + 交易解锁（货架买后即刷）+ 探索解锁（每日一次探索点不限次）+ 重生解锁（大重生机会基本不限次）+ 属性上限解锁（饱腹/心态/精力/生命封顶 500→可调）；关闭即还原官方门槛。v1.8.0 前名「角色解锁 RoleUnlock」。" },
+        new() { Guid = "com.local.survivallog.robotspeed", En = "RobotSpeed", Name = "机器人提速",
+            Desc = "机器人移速/充电/续航/耗电/动作时长/货舱六维倍率 + 与手动动作对齐。" },
+        new() { Guid = "com.local.survivallog.planpick", En = "PlanPick", Name = "自选生存规划",
+            Desc = "生存规划改自选：解锁日全表候选 + 搜索 + 键盘；整数百分比加成。" },
+        new() { Guid = "com.local.survivallog.savemgr", En = "SaveMgr", Name = "存档管理",
+            Desc = "每日结算自动存档点（间隔可设）+ 局内 ESC 菜单「立即存档/读取存档」。存档点与官方存档同列同管（× 删除），零隐藏副本。" },
+        new() { Guid = "com.local.survivallog.predisasterspeed", En = "PreDisasterSpeed", Name = "灾前加速",
+            Desc = "灾变倒计时前的官方速度条增强（热键变档 + 真三倍校正）。仅支持启用/停用。" },
+        new() { Guid = "com.local.survivallog.endlessguard", En = "EndlessGuard", Name = "囤鼠桃园",
+            Desc = "无尽模式永不沦陷：拦新沦陷 + 恢复已沦陷的交易点/探险图/营地 + 抹掉沦陷倒计时；附 11 条拾遗扩展规划（D100-D300）。" },
+    };
+
+    /// <summary>roster 查询（GUID，OrdinalIgnoreCase；空/未登记=null）。</summary>
+    internal static RosterEntry RosterOf(string guid)
+    {
+        if (string.IsNullOrEmpty(guid)) return null;
+        foreach (var r in Roster)
+            if (string.Equals(r.Guid, guid, StringComparison.OrdinalIgnoreCase)) return r;
+        return null;
+    }
+
     /// <summary>
     /// L1 匹配（GUID 优先、dll 文件名兜底）。两条路径各自全表扫描：先 GUID 全表，命中即返；
     /// 再 dll 文件名全表（去目录、去 .dll 后缀、OrdinalIgnoreCase）。dllName 可传绝对路径。
@@ -674,6 +720,11 @@ internal static class Meta
             if (string.Equals(mm.En, enOrGuid, StringComparison.OrdinalIgnoreCase)
                 || string.Equals(mm.Guid, enOrGuid, StringComparison.OrdinalIgnoreCase))
                 return mm.Name + "（" + enOrGuid + "）";
+        // mcSpec 2：Meta 九表删除后 roster 补位（spec §4.4 兜底链）
+        foreach (var r in Roster)
+            if (string.Equals(r.En, enOrGuid, StringComparison.OrdinalIgnoreCase)
+                || string.Equals(r.Guid, enOrGuid, StringComparison.OrdinalIgnoreCase))
+                return r.Name + "（" + enOrGuid + "）";
         foreach (var e in ExtraNames)
             if (string.Equals(e.En, enOrGuid, StringComparison.OrdinalIgnoreCase)
                 || string.Equals(e.Guid, enOrGuid, StringComparison.OrdinalIgnoreCase))
