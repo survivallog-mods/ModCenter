@@ -45,7 +45,8 @@ internal static class ThirdParty
     private static readonly Dictionary<string, McManifest> Cache = new();
     private static readonly HashSet<string> None = new();
 
-    private sealed class McManifest
+    // internal：EffectOf/Project 签名需要（对 ConfigBridge 暴露投影面）；嵌套类型保持 private
+    internal sealed class McManifest
     {
         internal string Id, Display, Summary;
         internal int Spec;   // 实际解析版本（日志口径；1/2）
@@ -58,14 +59,14 @@ internal static class ThirdParty
         internal Dictionary<string, string> Badges = new(); // 展示键 k → 归一徽标（Apply 渲染时填充，MC_SET_OK 回执查表）
     }
 
-    private sealed class McGroup
+    internal sealed class McGroup
     {
         internal string Title;
         internal double? Order;
         internal List<McItem> Items = new();
     }
 
-    private sealed class McItem
+    internal sealed class McItem
     {
         internal string Key, Label, Note, Badge; // Key = "Section:Key"（指南格式）
         internal double? Min, Max, Step, Order;
@@ -80,27 +81,27 @@ internal static class ThirdParty
     }
 
     /// <summary>mcSpec 2 使用说明：intro 一句话（安装确认段取此行）+ 分段要点（详情页弹窗）。</summary>
-    private sealed class McUsage
+    internal sealed class McUsage
     {
         internal string Intro;
         internal List<McUsageSec> Sections = new();
     }
 
-    private sealed class McUsageSec
+    internal sealed class McUsageSec
     {
         internal string Heading;
         internal List<string> Bullets = new();
     }
 
     /// <summary>mcSpec 2 启停键：对象 {section,key}；字符串 "none" → None=true（无总开关，行恒亮）。</summary>
-    private sealed class McEnabled
+    internal sealed class McEnabled
     {
         internal string Section, Key;
         internal bool None;
     }
 
     /// <summary>mcSpec 2 清单编辑器宿主（kind 封闭词表，映射面板 ovr/bagOvr 编辑器）。</summary>
-    private sealed class McList
+    internal sealed class McList
     {
         internal string Kind;   // actionOverride | bagOverride
         internal string Key;    // 宿主 string entry（"节:键"）
@@ -108,13 +109,13 @@ internal static class ThirdParty
     }
 
     /// <summary>mcSpec 2 条件显示：宿主项（同 mod "节:键"）当前值==Value 才显示（string 比较）。</summary>
-    private sealed class McVis
+    internal sealed class McVis
     {
         internal string Key, Value;
     }
 
     /// <summary>mcSpec 2 ucb 柜子白名单行（id=BagId，name=显示名，native=原生行数）。</summary>
-    private sealed class McCab
+    internal sealed class McCab
     {
         internal long Id;
         internal string Name;
@@ -323,6 +324,91 @@ internal static class ThirdParty
     }
 
     // ============ 清单发现与解析 ============
+
+    /// <summary>套件投影（spec 2026-11-15 §4.2 路由①）：dll 在链上且清单有效 → 投影为 MetaMod
+    /// 供 ConfigBridge 全部既有消费面（快照 Groups/OvrHost/BagOvrHost、TrySet/FindItem 白名单、
+    /// SetModEnabled 启停键）零改动复用——ConfigBridge.BuildItem 的"反射优先+Meta 兜底"本就是
+    /// mcSpec 2 区间语义。清单缺失（返回 mm 原样）= 路由② Meta 冻结。man 出参=null 即路由②，
+    /// 非 null 时调用方附挂 UsageJson/NoToggle。线程：主线程（BuildSnapshot/Pump 上下文）。</summary>
+    internal static MetaMod EffectOf(MetaMod mm, ConfigFile cfg,
+        Dictionary<string, BepInEx.PluginInfo> plugins, out McManifest man)
+    {
+        man = null;
+        if (cfg == null || plugins == null) return mm; // dll 不在链上（路由③由调用方处理）或枚举不可用
+        if (!plugins.TryGetValue(mm.Guid, out var pi) || pi?.Instance == null) return mm;
+        man = ManifestOf(pi);
+        return man == null ? mm : Project(mm, man);
+    }
+
+    /// <summary>纯投影（自检可离线调）：McManifest → MetaMod。display/en/summary 缺项回退基线 mm；
+    /// groups/items 按 order 稳定排序；lists→OvrHost/BagOvrHost；enabled→EnabledSection/Key
+    /// （"none" 保持缺省 General/Enabled——entry 缺失自然拒绝，DailySurprise 现行同款；
+    /// NoToggle 由快照侧按 man 挂）。badge 经 NormBadge 归一（回执/快照共用口径）。</summary>
+    internal static MetaMod Project(MetaMod mm, McManifest man)
+    {
+        var p = new MetaMod
+        {
+            Guid = mm.Guid, // 路由主键恒用基线（roster/Meta 一致）
+            Name = string.IsNullOrEmpty(man.Display) ? mm.Name : man.Display,
+            En = string.IsNullOrEmpty(man.En) ? mm.En : man.En,
+            Desc = string.IsNullOrEmpty(man.Summary) ? mm.Desc : man.Summary,
+        };
+        if (man.Enabled != null && !man.Enabled.None)
+        {
+            p.EnabledSection = man.Enabled.Section;
+            p.EnabledKey = man.Enabled.Key;
+        }
+        foreach (var g in man.Groups.OrderBy(x => x.Order ?? 0))
+            p.Groups.Add(new MetaGroup
+            {
+                Title = g.Title,
+                Items = g.Items.OrderBy(x => x.Order ?? 0).Select(ToMetaItem).ToList(),
+            });
+        foreach (var l in man.Lists)
+        {
+            if (l.Kind != "actionOverride" && l.Kind != "bagOverride") continue;
+            if (!Split(l.Key, out var section, out var key)) continue;
+            var host = new MetaItem
+            {
+                Section = section, Key = key, Type = "sel", Def = "",
+                Label = string.IsNullOrEmpty(l.Label) ? key : l.Label,
+                Badge = NormBadge(l.Badge), Note = l.Note,
+            };
+            if (l.Kind == "actionOverride") p.OvrHost = host;
+            else p.BagOvrHost = host;
+        }
+        return p;
+    }
+
+    /// <summary>McItem → MetaItem（mcSpec 2 字段逐项落位；vis 冒号键转 panel 点口径）。</summary>
+    private static MetaItem ToMetaItem(McItem it)
+    {
+        Split(it.Key, out var section, out var key);
+        var m = new MetaItem
+        {
+            Section = section,
+            Key = key,
+            WriteKeys = it.WriteKeys != null && it.WriteKeys.Length > 0 ? it.WriteKeys : null,
+            Label = string.IsNullOrEmpty(it.Label) ? key : it.Label,
+            Badge = NormBadge(it.Badge),
+            Type = it.Type,
+            Def = it.Def,
+            Min = it.Min, Max = it.Max, St = it.Step,
+            Opts = it.Opts?.ToArray(),
+            Note = it.Note,
+            LinkedSuffix = it.LinkedSuffix,
+            // spec §3：无 type+def 兜底 → entry 缺失即隐藏（BuildItem 判 RequireEntry 返回 null）
+            RequireEntry = string.IsNullOrEmpty(it.Type) && it.Def == null,
+        };
+        if (it.Vis != null && Split(it.Vis.Key, out var vs, out var vk))
+        {
+            m.VisKey = vs + "." + vk;
+            m.VisVal = it.Vis.Value;
+        }
+        if (it.Cabs != null && it.Cabs.Count > 0)
+            m.Cabs = it.Cabs.Select(c => new ItemInfo.CabInfo { Id = c.Id, Name = c.Name, Native = c.Native }).ToList();
+        return m;
+    }
 
     private static McManifest ManifestOf(BepInEx.PluginInfo info)
     {

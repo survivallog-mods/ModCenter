@@ -158,9 +158,13 @@ internal static class ConfigBridge
                 ? "启动清理组件缺失（patchers\\MCShell.dll）：更新/安装/卸载/停用/排序不会生效。请用安装器或完整包补装。"
                 : null,
         };
-        foreach (var mm in Meta.Mods)
+        foreach (var orig in Meta.Mods)
         {
-            var cfg = CfgOf(mm.Guid);
+            var cfg = CfgOf(orig.Guid);
+            // mcSpec 2 路由①/②（spec 2026-11-15 §4.2）：dll 在链上且有有效清单 → 清单投影表
+            // （配置变更零接触 ModCenter）；无清单 → orig 原样（路由② Meta 冻结兜底，行为不变）。
+            // dll 不在 → 路由③ roster 最小行（任务 4 接管；当前仍走本循环 Missing 形态）。
+            var mm = ThirdParty.EffectOf(orig, cfg, plugMap, out var man);
             var mi = new ModInfo
             {
                 Guid = mm.Guid, Name = mm.Name, En = mm.En, Desc = mm.Desc,
@@ -175,12 +179,23 @@ internal static class ConfigBridge
             foreach (var mg in mm.Groups)
             {
                 var gi = new GroupInfo { Title = mg.Title };
-                foreach (var it in mg.Items) gi.Items.Add(BuildItem(cfg, it));
+                foreach (var it in mg.Items)
+                {
+                    var ii = BuildItem(cfg, it);
+                    if (ii != null) gi.Items.Add(ii); // mcSpec 2：RequireEntry 项 entry 缺失 → 隐藏（spec §3 无兜底→隐藏）
+                }
                 mi.Groups.Add(gi);
             }
             if (mm.OvrHost != null) mi.Ovr = ReadOvr(cfg, mm.OvrHost);
             if (mm.OvrHost != null) mi.Acts = ActionCatalog.Load(); // v2.0.7：动作目录（QuickAction 产出单源；缺文件=null 不输出→面板回退 ID 手输）
             if (mm.BagOvrHost != null) mi.BagOvr = ReadBagOvr(cfg, mm.BagOvrHost);
+            if (man != null) // mcSpec 2：使用说明/无总开关附挂（Payload 只增字段，空不输出；panel 兜底过渡见 spec §4.5）
+            {
+                if (man.Usage != null)
+                    mi.UsageJson = JsonW.UsageJsonOf(man.Usage.Intro,
+                        man.Usage.Sections.Select(s => (s.Heading, (IEnumerable<string>)s.Bullets)));
+                if (man.Enabled != null && man.Enabled.None) mi.NoToggle = true;
+            }
             // v4 三标记（作者拍板）：⚠红=确定不可用（L1 严重冲突）、⚠橙=其余一切告警
             // （L2 碰撞/L3 叠加/版本不符）、↑黄=仅有新版本；↓/⊘/⟳/蓝 退役（待生效只留底条）。
             // 未安装（dll 不在场）实机反馈修正：不挂 ⚠红——主动卸载不是故障，行内锁定开关
@@ -289,6 +304,7 @@ internal static class ConfigBridge
     private static ItemInfo BuildItem(ConfigFile cfg, MetaItem it)
     {
         var e1 = cfg != null ? Entry(cfg, it.Section, it.WKeys[0]) : null;
+        if (it.RequireEntry && e1 == null) return null; // mcSpec 2 清单项无 type+def 兜底：entry 缺失即隐藏（spec §3）
         var ii = new ItemInfo { K = it.K, L = it.Label, B = it.Badge };
         if (e1 != null)
         {
@@ -305,6 +321,7 @@ internal static class ConfigBridge
         if (ii.Max == null) ii.Max = it.Max;
         ii.St = it.St; // 步进无反射来源，永远兜底
         ii.VisK = it.VisKey; ii.VisV = it.VisVal; // 条件显示（panel 侧按宿主项当前值即时显隐）
+        if (it.Cabs != null) ii.Cabs = it.Cabs; // mcSpec 2：清单 cabs 透传（ucb 下拉数据源，UNCOMMON_CABS 兜底过渡）
         if (ii.Opts == null && it.Opts != null) ii.Opts = it.Opts.ToList();
         // string 型 entry 无选项来源时按文本框渲染（任务 14；套件现役 string 项均带 Opts→sel 不受影响）
         if (ii.T == "sel" && ii.Opts == null && e1 != null && e1.SettingType == typeof(string)) ii.T = "str";
@@ -680,12 +697,23 @@ internal static class ConfigBridge
         if (string.IsNullOrEmpty(guidOrName)) return null;
         foreach (var mm in Meta.Mods)
         {
-            if (string.Equals(mm.Guid, guidOrName, StringComparison.OrdinalIgnoreCase)) return mm;
-            if (string.Equals(mm.En, guidOrName, StringComparison.OrdinalIgnoreCase)) return mm;
+            if (string.Equals(mm.Guid, guidOrName, StringComparison.OrdinalIgnoreCase)) return EffectiveOf(mm);
+            if (string.Equals(mm.En, guidOrName, StringComparison.OrdinalIgnoreCase)) return EffectiveOf(mm);
             var tail = mm.Guid.Substring(mm.Guid.LastIndexOf('.') + 1);
-            if (string.Equals(tail, guidOrName, StringComparison.OrdinalIgnoreCase)) return mm;
+            if (string.Equals(tail, guidOrName, StringComparison.OrdinalIgnoreCase)) return EffectiveOf(mm);
         }
         return null;
+    }
+
+    /// <summary>mcSpec 2：写路径与快照同源投影——TrySet/SetModEnabled 的白名单/启停键随清单生效
+    /// （有清单=清单键集；无=Meta 冻结表原样）。主线程（HandleSet/SetModEnabled 均 Pump 上下文）。</summary>
+    private static MetaMod EffectiveOf(MetaMod mm)
+    {
+        var cfg = CfgOf(mm.Guid);
+        if (cfg == null) return mm;
+        Dictionary<string, BepInEx.PluginInfo> plugins = null;
+        try { plugins = IL2CPPChainloader.Instance?.Plugins; } catch { }
+        return ThirdParty.EffectOf(mm, cfg, plugins, out _);
     }
 
     private static MetaItem FindItem(MetaMod mm, string section, string key)

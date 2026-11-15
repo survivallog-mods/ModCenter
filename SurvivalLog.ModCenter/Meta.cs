@@ -43,6 +43,10 @@ internal sealed class MetaItem
     public string VisKey;    // 条件显示：同 mod 内宿主项完整展示键（K 口径"节.键"，如 General.Difficulty）；null=恒显示
     public string VisVal;    // 宿主项当前值==此值才在面板显示（string 比较；宿主值随写入即时变，panel 侧重渲）
 
+    // ---- mcSpec 2 投影专用（spec 2026-11-15 §1/§3；Meta 表自身不赋值，默认值即旧行为） ----
+    public bool RequireEntry; // 清单项无 type+def 兜底：entry 缺失时快照隐藏该项（spec §3"无兜底→隐藏"；false=照旧展示）
+    public List<ItemInfo.CabInfo> Cabs; // 清单 cabs 透传（ucb 下拉数据源→快照 ItemInfo.Cabs）；null 不透传
+
     public bool Linked => WriteKeys != null && WriteKeys.Length > 1;
 
     /// <summary>实写键（永不 null：未声明联动 = 单键 [Key]；TrySet/快照统一走此口）。</summary>
