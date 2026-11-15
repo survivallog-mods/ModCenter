@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Net.Http;
+using System.Text;
 using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
@@ -438,7 +439,12 @@ public static class RepoClient
             foreach (var v in resets)
                 if (long.TryParse(v, out var sec)) { win.ResetUnix = sec; break; }
         resp.EnsureSuccessStatusCode();
-        return await resp.Content.ReadAsStringAsync(cts.Token);
+        // v2.3.0 实证修复：BepInEx 环境下部分 handler 对无 charset 响应按 ISO-8859-1 解
+        // ReadAsStringAsync——桶内 update.json/suite.json（Content-Type: application/json 无
+        // charset）的中文 notes 全变 ï¼ˆ 式 mojibake（静态 UI 中文不受影响，v2.2.0 前拉取的
+        // 五字段全 ASCII 故未暴露）。JSON 规范即 UTF-8：按字节读+强制 UTF-8 解码，无视响应头。
+        var bytes = await resp.Content.ReadAsByteArrayAsync(cts.Token);
+        return Encoding.UTF8.GetString(bytes);
     }
 
     private static bool TryGetStr(JsonElement e, string prop, out string value)
