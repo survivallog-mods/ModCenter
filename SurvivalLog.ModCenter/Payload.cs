@@ -179,6 +179,8 @@ public sealed class ItemInfo
     public string Fail;  // Tier 2 状态回报 failed（任务 16）：非空=该项置灰展示原因（QueryStates）
     public string Note;  // 补充说明（联动项含动态"当前 宽w×高h"）
     public List<string> Opts; // sel 选项（enum 名/白名单值/Meta 兜底）
+    public string VisK; // 条件显示宿主项完整展示键（如 "General.Difficulty"；null=恒显示）
+    public string VisV; // 宿主项当前值==VisV 才显示（string 比较，panel 侧即时判定）
 
     internal void Write(StringBuilder sb)
     {
@@ -192,6 +194,7 @@ public sealed class ItemInfo
         sb.Append(",\"b\":").Append(JsonW.Str(B));
         if (Fail != null) sb.Append(",\"fail\":").Append(JsonW.Str(Fail)); // Tier 2 failed 状态（任务 16）
         if (Note != null) sb.Append(",\"note\":").Append(JsonW.Str(Note));
+        if (VisK != null) sb.Append(",\"vk\":").Append(JsonW.Str(VisK)).Append(",\"vv\":").Append(JsonW.Str(VisV));
         if (Opts != null && Opts.Count > 0)
         {
             sb.Append(",\"opts\":[");

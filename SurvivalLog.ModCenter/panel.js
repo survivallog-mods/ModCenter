@@ -506,6 +506,28 @@
     return m || mods()[0] || null;
   }
   function itemOf(m, g, i) { return (m.groups[g] && m.groups[g].items[i]) || null; }
+
+  /* vis 条件显示（喜从天降自定义参数首用）：it.vk=同 mod 宿主项完整展示键、it.vv=期望值；
+   * 宿主当前值（内存快照 it.v，写入即改）≠期望值时隐藏。宿主 select/开关提交后
+   * maybeReRenderVis 即时重渲详情区（数值滑条不触发，防连拖重建 DOM 丢焦点）。 */
+  function visHost(m, it) {
+    for (var g = 0; g < m.groups.length; g++)
+      for (var i = 0; i < m.groups[g].items.length; i++)
+        if (m.groups[g].items[i].k === it.vk) return m.groups[g].items[i];
+    return null;
+  }
+  function hiddenItem(m, it) {
+    if (!it.vk) return false;
+    var h = visHost(m, it);
+    return !h || String(h.v) !== String(it.vv);
+  }
+  function modHasVis(m) {
+    for (var g = 0; g < m.groups.length; g++)
+      for (var i = 0; i < m.groups[g].items.length; i++)
+        if (m.groups[g].items[i].vk) return true;
+    return false;
+  }
+  function maybeReRenderVis(m) { if (m && modHasVis(m)) renderCfg(); }
   function clampItem(it, v) {
     if (typeof it.min === 'number' && v < it.min) v = it.min;
     if (typeof it.max === 'number' && v > it.max) v = it.max;
@@ -1593,10 +1615,11 @@
       + '<div class="__mc-mod-desc">' + esc(m.desc) + '</div>'
       + '<div class="__mc-stop-banner' + (m.enabled ? '' : ' __mc-show') + '">' + banner + '</div>';
     for (var gi = 0; gi < m.groups.length; gi++) {
-      h += '<div class="__mc-grp"><h3>' + esc(m.groups[gi].title) + '</h3>';
+      var gh = '';
       for (var ii = 0; ii < m.groups[gi].items.length; ii++)
-        h += itemHtml(m, m.groups[gi].items[ii], gi, ii);
-      h += '</div>';
+        if (!hiddenItem(m, m.groups[gi].items[ii]))   // vis 条件显示：隐藏项跳过（索引占位，data-i 不变）
+          gh += itemHtml(m, m.groups[gi].items[ii], gi, ii);
+      if (gh) h += '<div class="__mc-grp"><h3>' + esc(m.groups[gi].title) + '</h3>' + gh + '</div>';   // 全隐组连标题一起隐
     }
     if (m.groups.length === 0) {
       h += '<div class="__mc-grp"><h3>\u914d\u7f6e</h3>'
@@ -2203,6 +2226,7 @@
         sw.setAttribute('aria-checked', String(!!it.v));
         sendSet(m, it, it.v);
         toast('\u5df2\u4fdd\u5b58\uff1a' + m.name + ' \u00b7 ' + it.l + ' = ' + (it.v ? '\u5f00' : '\u5173'), it.b);
+        maybeReRenderVis(m);
         return;
       }
       /* 覆盖清单 dd 下拉：开/关（切换时先全局关再按需开，保证同时只有一个弹出层） */
@@ -2513,6 +2537,7 @@
         it.v = el.value;
         sendSet(m, it, it.v);
         toast('\u5df2\u4fdd\u5b58\uff1a' + m.name + ' \u00b7 ' + it.l + ' = ' + el.value, it.b);
+        maybeReRenderVis(m);
       } else if (el.getAttribute('data-num')) {
         // T20 numbox（纯文本数值框）：提交时归位显示值（input 阶段已按钳制值发送）
         el.value = fmt(it.v);

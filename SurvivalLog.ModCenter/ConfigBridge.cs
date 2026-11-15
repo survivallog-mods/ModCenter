@@ -304,6 +304,7 @@ internal static class ConfigBridge
         if (ii.Min == null) ii.Min = it.Min;
         if (ii.Max == null) ii.Max = it.Max;
         ii.St = it.St; // 步进无反射来源，永远兜底
+        ii.VisK = it.VisKey; ii.VisV = it.VisVal; // 条件显示（panel 侧按宿主项当前值即时显隐）
         if (ii.Opts == null && it.Opts != null) ii.Opts = it.Opts.ToList();
         // string 型 entry 无选项来源时按文本框渲染（任务 14；套件现役 string 项均带 Opts→sel 不受影响）
         if (ii.T == "sel" && ii.Opts == null && e1 != null && e1.SettingType == typeof(string)) ii.T = "str";

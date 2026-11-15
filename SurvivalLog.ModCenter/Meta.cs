@@ -40,6 +40,8 @@ internal sealed class MetaItem
     public string[] Opts;    // sel 选项兜底（string 型无 AcceptableValueList，如 UiFit.Mode）
     public string Note;      // 静态补充说明
     public string LinkedSuffix; // 联动项动态 note 后缀（前缀"当前 宽w×高h"由桥现场拼）
+    public string VisKey;    // 条件显示：同 mod 内宿主项完整展示键（K 口径"节.键"，如 General.Difficulty）；null=恒显示
+    public string VisVal;    // 宿主项当前值==此值才在面板显示（string 比较；宿主值随写入即时变，panel 侧重渲）
 
     public bool Linked => WriteKeys != null && WriteKeys.Length > 1;
 
@@ -408,6 +410,72 @@ internal static class Meta
                             Section = "Plans", Key = "ExtendScavengePlans", Label = "拾遗扩展 11 条", Badge = "reboot", Type = "bool", Def = true,
                             Note = "超市拾遗·六~十/医院踏勘·三~五/学校摸排·三~五（D100-D300 每 20 天一条）；关闭后重启生效，本局已注入内容保留"
                         }
+                    }
+                }
+            }
+        },
+        // 临时登记（temp/dailysurprise-page 分支，作者 2026-11-14 要求：喜从天降调参测试用；
+        // 该 mod 无 General.Enabled 总开关——面板行恒亮"启用"，顶部开关写了会被拒（日志可见），非故障。
+        // 难度档/强制事件均为 string sel（值=档名/事件名，entry AcceptableValueList 反射出选项）；
+        // 自定义 5 项挂 vis（难度=自定义才显示，panel 即时显隐））
+        new MetaMod
+        {
+            Guid = "com.local.survivallog.dailysurprise",
+            Name = "喜从天降", En = "DailySurprise",
+            Desc = "每个游戏日随机降临一个天降事件（好运/平淡/霉运，45 事件全量）：原生事件卡弹窗 + 即时奖惩，仅灾后生效。",
+            Groups =
+            {
+                new MetaGroup
+                {
+                    Title = "难度",
+                    Items =
+                    {
+                        new MetaItem { Section = "General", Key = "Difficulty", Label = "难度档", Badge = "now", Type = "sel", Def = "日复一日",
+                            Opts = new[] { "幸运儿", "顺风局", "日复一日", "命运多舛", "厄运缠身", "自定义" },
+                            Note = "次日凌晨掷骰生效；默认日复一日（好45/平25/霉30）" }
+                    }
+                },
+                new MetaGroup
+                {
+                    Title = "自定义（选「自定义」难度时显示）",
+                    Items =
+                    {
+                        new MetaItem { Section = "General", Key = "CustomGoodPercent", Label = "好运天数%", Badge = "now", Type = "int", Def = 45, Min = 0, Max = 100, St = 5,
+                            VisKey = "General.Difficulty", VisVal = "自定义", Note = "三项和须=100，非法回退档 3" },
+                        new MetaItem { Section = "General", Key = "CustomPlainPercent", Label = "平淡天数%", Badge = "now", Type = "int", Def = 25, Min = 0, Max = 100, St = 5,
+                            VisKey = "General.Difficulty", VisVal = "自定义" },
+                        new MetaItem { Section = "General", Key = "CustomBadPercent", Label = "霉运天数%", Badge = "now", Type = "int", Def = 30, Min = 0, Max = 100, St = 5,
+                            VisKey = "General.Difficulty", VisVal = "自定义", Note = "允许 0=纯抽奖" },
+                        new MetaItem { Section = "General", Key = "CustomRewardMultiplier", Label = "奖励倍率", Badge = "now", Type = "float", Def = 1, Min = 0.1, Max = 5, St = 0.1,
+                            VisKey = "General.Difficulty", VisVal = "自定义", Note = "缩放物品数量" },
+                        new MetaItem { Section = "General", Key = "CustomLossMultiplier", Label = "损失倍率", Badge = "now", Type = "float", Def = 1, Min = 0.1, Max = 5, St = 0.1,
+                            VisKey = "General.Difficulty", VisVal = "自定义", Note = "缩放耐久/偷窃/属性损失" }
+                    }
+                },
+                new MetaGroup
+                {
+                    Title = "触发与展示",
+                    Items =
+                    {
+                        new MetaItem { Section = "General", Key = "TriggerHour", Label = "每天几点触发", Badge = "now", Type = "int", Def = 1, Min = 0, Max = 23, St = 1,
+                            Note = "游戏内小时（1=凌晨1点睡醒后）；0=日结算时立即触发" },
+                        new MetaItem { Section = "General", Key = "ShowPlainPopup", Label = "平淡事件弹卡", Badge = "now", Type = "bool", Def = true,
+                            Note = "false=平淡事件不拉事件卡，改为主角头顶气泡播台词（记账照常）" },
+                        new MetaItem { Section = "General", Key = "AllowPermanentNegative", Label = "永久负面事件", Badge = "now", Type = "bool", Def = true,
+                            Note = "false=心结/代价/低语全走替补（重病/雷击/管道爆裂）" }
+                    }
+                },
+                new MetaGroup
+                {
+                    Title = "调试（临时测试，验完删除）",
+                    Items =
+                    {
+                        new MetaItem { Section = "General", Key = "DebugHourlyPopup", Label = "每小时随机弹窗", Badge = "now", Type = "bool", Def = false,
+                            Note = "每个游戏小时从 45 事件随机弹一个卡（仅展示，不发放不记账）；进档先弹一次" },
+                        new MetaItem { Section = "General", Key = "DebugRandomDailyHour", Label = "每天随机小时触发", Badge = "now", Type = "bool", Def = false,
+                            Note = "每日掷 1~23 点触发一次，覆盖上面「每天几点触发」" },
+                        new MetaItem { Section = "General", Key = "DebugForceEventKey", Label = "强制指定事件", Badge = "now", Type = "sel", Def = "关闭",
+                            Note = "选具体事件=进档后强制弹该事件卡一次（仅展示不发放；换档或换选值可再触发）" }
                     }
                 }
             }
