@@ -1182,24 +1182,21 @@
    * 动作覆盖同款交互裁剪版：尾部下拉选柜子→自动加一行（默认原生行数）→滑条/数值调高→
    * ✕ 删行=恢复原生。只开高度（宽恒 12）。状态单源=锚项 it.v 整串（"id:h,…"），改动即
    * 重序列化写回 it.v 并 MC_SET（C# TrySet 绑定 string entry→SettingChanged 帧级生效）。
-   * 名单 13 包与 CabinetEverywhere RailUi.UncommonBagIds 同源（gamekb 2026-11-12 交叉实证：
-   * 可购纯家用储物柜，零场景件/零机器；柜子1/2/3、箱子族3002 等混场景件的包不收）。 */
+   * 兜底名单 9 包与 CabinetEverywhere RailUi.UncommonBagIds / Meta.cs Cabs 同源：1003=橱柜/
+   * 储物柜/保险箱/书架（玩家主力家用柜，含 74 探索场景共用件随变——宽度统一 12 早已同半径）；
+   * 金属柜族 10002/10005/10006/10008/10009 变体条目（Name/Des 键借用他件、商店不可见）已移除。 */
   var UCB_SECTION = 'Rail', UCB_KEY = 'UncommonHeights';
   var UNCOMMON_CABS = [
-    { id: 1006,   n: '\u77ee\u67dc\uff08\u62bd\u5c49\u67dc\uff09', h: 6 },   // 矮柜（抽屉柜）
-    { id: 10002,  n: '\u91d1\u5c5e\u67dc', h: 8 },                            // 金属柜（含普通储物柜）
-    { id: 10005,  n: '\u91d1\u5c5e\u67dc\uff08\u751f\u9508\uff09', h: 6 },   // 金属柜（生锈）
-    { id: 10006,  n: '\u94c1\u76ae\u67dc\uff08\u51f9\u9677\uff09', h: 10 },  // 铁皮柜（凹陷）
-    { id: 10008,  n: '\u91d1\u5c5e\u67dc\uff08\u53d8\u4f53\uff09', h: 8 },   // 金属柜（变体）
-    { id: 10009,  n: '\u50a8\u7269\u67dc\uff08\u53d8\u4f53\uff09', h: 4 },   // 储物柜（变体）
-    { id: 110003, n: '\u5e8a\u5934\u67dc', h: 6 },
-    { id: 110004, n: '\u5927\u8863\u67dc', h: 10 },
-    { id: 110005, n: '\u7384\u5173\u53f0', h: 7 },
-    { id: 110006, n: '\u5c0f\u8863\u67dc', h: 3 },
-    { id: 10003,  n: '\u5de5\u5177\u7bb1', h: 3 },
-    { id: 2002,   n: '\u5564\u9152\u7bb1', h: 3 },
-    { id: 3003,   n: '\u7eb8\u7bb1\u5806/\u624b\u63a8\u8f66', h: 6 }
-  ];
+    { id: 1003,   n: '橱柜/储物柜/保险箱/书架', h: 10 },
+    { id: 1006,   n: '抽屉柜', h: 6 },
+    { id: 110003, n: '床头柜', h: 6 },
+    { id: 110004,   n: '大衣柜', h: 10 },
+    { id: 110005,   n: '玄关台', h: 7 },
+    { id: 110006,   n: '小衣柜', h: 3 },
+    { id: 10003,   n: '工具箱', h: 3 },
+    { id: 2002,   n: '啤酒箱', h: 3 },
+    { id: 3003,   n: '纸箱堆/手推车', h: 6 }
+  ]
   /* mcSpec 2：ucb 白名单双源——快照 item.cabs（清单声明，{id,name,native}→{id,n,h}）优先，
    * UNCOMMON_CABS 静态表兜底（旧 dll Meta 路径不带 cabs；阶段 3 删表）。 */
   function ucbCabs(it) {
