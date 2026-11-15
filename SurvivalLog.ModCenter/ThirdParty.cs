@@ -34,8 +34,12 @@ namespace SurvivalLog.ModCenter;
 /// </summary>
 internal static class ThirdParty
 {
-    /// <summary>当前认识的协议版本（指南 §七接口冻结：mcSpec 1）。</summary>
-    private const int McSpecSupported = 1;
+    /// <summary>当前认识的最高协议版本（mcSpec 1 字段冻结 + 2 套件扩展；不认识 → 整单忽略）。
+    /// 认识的版本集见 <see cref="SpecKnown"/>（Tier 2 McSpec 门同步放行，接口冻结之扩展而非变更）。</summary>
+    private const int McSpecSupported = 2;
+
+    /// <summary>是否认识的 mcSpec 版本（1=第三方 Tier 1 冻结集；2=套件扩展集，spec 2026-11-15 §1）。</summary>
+    internal static bool SpecKnown(int v) => v == 1 || v == 2;
 
     // 清单缓存（会话内不变）：guid → 解析成功的清单；_none = 已查过且无有效清单（防重复扫）
     private static readonly Dictionary<string, McManifest> Cache = new();
@@ -44,7 +48,12 @@ internal static class ThirdParty
     private sealed class McManifest
     {
         internal string Id, Display, Summary;
+        internal int Spec;   // 实际解析版本（日志口径；1/2）
         internal bool SoftDisable;
+        internal string En;                    // mcSpec 2：内部短名（En 路由兼容）
+        internal McUsage Usage;                // mcSpec 2：使用说明（panel USAGE 表退役的数据源）
+        internal McEnabled Enabled;            // mcSpec 2：启停键声明（缺省 General/Enabled；"none"=无总开关）
+        internal List<McList> Lists = new();   // mcSpec 2：清单编辑器宿主（actionOverride/bagOverride）
         internal List<McGroup> Groups = new();
         internal Dictionary<string, string> Badges = new(); // 展示键 k → 归一徽标（Apply 渲染时填充，MC_SET_OK 回执查表）
     }
@@ -60,6 +69,56 @@ internal static class ThirdParty
     {
         internal string Key, Label, Note, Badge; // Key = "Section:Key"（指南格式）
         internal double? Min, Max, Step, Order;
+        // ---- mcSpec 2 扩展（仅套件生效；spec §约束：第三方出现→解析保留、消费侧搁置+日志） ----
+        internal string Type;          // int/float/bool/sel/str/ucb——entry 缺失时类型兜底（ucb 恒以此声明）
+        internal object Def;           // entry 尚不存在时的展示值兜底（number→double/string/bool）
+        internal List<string> Opts;    // sel 选项兜底（反射无 AcceptableValueList 时）
+        internal string[] WriteKeys;   // 联动等值写键组（同节，含主键；null=单键 [Key]）
+        internal string LinkedSuffix;  // 联动动态 note 后缀（前缀"当前 宽w×高h"由桥现场拼）
+        internal McVis Vis;            // 条件显示（宿主项当前值==Value 才显示）
+        internal List<McCab> Cabs;     // ucb 柜子白名单（快照透传面板下拉数据源）
+    }
+
+    /// <summary>mcSpec 2 使用说明：intro 一句话（安装确认段取此行）+ 分段要点（详情页弹窗）。</summary>
+    private sealed class McUsage
+    {
+        internal string Intro;
+        internal List<McUsageSec> Sections = new();
+    }
+
+    private sealed class McUsageSec
+    {
+        internal string Heading;
+        internal List<string> Bullets = new();
+    }
+
+    /// <summary>mcSpec 2 启停键：对象 {section,key}；字符串 "none" → None=true（无总开关，行恒亮）。</summary>
+    private sealed class McEnabled
+    {
+        internal string Section, Key;
+        internal bool None;
+    }
+
+    /// <summary>mcSpec 2 清单编辑器宿主（kind 封闭词表，映射面板 ovr/bagOvr 编辑器）。</summary>
+    private sealed class McList
+    {
+        internal string Kind;   // actionOverride | bagOverride
+        internal string Key;    // 宿主 string entry（"节:键"）
+        internal string Label, Badge, Note;
+    }
+
+    /// <summary>mcSpec 2 条件显示：宿主项（同 mod "节:键"）当前值==Value 才显示（string 比较）。</summary>
+    private sealed class McVis
+    {
+        internal string Key, Value;
+    }
+
+    /// <summary>mcSpec 2 ucb 柜子白名单行（id=BagId，name=显示名，native=原生行数）。</summary>
+    private sealed class McCab
+    {
+        internal long Id;
+        internal string Name;
+        internal double Native;
     }
 
     // ============ 对外契约 ============
@@ -170,7 +229,7 @@ internal static class ThirdParty
                     if (specProp != null)
                     {
                         var specOk = false;
-                        try { specOk = Convert.ToInt32(specProp.GetValue(null), CultureInfo.InvariantCulture) == McSpecSupported; }
+                        try { specOk = SpecKnown(Convert.ToInt32(specProp.GetValue(null), CultureInfo.InvariantCulture)); }
                         catch { }
                         if (!specOk)
                         {
@@ -280,7 +339,7 @@ internal static class ThirdParty
             Cache[guid] = man;
             Log($"清单(tp) {guid}: 命中资源 '{res.Name}'"
                 + (res.Dups > 1 ? $"（同程序集 {res.Dups} 份 modcenter.json，取第一个，其余忽略）" : "")
-                + $"——mcSpec {McSpecSupported} 定制页生效（{man.Groups.Count} 组）");
+                + $"——mcSpec {man.Spec} 定制页生效（{man.Groups.Count} 组）");
         }
         return man;
     }
@@ -321,7 +380,9 @@ internal static class ThirdParty
         }
     }
 
-    /// <summary>解析与校验（JsonDocument，套件入向解析同款纪律）。任何不合格 → null（降级 Tier 0）。</summary>
+    /// <summary>解析与校验（JsonDocument，套件入向解析同款纪律）。任何不合格 → null（降级 Tier 0）。
+    /// mcSpec 1 字段集与合并语义冻结（指南 §七）；mcSpec 2 = 1 的严格超集，扩展字段仅套件生效
+    /// （spec 2026-11-15 §1/§3）——v1 清单行为逐字节不变，v2 逐字段额外解析。</summary>
     private static McManifest Parse(Stream stream, string guid)
     {
         try
@@ -332,18 +393,29 @@ internal static class ThirdParty
             if (!root.TryGetProperty("mcSpec", out var specEl)
                 || specEl.ValueKind != JsonValueKind.Number
                 || !specEl.TryGetInt32(out var spec)
-                || spec != McSpecSupported)
+                || !SpecKnown(spec))
             {
                 Log($"清单(tp) {guid} mcSpec 不识别（{Raw(specEl)}）——整单忽略，按 Tier 0 通用页兜底");
                 return null;
             }
+            var v2 = spec >= 2;
             var man = new McManifest
             {
+                Spec = spec,
                 Id = GetS(root, "id"),
                 Display = GetS(root, "display"),
                 Summary = GetS(root, "summary"),
                 SoftDisable = root.TryGetProperty("softDisable", out var sd) && sd.ValueKind == JsonValueKind.True,
             };
+            if (v2)
+            {
+                man.En = GetS(root, "en");
+                man.Usage = ParseUsage(root, guid);
+                man.Enabled = ParseEnabled(root, guid);
+                ParseLists(root, guid, man.Lists);
+                if (!Meta.IsSuiteGuid(guid) && HasExtFields(root))
+                    Log($"清单(tp) {guid}: mcSpec 2 扩展字段仅套件清单生效，本清单按 Tier 1 字段集对待（解析保留、消费搁置）");
+            }
             if (!root.TryGetProperty("groups", out var gsEl) || gsEl.ValueKind != JsonValueKind.Array)
             {
                 Log($"清单(tp) {guid} 缺 groups 段——整单忽略，按 Tier 0 通用页兜底");
@@ -361,12 +433,14 @@ internal static class ThirdParty
                         if (ie.ValueKind != JsonValueKind.Object) continue;
                         var key = GetS(ie, "key");
                         if (string.IsNullOrEmpty(key)) { Log($"清单(tp) {guid} '{title}' 有项缺 key，跳过该项"); continue; }
-                        g.Items.Add(new McItem
+                        var it = new McItem
                         {
                             Key = key, Label = GetS(ie, "label"), Note = GetS(ie, "note"), Badge = GetS(ie, "badge"),
                             Min = GetN(ie, "min"), Max = GetN(ie, "max"), Step = GetN(ie, "step"),
                             Order = GetN(ie, "order"),
-                        });
+                        };
+                        if (v2) ParseItemExt(ie, it);
+                        g.Items.Add(it);
                     }
                 man.Groups.Add(g);
             }
@@ -377,6 +451,139 @@ internal static class ThirdParty
             Log($"清单(tp) {guid} 解析失败（{e.Message}）——整单忽略，按 Tier 0 通用页兜底");
             return null;
         }
+    }
+
+    // ---- mcSpec 2 扩展字段解析（任何不合格只是忽略该字段，绝不废整单） ----
+
+    /// <summary>usage：{intro, sections:[{heading, bullets[]}]}</summary>
+    private static McUsage ParseUsage(JsonElement root, string guid)
+    {
+        if (!root.TryGetProperty("usage", out var ue) || ue.ValueKind != JsonValueKind.Object) return null;
+        var u = new McUsage { Intro = GetS(ue, "intro") };
+        if (ue.TryGetProperty("sections", out var ss) && ss.ValueKind == JsonValueKind.Array)
+            foreach (var se in ss.EnumerateArray())
+            {
+                if (se.ValueKind != JsonValueKind.Object) continue;
+                var sec = new McUsageSec { Heading = GetS(se, "heading") };
+                if (se.TryGetProperty("bullets", out var bs) && bs.ValueKind == JsonValueKind.Array)
+                    foreach (var b in bs.EnumerateArray())
+                        if (b.ValueKind == JsonValueKind.String && b.GetString().Length > 0)
+                            sec.Bullets.Add(b.GetString());
+                u.Sections.Add(sec);
+            }
+        if (string.IsNullOrEmpty(u.Intro) && u.Sections.Count == 0) return null;
+        return u;
+    }
+
+    /// <summary>enabled：{section,key} 对象或 "none" 字符串；畸形 → 忽略（缺省 General/Enabled）。</summary>
+    private static McEnabled ParseEnabled(JsonElement root, string guid)
+    {
+        if (!root.TryGetProperty("enabled", out var ee)) return null;
+        if (ee.ValueKind == JsonValueKind.String)
+        {
+            if (string.Equals(ee.GetString()?.Trim(), "none", StringComparison.OrdinalIgnoreCase))
+                return new McEnabled { None = true };
+            Log($"清单(tp) {guid} enabled 字符串不识别（{Raw(ee)}），按缺省 General/Enabled 对待");
+            return null;
+        }
+        if (ee.ValueKind == JsonValueKind.Object)
+        {
+            var s = GetS(ee, "section"); var k = GetS(ee, "key");
+            if (!string.IsNullOrEmpty(s) && !string.IsNullOrEmpty(k)) return new McEnabled { Section = s, Key = k };
+            Log($"清单(tp) {guid} enabled 对象缺 section/key，按缺省 General/Enabled 对待");
+        }
+        return null;
+    }
+
+    /// <summary>lists[]：kind+key 必填（kind 封闭词表），label/badge/note 可选；坏行跳过。</summary>
+    private static void ParseLists(JsonElement root, string guid, List<McList> into)
+    {
+        if (!root.TryGetProperty("lists", out var le) || le.ValueKind != JsonValueKind.Array) return;
+        foreach (var e in le.EnumerateArray())
+        {
+            if (e.ValueKind != JsonValueKind.Object) continue;
+            var kind = GetS(e, "kind"); var key = GetS(e, "key");
+            if (kind != "actionOverride" && kind != "bagOverride")
+            { Log($"清单(tp) {guid} lists 行 kind 不识别（{Raw(GetKindEl(e))}），跳过"); continue; }
+            if (string.IsNullOrEmpty(key)) { Log($"清单(tp) {guid} lists 行缺 key，跳过"); continue; }
+            into.Add(new McList { Kind = kind, Key = key, Label = GetS(e, "label"), Badge = GetS(e, "badge"), Note = GetS(e, "note") });
+        }
+    }
+
+    private static JsonElement GetKindEl(JsonElement e) =>
+        e.TryGetProperty("kind", out var k) ? k : default;
+
+    /// <summary>item 扩展字段：type/def/opts/writeKeys/linkedSuffix/vis/cabs。</summary>
+    private static void ParseItemExt(JsonElement ie, McItem it)
+    {
+        it.Type = GetS(ie, "type");
+        it.Def = ParseDef(ie);
+        if (ie.TryGetProperty("opts", out var oe) && oe.ValueKind == JsonValueKind.Array)
+        {
+            it.Opts = new List<string>();
+            foreach (var o in oe.EnumerateArray())
+                if (o.ValueKind == JsonValueKind.String && o.GetString().Length > 0)
+                    it.Opts.Add(o.GetString());
+            if (it.Opts.Count == 0) it.Opts = null;
+        }
+        if (ie.TryGetProperty("writeKeys", out var we) && we.ValueKind == JsonValueKind.Array)
+        {
+            var ks = new List<string>();
+            foreach (var w in we.EnumerateArray())
+                if (w.ValueKind == JsonValueKind.String && w.GetString().Length > 0)
+                    ks.Add(w.GetString());
+            if (ks.Count > 0) it.WriteKeys = ks.ToArray();
+        }
+        it.LinkedSuffix = GetS(ie, "linkedSuffix");
+        if (ie.TryGetProperty("vis", out var ve) && ve.ValueKind == JsonValueKind.Object)
+        {
+            var vk = GetS(ve, "key"); var vv = GetS(ve, "value");
+            if (!string.IsNullOrEmpty(vk) && !string.IsNullOrEmpty(vv)) it.Vis = new McVis { Key = vk, Value = vv };
+        }
+        if (ie.TryGetProperty("cabs", out var ce) && ce.ValueKind == JsonValueKind.Array)
+        {
+            foreach (var c in ce.EnumerateArray())
+            {
+                if (c.ValueKind != JsonValueKind.Object) continue;
+                var id = GetN(c, "id"); var nm = GetS(c, "name");
+                if (id == null || string.IsNullOrEmpty(nm)) continue;
+                it.Cabs ??= new List<McCab>();
+                it.Cabs.Add(new McCab { Id = (long)id.Value, Name = nm, Native = GetN(c, "native") ?? 0 });
+            }
+        }
+    }
+
+    /// <summary>def 兜底值：number→double / string / bool；其他形态（对象/数组/null）不兜底。</summary>
+    private static object ParseDef(JsonElement ie)
+    {
+        if (!ie.TryGetProperty("def", out var de)) return null;
+        return de.ValueKind switch
+        {
+            JsonValueKind.Number => de.TryGetInt64(out var l) && l >= int.MinValue && l <= int.MaxValue
+                ? (object)(int)l  // int 型常见，落 int 便于反射口径一致；超界回 double
+                : de.GetDouble(),
+            JsonValueKind.String => de.GetString(),
+            JsonValueKind.True => true,
+            JsonValueKind.False => false,
+            _ => null,
+        };
+    }
+
+    /// <summary>是否出现任一 mcSpec 2 扩展字段（en/usage/enabled/lists 及 item 级 writeKeys/vis/cabs 等）——
+    /// 非套件 v2 清单的"搁置"提示判据（一次性，解析期）。</summary>
+    private static bool HasExtFields(JsonElement root)
+    {
+        foreach (var p in new[] { "en", "usage", "enabled", "lists" })
+            if (root.TryGetProperty(p, out _)) return true;
+        if (!root.TryGetProperty("groups", out var gs) || gs.ValueKind != JsonValueKind.Array) return false;
+        foreach (var g in gs.EnumerateArray())
+        {
+            if (!g.TryGetProperty("items", out var isEl) || isEl.ValueKind != JsonValueKind.Array) continue;
+            foreach (var it in isEl.EnumerateArray())
+                foreach (var p in new[] { "type", "def", "opts", "writeKeys", "linkedSuffix", "vis", "cabs" })
+                    if (it.ValueKind == JsonValueKind.Object && it.TryGetProperty(p, out _)) return true;
+        }
+        return false;
     }
 
     // ============ 合并细节 ============
