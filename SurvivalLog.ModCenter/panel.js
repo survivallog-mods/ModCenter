@@ -107,7 +107,7 @@
   var SELF_NAME = 'Mod \u7ba1\u7406\u4e2d\u5fc3'; // Mod 管理中心
   var SELF_GUID = 'com.local.survivallog.modcenter'; // v2.0.4：自身真实 GUID（仓库徽标路由/弹窗用；行选仍用 '__self'）
   var SELF_EN = 'ModCenter\uff08\u672c\u9762\u677f\uff09';
-  var OVR_SECTION = '\u5176\u4ed6', OVR_KEY = 'Overrides'; // 与 C# Meta.OvrSection/OvrKey 同源
+  var OVR_SECTION = '\u5176\u4ed6', OVR_KEY = 'Overrides'; // 宿主 cfg 键与动作加速清单声明（modcenter.json lists.key）同源
 
   /* ---- 状态：host/root=宿主文档与面板根；snap=最近快照；sel='__self'|guid ----
    * v2 任务 7：pend=最近 MC_PENDING_SUMMARY（底部待生效条数据，跨开关面板保留）；
@@ -1182,11 +1182,9 @@
    * 动作覆盖同款交互裁剪版：尾部下拉选柜子→自动加一行（默认原生行数）→滑条/数值调高→
    * ✕ 删行=恢复原生。只开高度（宽恒 12）。状态单源=锚项 it.v 整串（"id:h,…"），改动即
    * 重序列化写回 it.v 并 MC_SET（C# TrySet 绑定 string entry→SettingChanged 帧级生效）。
-   * 兜底名单 9 包与 CabinetEverywhere RailUi.UncommonBagIds / Meta.cs Cabs 同源：1003=橱柜/
-   * 白名单唯一来源=快照 item.cabs（清单声明，阶段 3 已删静态表）。 */
+   * mcSpec 2 阶段 3：白名单唯一来源=快照 item.cabs（modcenter.json 清单声明），
+   * 无 cabs（旧 dll）返回空表、下拉给更新提示。 */
   var UCB_SECTION = 'Rail', UCB_KEY = 'UncommonHeights';
-    /* mcSpec 2 阶段 3：ucb 白名单唯一来源=快照 item.cabs（清单声明，{id,name,native}→{id,n,h}）；
-   * 无 cabs（旧 dll）返回空表，下拉给更新提示。 */
   function ucbCabs(it) {
     if (it && it.cabs && it.cabs.length)
       return it.cabs.map(function (c) { return { id: c.id, n: c.name, h: c.native }; });
@@ -1231,7 +1229,7 @@
   function ucbDdShow(widget, m) {
     var pop = widget.querySelector('.__mc-ovr-dd-pop');
     var it = ucbItemOf(m);
-    var cabs = ucbCabs(it); // mcSpec 2：cabs 双源（快照优先/静态表兜底）
+    var cabs = ucbCabs(it); // mcSpec 2：cabs 唯一来源=快照（清单声明）
     var have = {};
     ucbParse(it ? it.v : '').forEach(function (o) { have[o.id] = true; });
     var h = '';
@@ -1248,7 +1246,7 @@
   /* 行渲染（itemHtml 的 t=ucb 分支调用；一组多行：已配置行×N + 尾部添加行） */
   function ucbHtml(m, it) {
     var rows = ucbParse(it.v);
-    var cabs = ucbCabs(it); // mcSpec 2：cabs 双源
+    var cabs = ucbCabs(it); // mcSpec 2：cabs 唯一来源=快照（清单声明）
     var h = '';
     for (var i = 0; i < rows.length; i++) {
       var cab = ucbCabOf(cabs, rows[i].id);
@@ -1526,7 +1524,7 @@
        * （安装入口在下方维护区，G4 直达语义不变）；已装空组=仅启停形态文案照旧 */
       h += m.missing
         ? '<div class="__mc-grp"><h3>\u5b89\u88c5</h3>'
-        + '<div class="__mc-ovr-empty">\u672a\u5b89\u88c5\uff1a\u6b64\u9875\u6682\u65e0\u53ef\u914d\u7f6e\u9879\u3002\u53bb\u4e0b\u65b9\u300c\u7ef4\u62a4\u300d\u533a\u5b89\u88c5\540e\uff0c\u914d\u7f6e\u9879\u4f1a\u5728\u8fd9\u91cc\u51fa\u73b0\u3002</div></div>'
+        + '<div class="__mc-ovr-empty">\u672a\u5b89\u88c5\uff1a\u6b64\u9875\u6682\u65e0\u53ef\u914d\u7f6e\u9879\u3002\u53bb\u4e0b\u65b9\u300c\u7ef4\u62a4\u300d\u533a\u5b89\u88c5\u540e\uff0c\u914d\u7f6e\u9879\u4f1a\u5728\u8fd9\u91cc\u51fa\u73b0\u3002</div></div>'
         : '<div class="__mc-grp"><h3>\u914d\u7f6e</h3>'
         + '<div class="__mc-ovr-empty">\u8be5 mod \u53ea\u6709\u542f\u7528 / \u505c\u7528\uff0c\u6ca1\u6709\u5176\u4ed6\u8bbe\u7f6e\u3002</div></div>';
     }
@@ -1781,9 +1779,17 @@
   }
 
   function usageIntroHtml(guid) {
-    var u = usageOf(guid, findMod(guid)); // mcSpec 2：已装 mod 用清单 usage；未装/未迁移回 USAGE 表
-    if (!u) return '<div class="__mc-m-sec"><div class="__mc-m-h">\u529f\u80fd\u8bf4\u660e</div>'
-      + '<div class="__mc-m-txt">\u751f\u5b58\u65e5\u5fd7\u5957\u4ef6\u6a21\u7ec4\uff08\u672c\u5730\u7ef4\u62a4\uff09\uff0c\u88c5\u597d\u5373\u751f\u6548\uff0c\u53c2\u6570\u5728\u914d\u7f6e\u9875\u8c03\u6574\u3002</div></div>';
+    var u = usageOf(guid, findMod(guid)); // mcSpec 2：已装 mod 用清单 usage；__self 回 USAGE 表
+    if (!u) {
+      /* 未安装套件 mod 无清单 usage——回落快照行 desc（roster 最小行/已装行都带），
+       * 仍无才给通用一句话（v2.2.0 功能说明段语义尽可能保留） */
+      var m = findMod(guid);
+      var txt = (m && m.desc)
+        ? esc(m.desc)
+        : '\u751f\u5b58\u65e5\u5fd7\u5957\u4ef6\u6a21\u7ec4\uff08\u672c\u5730\u7ef4\u62a4\uff09\uff0c\u88c5\u597d\u5373\u751f\u6548\uff0c\u53c2\u6570\u5728\u914d\u7f6e\u9875\u8c03\u6574\u3002';
+      return '<div class="__mc-m-sec"><div class="__mc-m-h">\u529f\u80fd\u8bf4\u660e</div>'
+        + '<div class="__mc-m-txt">' + txt + '</div></div>';
+    }
     var h = '<div class="__mc-m-sec"><div class="__mc-m-h">\u529f\u80fd\u8bf4\u660e</div>'
       + '<div class="__mc-m-txt">' + esc(u.i);
     var ls = u.secs && u.secs.length ? u.secs[0].ls : [];

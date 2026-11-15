@@ -234,7 +234,7 @@ internal static class ThirdParty
                         catch { }
                         if (!specOk)
                         {
-                            Log($"Tier2(tp) {guid}: McSpec 不识别——按 Tier 1/0 对待（接口冻结：mcSpec 1）");
+                            Log($"Tier2(tp) {guid}: McSpec 不识别——按 Tier 1/0 对待（接口冻结：mcSpec 1/2）");
                             t = null;
                         }
                     }
@@ -407,8 +407,8 @@ internal static class ThirdParty
             Opts = it.Opts?.ToArray(),
             Note = it.Note,
             LinkedSuffix = it.LinkedSuffix,
-            // spec §3：无 type+def 兜底 → entry 缺失即隐藏（BuildItem 判 RequireEntry 返回 null）
-            RequireEntry = string.IsNullOrEmpty(it.Type) && it.Def == null,
+            // spec §3：type+def 齐备才兜底展示——任一缺失即 RequireEntry（entry 缺失隐藏，防半兜底脏渲染）
+            RequireEntry = string.IsNullOrEmpty(it.Type) || it.Def == null,
         };
         if (it.Vis != null && Split(it.Vis.Key, out var vs, out var vk))
         {
@@ -509,7 +509,9 @@ internal static class ThirdParty
                 man.Usage = ParseUsage(root, guid);
                 man.Enabled = ParseEnabled(root, guid);
                 ParseLists(root, guid, man.Lists);
-                if (!Meta.IsSuiteGuid(guid) && HasExtFields(root))
+                if (!Meta.IsSuiteGuid(guid) && Meta.RosterOf(guid) == null && HasExtFields(root))
+                    // 套件判定=IsSuiteGuid ∪ roster（spec §约束"IsSuiteGuid/roster 判定"——SuiteGuids
+                    // 为基线存量表，roster 是迁移名单真值；并集防 savemgr 类漏登误报搁置日志）
                     Log($"清单(tp) {guid}: mcSpec 2 扩展字段仅套件清单生效，本清单按 Tier 1 字段集对待（解析保留、消费搁置）");
             }
             if (!root.TryGetProperty("groups", out var gsEl) || gsEl.ValueKind != JsonValueKind.Array)
