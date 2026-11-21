@@ -460,7 +460,8 @@ public sealed class VerRowInfo
 /// <summary>
 /// 冲突详情卡片（v2 任务 11，MC_CF_DATA.cards 元素；面板照原型 cfHtml 渲染）：
 /// lv=色级（red|orange|gray，决定图标色/字形）、tag=标签（冲突|碰撞|同域）、title=卡片副标题、
-/// who=冲突对象（显示名，面板以"、"连接加粗）、reason=原因全文、tips=处置建议（面板编号列表）。
+/// who=冲突对象（显示名，面板以"、"连接加粗）、reason=原因全文、tips=处置建议（面板编号列表）、
+/// err=true 仅运行异常卡（任务 15；面板挂错误日志入口，其余卡不输出该字段）。
 /// </summary>
 public sealed class CfCardInfo
 {
@@ -470,6 +471,7 @@ public sealed class CfCardInfo
     public List<string> Who = new();
     public string Reason;
     public List<string> Tips = new();
+    public bool Err; // 任务 15：运行异常卡（面板据此挂"查看错误日志"入口，任务 16）；仅 true 输出
 
     internal void Write(StringBuilder sb)
     {
@@ -489,7 +491,8 @@ public sealed class CfCardInfo
             if (i > 0) sb.Append(',');
             sb.Append(JsonW.Str(Tips[i]));
         }
-        sb.Append("]}");
+        if (Err) sb.Append("],\"err\":true}"); // false 不输出，保持旧 payload 字节不变
+        else sb.Append("]}");
     }
 }
 
@@ -514,6 +517,87 @@ public sealed class CfData
         }
         sb.Append("]}");
         return sb.ToString();
+    }
+}
+
+/// <summary>
+/// 错误日志面板数据（任务 16，MC_ERR_GET → MC_ERR_DATA 推送体，__mcEvent 通道）：
+/// rows=<see cref="ErrorLog.Keys"/> 投影（会话级、无历史），gameVer=本地游戏版本人读串
+///（面板复制环境头用；通道失败空串）。序列化手写 StringBuilder（AOT 零反射纪律，同
+/// <see cref="RepoData"/>）。
+/// </summary>
+public sealed class ErrData
+{
+    public string GameVer;
+    public List<ErrRowInfo> Rows = new();
+
+    public string ToJson()
+    {
+        var sb = new StringBuilder(2048);
+        sb.Append("{\"type\":\"MC_ERR_DATA\",\"gameVer\":").Append(JsonW.Str(GameVer))
+          .Append(",\"rows\":[");
+        for (var i = 0; i < Rows.Count; i++)
+        {
+            if (i > 0) sb.Append(',');
+            Rows[i].Write(sb);
+        }
+        sb.Append("]}");
+        return sb.ToString();
+    }
+}
+
+/// <summary>错误面板行（MC_ERR_DATA.rows 元素）：guid=插件 GUID 或 _unattributed（name=未归属）；
+/// name/ver 由 ConfigBridge.BuildErrData 装配（_repoRows 优先→SuiteRoster→链上插件元数据）；
+/// suite=SuiteRoster 命中（未归属 false——面板归三方组）；count=折叠后记录条数（非 Repeat 总和）；
+/// last=最新一条 HH:mm:ss；entries=记录 newest-first（≤50，ErrorLog 容量上限已保证）。</summary>
+public sealed class ErrRowInfo
+{
+    public string Guid;
+    public string Name;
+    public string Ver;
+    public bool Suite;
+    public int Count;
+    public string Last;
+    public List<ErrEntryInfo> Entries = new();
+
+    internal void Write(StringBuilder sb)
+    {
+        sb.Append("{\"guid\":").Append(JsonW.Str(Guid))
+          .Append(",\"name\":").Append(JsonW.Str(Name))
+          .Append(",\"ver\":").Append(JsonW.Str(Ver))
+          .Append(",\"suite\":").Append(Suite ? "true" : "false")
+          .Append(",\"count\":").Append(Count.ToString(CultureInfo.InvariantCulture))
+          .Append(",\"last\":").Append(JsonW.Str(Last))
+          .Append(",\"entries\":[");
+        for (var i = 0; i < Entries.Count; i++)
+        {
+            if (i > 0) sb.Append(',');
+            Entries[i].Write(sb);
+        }
+        sb.Append("]}");
+    }
+}
+
+/// <summary>一条错误记录（MC_ERR_DATA.entries 元素）：t=HH:mm:ss、lv=Error/Fatal、
+/// src=日志源名、msg=全文首行、stack=堆栈段（可空）、rep=连续重复次数（面板 &gt;1 才内联显示）。</summary>
+public sealed class ErrEntryInfo
+{
+    public string T;
+    public string Lv;
+    public string Src;
+    public string Msg;
+    public string Stack;
+    public int Rep;
+
+    internal void Write(StringBuilder sb)
+    {
+        sb.Append("{\"t\":").Append(JsonW.Str(T))
+          .Append(",\"lv\":").Append(JsonW.Str(Lv))
+          .Append(",\"src\":").Append(JsonW.Str(Src))
+          .Append(",\"msg\":").Append(JsonW.Str(Msg))
+          .Append(",\"stack\":").Append(JsonW.Str(Stack))
+          .Append(",\"rep\":").Append(Rep.ToString(CultureInfo.InvariantCulture))
+          .Append('}');
     }
 }
 

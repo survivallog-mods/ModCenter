@@ -85,6 +85,14 @@
  * 含与 README 出入的修正）→ 通用浮层弹窗分「怎么用/提示」两段
  * 编号要点；tp 第三方无说明不显示按钮。纯前端静态内容（不发消息、不占快照协议），见
  * renderCfg 前的 USAGE 表段。
+ * 套件名单单源任务 16 = 错误日志面板（原型 2026-11-21-error-log-panel-prototype 定稿）：
+ * 头部「错误日志」按钮 + 告警弹窗运行异常卡「查看错误日志」→ MC_ERR_GET → MC_ERR_DATA
+ * {gameVer,rows:[{guid,name,ver,suite,count,last,entries:[{t,lv,src,msg,stack,rep}]}]}
+ * → 内容区整体换视图（← 返回；左栏按 suite 布尔分组套件/三方——未归属归三方、组标题仅
+ * 非空时出现、全空「暂无错误」；右栏详情头名/版本/GUID + 「仅保留最近 50 条」+ 单一复制
+ * 图标 + 条目卡时间/级别/来源/消息（rep>1 内联「（重复 N 次）」）+ 可展开堆栈）。无清空/
+ * 批量/单条复制按钮、无历史（会话级，重启即空）。复制=copyText 三级降级（clipboard →
+ * execCommand → 手动复制弹窗），环境头带 ModCenter 版本/游戏版本/时间戳。
  */
 (function () {
   if (window.__McInstalled) return;
@@ -122,9 +130,12 @@
    * v2 任务 9：ord=排序模式开着（面板内状态，跨开关保留同 repo）；order=本地工作序
    * （guids[]，进排序模式拉 MC_ORDER_DATA 填充；未保存的本地重排跨开关面板保留）；
    * ordRows=最近 MC_ORDER_DATA（含 rows 显示元数据与 def 默认序）；ordSaving=保存
-   * 回执（MC_ORDER_OK/FAIL）在途防连点。ORD.src=DnD 源行 guid（拖拽会话期；T10 带出①）。 */
+   * 回执（MC_ORDER_OK/FAIL）在途防连点。ORD.src=DnD 源行 guid（拖拽会话期；T10 带出①）。
+   * 任务 16：errView=错误日志视图开着；errRows=最近 MC_ERR_DATA.rows；errSel=选中行 guid；
+   * errOpen={entryIdx:true}=堆栈展开态（切选/新数据清）；gameVer=MC_ERR_DATA 附带的游戏版本
+   * （复制环境头用）。 */
   var S = { host: null, root: null, side: null, cfg: null, sub: null, toastEl: null, patchBtn: null, pendEl: null, pendTx: null, mbg: null, mdl: null, mdlRepoKey: null };
-  var ST = { snap: null, sel: null, pend: null, repoData: null, dl: null, chkWaiting: false, ord: false, order: null, ordRows: null, ordSaving: false, uninstGuid: null, cfGuid: null, scan: null, patchOpen: false, scanWait: false, verKey: null };
+  var ST = { snap: null, sel: null, pend: null, repoData: null, dl: null, chkWaiting: false, ord: false, order: null, ordRows: null, ordSaving: false, uninstGuid: null, cfGuid: null, scan: null, patchOpen: false, scanWait: false, verKey: null, errView: false, errRows: null, errSel: null, errOpen: {}, gameVer: '' };
   var ORD = { src: null }; // v2 任务 9：拖拽源 guid（null=无拖拽会话；T10 带出①：改存 guid 防拖拽中键盘重排错位）
   var TH = Object.create(null); // 滑条 100ms 节流句柄表
   var uninstTimer = null;       // v2 任务 10：MC_UNINST_DATA 等待超时句柄
@@ -363,6 +374,27 @@
     /* v2.0.5（作者拍板，撤 v3.3）：排序行 mod 名不再两行换行——回退基础 .__mc-nm（flex:1 +
      * nowrap + ellipsis）：90%+ 名称当前宽度可完整显示，放不下的省略号 + 悬停 title 全名；
      * 版本号随之右对齐到行尾（冲突 chip 前）。 */
+    /* ---- 任务 16：错误日志视图（原型 2026-11-21-error-log-panel-prototype 段照抄，类名 __mc 化） ---- */
+    + '#__mc_overlay .__mc-err-empty{padding:22px 18px;text-align:center;font-size:12px;color:#6b7180;letter-spacing:1px;}' /* 左栏全空态 */
+    + '#__mc_overlay .__mc-err-top{display:flex;align-items:center;gap:10px;margin-bottom:14px;}' /* 内容区顶：← 返回 + 标题 */
+    + '#__mc_overlay .__mc-err-crumb{font-size:15px;font-weight:600;letter-spacing:1px;}'
+    + '#__mc_overlay .__mc-err-dhead{display:flex;align-items:flex-start;gap:12px;padding-bottom:12px;border-bottom:1px solid #2a2f3d;margin-bottom:12px;}' /* 详情头：名/版本/GUID + 提示 + 复制钮 */
+    + '#__mc_overlay .__mc-err-dhead h2{font-size:17px;font-weight:600;display:flex;align-items:center;gap:8px;}'
+    + '#__mc_overlay .__mc-err-guid{font-size:11px;color:#6b7180;font-family:Consolas,monospace;margin-top:5px;word-break:break-all;}'
+    + '#__mc_overlay .__mc-err-hint{margin-left:auto;align-self:center;font-size:11px;color:#6b7180;white-space:nowrap;}'
+    + '#__mc_overlay .__mc-err-copy{width:28px;height:28px;border:1px solid #2a2f3d;background:transparent;border-radius:6px;color:#9aa0ad;display:inline-flex;align-items:center;justify-content:center;flex-shrink:0;cursor:pointer;font-family:inherit;}' /* 右上角单一复制图标（无批量/单条复制钮） */
+    + '#__mc_overlay .__mc-err-copy:hover{border-color:#e8a33d;color:#e8a33d;}'
+    + '#__mc_overlay .__mc-err-copy svg{width:14px;height:14px;}'
+    + '#__mc_overlay .__mc-ecard{background:#0f1219;border:1px solid #2a2f3d;border-radius:8px;padding:11px 13px;margin-bottom:10px;}' /* 一条错误记录卡 */
+    + '#__mc_overlay .__mc-ecard-h{display:flex;align-items:center;gap:9px;font-size:11.5px;color:#6b7180;font-family:Consolas,monospace;flex-wrap:wrap;}'
+    + '#__mc_overlay .__mc-lvl{font-size:10.5px;padding:1px 7px;border-radius:4px;border:1px solid rgba(248,113,113,.4);color:#f87171;background:rgba(248,113,113,.1);letter-spacing:.5px;font-family:"Segoe UI","Microsoft YaHei",system-ui,sans-serif;}' /* 级别徽章 */
+    + '#__mc_overlay .__mc-lvl.__mc-lvl-fatal{border-color:rgba(239,68,68,.65);background:rgba(239,68,68,.18);color:#fca5a5;}'
+    + '#__mc_overlay .__mc-emsg{margin:8px 0 0;font-size:12.5px;line-height:1.55;color:#e8e6e0;word-break:break-word;}'
+    + '#__mc_overlay .__mc-estack{margin:8px 0 0;padding:7px 0 0 10px;border-left:2px solid #2a2f3d;color:#9aa0ad;font:11.5px/1.6 Consolas,monospace;white-space:pre-wrap;word-break:break-word;overflow:hidden;max-height:38px;transition:max-height .2s ease;}' /* 堆栈默认折叠两行 */
+    + '#__mc_overlay .__mc-estack.__mc-eopen{max-height:400px;}'
+    + '#__mc_overlay .__mc-eexp{margin-top:6px;border:0;background:transparent;color:#6b7180;font-size:11.5px;padding:0;cursor:pointer;font-family:inherit;}' /* 展开完整堆栈/收起 */
+    + '#__mc_overlay .__mc-eexp:hover{color:#e8a33d;}'
+    + '#__mc_overlay .__mc-copy-ta{width:100%;height:220px;background:#0f1219;border:1px solid #2a2f3d;color:#e8e6e0;border-radius:6px;padding:6px 8px;font:11.5px/1.5 Consolas,monospace;resize:vertical;user-select:text;}' /* 复制兜底：手动选中复制框 */
     + '#__mc_overlay .__mc-side::-webkit-scrollbar,#__mc_overlay .__mc-cfg::-webkit-scrollbar{width:8px;}'
     + '#__mc_overlay .__mc-side::-webkit-scrollbar-thumb,#__mc_overlay .__mc-cfg::-webkit-scrollbar-thumb{background:#2a2f3d;border-radius:4px;}';
 
@@ -417,6 +449,16 @@
       chkTimer = setTimeout(function () { chkTimer = null; setChkBusy(false); }, 20000); // C# 未回包兜底
     });
     x.style.marginLeft = '0';
+    /* 任务 16：头部「错误日志」入口（检查更新右侧）——MC_ERR_GET → MC_ERR_DATA 渲染错误视图；
+     * 会话级数据（重启即空），每次进入都重拉最新。 */
+    var errlog = doc.createElement('button');
+    errlog.type = 'button'; errlog.className = '__mc-btn';
+    errlog.title = '\u9519\u8bef\u65e5\u5fd7'; errlog.setAttribute('aria-label', '\u9519\u8bef\u65e5\u5fd7');
+    errlog.innerHTML = icSvg('warn') + '<span>\u9519\u8bef\u65e5\u5fd7</span>';
+    errlog.addEventListener('click', function (e) {
+      e.stopPropagation();
+      openErrView(null);
+    });
     /* 套件名单任务 10：自更新入口迁此——自身行/页退役后头部版本区接管（可点态由 renderSub
      * 按 snap.self.ics ↑黄切换）。点击需仓库行在场（未查/失败不响应），
      * openUpdModal → MC_UPD('ModCenter') 与原行内徽标同链。 */
@@ -426,7 +468,7 @@
       var m = findMod(SELF_GUID);
       if (m) openUpdModal(m);
     });
-    head.appendChild(t); head.appendChild(sub); head.appendChild(chk); head.appendChild(x);
+    head.appendChild(t); head.appendChild(sub); head.appendChild(chk); head.appendChild(errlog); head.appendChild(x);
 
     var body = doc.createElement('div'); body.className = '__mc-body';
     var side = doc.createElement('div'); side.className = '__mc-side'; side.id = '__mc_side';
@@ -566,7 +608,8 @@
   var ICON_PATHS = {
     warn: '<path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3"/><path d="M12 9v4"/><path d="M12 17h.01"/>',
     up: '<circle cx="12" cy="12" r="10"/><path d="m16 12-4-4-4 4"/><path d="M12 16V8"/>',
-    pend: '<path d="M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8"/><path d="M21 3v5h-5"/><path d="M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16"/><path d="M8 16H3v5"/>' /* v4：仅弹窗装饰 chip 用（行内 ⟳ 已退役） */
+    pend: '<path d="M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8"/><path d="M21 3v5h-5"/><path d="M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16"/><path d="M8 16H3v5"/>', /* v4：仅弹窗装饰 chip 用（行内 ⟳ 已退役） */
+    copy: '<rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/>' /* 任务 16：错误日志右上角复制图标（Lucide copy） */
   };
   function icSvg(name) {
     return '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' + ICON_PATHS[name] + '</svg>';
@@ -633,6 +676,7 @@
 
   function renderSide() {
     if (!S.side) return;
+    if (ST.errView) { renderErrSide(); return; } // 任务 16：错误日志视图=侧栏完整变体分支
     if (ST.ord) { renderSideOrder(); return; } // v2 任务 9：排序模式=侧栏完整变体分支
     var ms = mods(), ts = tps();
     var h = shellWarnHtml(); // T16 I-2：缺壳告警置顶
@@ -839,8 +883,9 @@
       /* v2 任务 7：图标点击路由（原型 wireSide 同款 stopPropagation——不选行）。
        * cf=冲突详情弹窗（T11 前兜底文案）/ upd=更新确认弹窗（T8 真数据版：按 guid 对照
        * 最近 MC_REPO_DATA；无仓库数据/检查失败回退 T7 兜底壳）；
-       * 无 data-click（纯状态，cursor:default）不弹窗不选行。 */
-      var ic = e.target.closest ? e.target.closest('.__mc-ic') : null;
+       * 无 data-click（纯状态，cursor:default）不弹窗不选行。
+       * 任务 16：错误视图行内图标无独立路由（errView 时跳过本分支——整行都是选择热区）。 */
+      var ic = ST.errView ? null : (e.target.closest ? e.target.closest('.__mc-ic') : null);
       if (ic) {
         e.stopPropagation();
         var click = ic.getAttribute('data-click');
@@ -852,6 +897,14 @@
         return;
       }
       var row = e.target.closest ? e.target.closest('.__mc-mod-row') : null;
+      /* 任务 16：错误日志视图行点击=切换选中行（不进 mod 详情/不走 G4 安装直达） */
+      if (row && ST.errView) {
+        e.stopPropagation();
+        ST.errSel = row.getAttribute('data-guid');
+        ST.errOpen = {};
+        renderSide(); renderCfg();
+        return;
+      }
       /* v2 任务 9（裁定 4）：排序模式行点击不选行（不进 mod 详情/不弹窗） */
       if (row) {
         if (ST.ord) return;
@@ -1478,6 +1531,7 @@
 
   function renderCfg() {
     if (!S.cfg) return;
+    if (ST.errView) { renderErrCfg(); return; } // 任务 16：错误日志视图接管内容区（详情页同款变体）
     if (!ST.snap) {
       S.cfg.innerHTML = '<div class="__mc-loading">\u6b63\u5728\u8bfb\u53d6 mod \u914d\u7f6e\u2026</div>';
       return;
@@ -1593,15 +1647,18 @@
   }
 
   function cfModalHtml(m, cards) {
-    var h = '', hasPatch = false;
+    var h = '', hasPatch = false, hasErr = false;
     for (var i = 0; i < cards.length; i++) {
       h += cfCardHtml(m, cards[i], i);
       if (cards[i] && cards[i].tag === '\u811a\u672c\u78b0\u649e') hasPatch = true;
+      if (cards[i] && cards[i].err) hasErr = true; // 任务 15 协议：err=true 运行异常卡（任务 16 挂面板入口）
     }
     /* v3.1 两钮收口：停用/卸载入口在左列开关与详情页维护区，告警弹窗不摆破坏性按钮；
-     * "去调序"仅碰撞卡出现（Ruling 20：关闭弹窗 → 进排序模式）。 */
+     * "去调序"仅碰撞卡出现（Ruling 20：关闭弹窗 → 进排序模式）。
+     * 任务 16：运行异常卡在场 → 追加「查看错误日志」主钮（卡片顺序/内容不变，仅追加）。 */
     h += '<div class="__mc-m-acts"><button type="button" class="__mc-btn __mc-btn-mini" data-mact="close">\u5173\u95ed</button>'
       + (hasPatch ? '<button type="button" class="__mc-btn __mc-btn-pri __mc-btn-mini" data-mact="cforder">\u53bb\u8c03\u5e8f</button>' : '')
+      + (hasErr ? '<button type="button" class="__mc-btn __mc-btn-pri __mc-btn-mini" data-mact="errlog" data-guid="' + esc(m.guid) + '">\u67e5\u770b\u9519\u8bef\u65e5\u5fd7</button>' : '')
       + '</div>';
     return h;
   }
@@ -1660,6 +1717,178 @@
       closeModal();
       if (!ST.ord) ordToggle();
     });
+    /* 任务 16：「查看错误日志」——关闭弹窗并打开错误面板，定位到该 mod */
+    var elog = S.mdl.querySelector('[data-mact="errlog"]');
+    if (elog) elog.addEventListener('click', function (e) {
+      e.stopPropagation();
+      closeModal();
+      openErrView(elog.getAttribute('data-guid') || ev.guid);
+    });
+  }
+
+  /* ================= 任务 16：错误日志视图（会话级，无历史/无清空） ================= */
+
+  /* 行查找（guid 匹配 MC_ERR_DATA.rows） */
+  function errRowOf(guid) {
+    var rows = ST.errRows || [];
+    for (var i = 0; i < rows.length; i++) if (rows[i] && rows[i].guid === guid) return rows[i];
+    return null;
+  }
+
+  /* 左栏：按 suite 布尔分组（套件在前、三方在后——未归属行 C# 侧 suite=false 归三方）；
+   * 组标题仅在该组非空时出现；全空「暂无错误」。条数=折叠后记录条数（count，非发生次数）。 */
+  function renderErrSide() {
+    var h = '';
+    var rows = ST.errRows;
+    if (!rows) {
+      h = '<div class="__mc-loading">\u6b63\u5728\u8bfb\u53d6\u9519\u8bef\u65e5\u5fd7\u2026</div>';
+    } else if (!rows.length) {
+      h = '<div class="__mc-err-empty">\u6682\u65e0\u9519\u8bef</div>';
+    } else {
+      var suite = [], tp = [];
+      for (var i = 0; i < rows.length; i++) (rows[i].suite ? suite : tp).push(rows[i]);
+      if (suite.length) {
+        h += '<div class="__mc-cat">\u5957\u4ef6</div>';
+        for (var si = 0; si < suite.length; si++) h += errRowHtml(suite[si]);
+      }
+      if (tp.length) {
+        h += '<div class="__mc-cat"' + (suite.length ? ' style="padding-top:14px"' : '') + '>\u4e09\u65b9</div>';
+        for (var ti = 0; ti < tp.length; ti++) h += errRowHtml(tp[ti]);
+      }
+    }
+    S.side.innerHTML = h;
+  }
+
+  function errRowHtml(r) {
+    return '<div class="__mc-mod-row' + (ST.errSel === r.guid ? ' __mc-sel' : '')
+      + '" data-interactive data-guid="' + esc(r.guid) + '" title="' + esc(r.name) + '">'
+      + '<span class="__mc-ic __mc-red" style="cursor:default" aria-hidden="true">' + icSvg('warn') + '</span>'
+      + '<span class="__mc-nm">' + esc(r.name) + '</span>'
+      + '<span class="__mc-ver">' + esc(String(r.count)) + ' \u6761</span>'
+      + '<span class="__mc-ver">' + esc(r.last) + '</span>'
+      + '</div>';
+  }
+
+  /* 右区：← 返回 + 详情头（名/版本/GUID + 仅保留最近 50 条 + 单一复制图标）+ 条目卡列表 */
+  function renderErrCfg() {
+    var h = '<div class="__mc-err-top"><button type="button" class="__mc-btn __mc-btn-mini" data-act="errback">\u2190 \u8fd4\u56de</button>'
+      + '<span class="__mc-err-crumb">\u9519\u8bef\u65e5\u5fd7</span></div>';
+    var rows = ST.errRows;
+    if (!rows) { S.cfg.innerHTML = h + '<div class="__mc-loading">\u6b63\u5728\u8bfb\u53d6\u9519\u8bef\u65e5\u5fd7\u2026</div>'; return; }
+    if (!rows.length) { S.cfg.innerHTML = h + '<div class="__mc-err-empty">\u6682\u65e0\u9519\u8bef</div>'; return; }
+    var r = errRowOf(ST.errSel) || rows[0];
+    ST.errSel = r.guid; // 回落首行时同步（复制/展开态以选中行为准）
+    h += '<div class="__mc-err-dhead"><div><h2>' + esc(r.name) + verHtml(r.ver) + '</h2>'
+      + '<div class="__mc-err-guid">' + esc(r.guid) + '</div></div>'
+      + '<span class="__mc-err-hint">\u4ec5\u4fdd\u7559\u6700\u8fd1 50 \u6761</span>'
+      + '<button type="button" class="__mc-err-copy" data-act="errcopy" title="\u590d\u5236\u5168\u90e8\u9519\u8bef\u65e5\u5fd7" aria-label="\u590d\u5236\u5168\u90e8\u9519\u8bef\u65e5\u5fd7">' + icSvg('copy') + '</button></div>';
+    var entries = r.entries || [];
+    for (var i = 0; i < entries.length; i++) h += errEntryHtml(entries[i], i);
+    S.cfg.innerHTML = h;
+  }
+
+  /* 条目卡：时间/级别/来源 + 消息（rep>1 内联「（重复 N 次）」）+ 可展开堆栈 */
+  function errEntryHtml(e, i) {
+    var open = !!ST.errOpen[i];
+    var rep = e.rep > 1 ? '\uff08\u91cd\u590d ' + e.rep + ' \u6b21\uff09' : '';
+    var h = '<article class="__mc-ecard">'
+      + '<div class="__mc-ecard-h"><span>' + esc(e.t) + '</span>'
+      + '<span class="__mc-lvl' + (e.lv === 'Fatal' ? ' __mc-lvl-fatal' : '') + '">' + esc(e.lv) + '</span>'
+      + '<span>' + esc(e.src) + '</span></div>'
+      + '<div class="__mc-emsg">' + esc(e.msg) + esc(rep) + '</div>';
+    if (e.stack) {
+      h += '<pre class="__mc-estack' + (open ? ' __mc-eopen' : '') + '" data-estk="' + i + '">' + esc(e.stack) + '</pre>'
+        + '<button type="button" class="__mc-eexp" data-act="errex" data-i="' + i + '">'
+        + (open ? '\u6536\u8d77\u5806\u6808 \u25b4' : '\u5c55\u5f00\u5b8c\u6574\u5806\u6808 \u25be') + '</button>';
+    }
+    return h + '</article>';
+  }
+
+  /* 进错误视图（guid=定位行；null=保留当前/首行）——排序模式让位丢弃（与弹窗互斥视图），
+   * 每次进入都发 MC_ERR_GET 拉最新（会话缓冲可能已变）。 */
+  function openErrView(guid) {
+    ST.ord = false; ST.order = null; ORD.src = null;
+    ST.errView = true;
+    if (guid) ST.errSel = guid;
+    ST.errOpen = {};
+    renderSide(); renderCfg();
+    window.__mcOutbox.push({ type: 'MC_ERR_GET' });
+  }
+
+  function closeErrView() {
+    ST.errView = false;
+    ST.errSel = null;
+    ST.errOpen = {};
+    renderSide(); renderCfg();
+  }
+
+  /* 堆栈展开/收起：就地切换 class 与按钮文案（不整页重渲——保滚动位置；ST.errOpen 记态防重渲回弹） */
+  function toggleErrStack(i) {
+    var open = !ST.errOpen[i];
+    ST.errOpen[i] = open;
+    if (!S.cfg) return;
+    var pre = S.cfg.querySelector('[data-estk="' + i + '"]');
+    var btn = S.cfg.querySelector('[data-act="errex"][data-i="' + i + '"]');
+    if (pre) pre.className = '__mc-estack' + (open ? ' __mc-eopen' : '');
+    if (btn) btn.textContent = open ? '\u6536\u8d77\u5806\u6808 \u25b4' : '\u5c55\u5f00\u5b8c\u6574\u5806\u6808 \u25be';
+  }
+
+  function pad2(n) { return (n < 10 ? '0' : '') + n; }
+
+  /* 复制选中 mod 全部错误（≤50）：环境头（ModCenter 版本/游戏版本/时间戳）+ 逐条记录 */
+  function copyErrAll() {
+    var r = errRowOf(ST.errSel);
+    if (!r || !r.entries || !r.entries.length) return;
+    var selfVer = ST.snap && ST.snap.self ? ST.snap.self.ver : '';
+    var d = new Date();
+    var stamp = d.getFullYear() + '-' + pad2(d.getMonth() + 1) + '-' + pad2(d.getDate())
+      + ' ' + pad2(d.getHours()) + ':' + pad2(d.getMinutes()) + ':' + pad2(d.getSeconds());
+    var text = 'ModCenter v' + selfVer + ' \u00b7 \u6e38\u620f ' + (ST.gameVer || '\u672a\u77e5') + ' \u00b7 ' + stamp
+      + '\nMod: ' + r.name + (r.ver ? ' ' + r.ver : '') + ' (' + r.guid + ')\n---';
+    for (var i = 0; i < r.entries.length; i++) {
+      var e = r.entries[i];
+      text += (i === 0 ? '\n' : '\n\n') + '[' + e.t + '] [' + e.lvl + '] ' + e.src
+        + '\n' + e.msg + (e.stack ? '\n' + e.stack : '');
+    }
+    copyText(text);
+  }
+
+  /* 剪贴板三级降级：navigator.clipboard → 宿主文档 textarea+execCommand → 手动复制弹窗 */
+  function copyText(text) {
+    var ok = function () { toastRaw('\u5df2\u590d\u5236\u5230\u526a\u8d34\u677f', '', 'info'); };
+    var fallback = function () {
+      var done = false;
+      try {
+        var ta = S.host.createElement('textarea');
+        ta.value = text;
+        ta.style.position = 'fixed'; ta.style.opacity = '0';
+        S.host.body.appendChild(ta);
+        ta.focus(); ta.select();
+        try { done = !!S.host.execCommand('copy'); } catch (_) { done = false; }
+        if (ta.parentNode) ta.parentNode.removeChild(ta);
+      } catch (_) { done = false; }
+      if (done) ok();
+      else showCopyModal(text);
+    };
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(text).then(ok, fallback);
+      return;
+    }
+    fallback();
+  }
+
+  /* 兜底：可选中的全文弹窗（剪贴板两条通道都失败——CEF 权限/焦点异常场景） */
+  function showCopyModal(text) {
+    openModal('<h3>\u590d\u5236\u5931\u8d25</h3>'
+      + '<div class="__mc-m-sub">\u8bf7\u5168\u9009\u4e0b\u65b9\u6587\u672c\u6846\u5185\u5bb9\uff0c\u53f3\u952e\u6216 Ctrl+C \u624b\u52a8\u590d\u5236\u3002</div>'
+      + '<div class="__mc-m-sec"><textarea class="__mc-copy-ta" readonly></textarea></div>'
+      + '<div class="__mc-m-acts"><button type="button" class="__mc-btn __mc-btn-mini" data-mact="close">\u5173\u95ed</button></div>');
+    if (!S.mdl) return;
+    var ta = S.mdl.querySelector('.__mc-copy-ta');
+    if (ta) {
+      ta.value = text; // 经 value 赋值：不经 innerHTML，无转义面
+      ta.focus(); ta.select();
+    }
   }
 
   /* ---- v2 任务 12：L2 补丁碰撞汇总弹窗（MC_SCAN_DATA 全量：可归属组 + 未知来源组）----
@@ -2283,6 +2512,13 @@
       /* 套件名单单源任务 13：维护区「版本」按钮 → 版本选择弹窗（openVerModal 按 guid 对照仓行） */
       var vb = t.closest('[data-act="ver"]');
       if (vb) { e.stopPropagation(); openVerModal(findMod(vb.getAttribute('data-guid'))); return; }
+      /* 任务 16：错误日志视图动作（返回 / 堆栈展开收起 / 复制全部） */
+      var ebk = t.closest('[data-act="errback"]');
+      if (ebk) { e.stopPropagation(); closeErrView(); return; }
+      var eex = t.closest('[data-act="errex"]');
+      if (eex) { e.stopPropagation(); toggleErrStack(+eex.getAttribute('data-i')); return; }
+      var ecp = t.closest('[data-act="errcopy"]');
+      if (ecp) { e.stopPropagation(); copyErrAll(); return; }
       var m = curMod();
       if (!m) return;
       /* bool 开关 */
@@ -2738,6 +2974,17 @@
     if (event && event.type === 'MC_VER_DATA') onVerData(event);
     /* v2 任务 11：冲突详情（MC_CF_DATA）→ 占位壳换真卡片（L1 卡片 + L3 同域卡） */
     if (event && event.type === 'MC_CF_DATA') onCfData(event);
+    /* 任务 16：错误日志数据（MC_ERR_DATA）——存 ST.errRows/gameVer；错误视图开着才重绘
+     * （选中行不在新数据=该 mod 已无错误 → 回落首行；展开态清零防索引错位） */
+    if (event && event.type === 'MC_ERR_DATA') {
+      ST.errRows = event.rows || [];
+      ST.gameVer = event.gameVer || '';
+      if (ST.errView) {
+        if (!errRowOf(ST.errSel)) ST.errSel = ST.errRows.length ? ST.errRows[0].guid : null;
+        ST.errOpen = {};
+        renderSide(); renderCfg();
+      }
+    }
     /* v2 任务 12：L2 补丁碰撞扫描数据（MC_SCAN_DATA）→ 侧栏汇总行 + 汇总弹窗就地重绘 */
     if (event && event.type === 'MC_SCAN_DATA') {
       ST.scan = event;
@@ -2790,6 +3037,7 @@
     ST.cfGuid = null; clearCfTimer();         // v2 任务 11：冲突详情等待随面板拆终止
     ST.verKey = null; clearVerTimer(); verData = null; // 任务 13：版本列表等待随面板拆终止
     ST.patchOpen = false; ST.scanWait = false; // v2 任务 12：碰撞汇总弹窗态随面板拆清
+    ST.errView = false; ST.errSel = null; ST.errOpen = {}; // 任务 16：错误视图随面板拆复位（重开经头部按钮重拉）
     ORD.src = null; // v2 任务 9：面板拆=拖拽会话终止（重开面板需重新 dragstart）
     if (el.isConnected && el.parentNode) el.parentNode.removeChild(el);
     /* 关闭即清节流句柄（评审备忘 3）：撤销未触发的 trailing 补发，面板关闭后不再发消息 */
@@ -2833,6 +3081,7 @@
     ST.cfGuid = null; clearCfTimer();         // v2 任务 11
     ST.verKey = null; clearVerTimer(); verData = null; // 任务 13
     ST.patchOpen = false; ST.scanWait = false; // v2 任务 12
+    ST.errView = false; ST.errSel = null; ST.errOpen = {}; // 任务 16
     ORD.src = null; // v2 任务 9
     for (var id in TH) if (TH[id] && TH[id].timer != null) clearTimeout(TH[id].timer);
     TH = Object.create(null);

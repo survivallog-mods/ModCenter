@@ -224,7 +224,7 @@ internal static class ConfigBridge
             // 未安装（dll 不在场）实机反馈修正：不挂 ⚠红——主动卸载不是故障，行内锁定开关
             // 已表达；红标只留给真冲突（冲突/仓库态对未加载插件本就无意义）。
             // 已有待生效意图的行不再给可动作徽标（裁定 3 语义保留，只是不再补 ⟳）。
-            // v2 任务 11：冲突徽标置最前；任务 12：L2 碰撞插其间（同 cf 弹窗）；停用行弱化（M7）
+            // v2 任务 11：冲突徽标置最前；任务 15：红/橙各一枚（L2 碰撞并入橙标）；停用行弱化（M7）
             var ics = CfIcsFor(cfRows, mm.Guid);
             if (!mi.Enabled) WeakenCfIcs(ics); // T11 M7：套件停用（General.Enabled=false）→ cf 徽标弱化+tip 前缀
             var repoIcs = RepoIcsOf(mm.Guid, repoPend);
@@ -2290,10 +2290,11 @@ internal static class ConfigBridge
         return list.OrderBy(e => e.Level == "red" ? 0 : 1).ToList(); // v3 两级：red→orange 稳定排序
     }
 
-    /// <summary>行内冲突 ics（BuildSnapshot/BuildTp 共用）：L1 每条一图标（红=严重 ⚠ / 橙=叠加
-    /// 小黄叹号 !，click=cf），随后 L2 碰撞橙标（每 mod 聚合一枚小黄叹号，click=cf）。
-    /// （L3 同域叠加标随静态域表 v2.4.0 删除。）未加载行（套件 dll 缺失/缺席行）不产冲突标。
-    /// 无命中=空表。</summary>
+    /// <summary>行内冲突 ics（BuildSnapshot/BuildTp 共用，任务 15 起按色级各一枚）：
+    /// ⚠红一枚 = 任一 L1 red 条目或 ErrorLog 有运行报错（两者都有时 tip 提示"冲突与运行报错"）；
+    /// ⚠橙一枚 = 任一 L1 orange 条目或 L2 补丁碰撞（tip 优先橙色 L1 的 TipShort，否则 L2 聚合 tip）。
+    /// click 均为 cf（停用行由 WeakenCfIcs 统一弱化）。（L3 同域叠加标随静态域表 v2.4.0 删除。）
+    /// 未加载行（套件 dll 缺失/缺席行）不产冲突标。无命中=空表。</summary>
     private static List<IcInfo> CfIcsFor(List<CfRow> all, string guid)
     {
         var list = new List<IcInfo>();
@@ -2302,11 +2303,29 @@ internal static class ConfigBridge
         foreach (var r in all)
             if (string.Equals(r.Guid, guid, StringComparison.OrdinalIgnoreCase)) { row = r; break; }
         if (row == null) return list;
-        var entries = EntriesFor(row, all);
-        foreach (var e in entries) list.Add(EntryIc(e));
+        var entries = EntriesFor(row, all); // red→orange 稳定序
+        var redEntry = entries.FirstOrDefault(e => e.Level == "red");
+        var hasErrors = ErrorLog.HasErrors(guid);
+        if (redEntry != null || hasErrors)
+        {
+            string tip;
+            if (redEntry != null && hasErrors) tip = "严重告警：冲突与运行报错，点击查看";
+            else if (hasErrors) tip = "运行报错，点击查看";
+            else tip = redEntry.TipShort;
+            list.Add(new IcInfo { K = "red", Click = "cf", Tip = tip });
+        }
         // v2 任务 12：L2 运行时碰撞（只统计可归属已装 mod 的组；未知来源只进扫描汇总，裁定 3）
         var l2 = PatchScan.IcsFor(guid);
-        if (l2 != null) list.Add(l2);
+        var orangeEntry = entries.FirstOrDefault(e => e.Level == "orange");
+        if (orangeEntry != null || l2 != null)
+            list.Add(new IcInfo
+            {
+                K = "orange",
+                Click = "cf",
+                Tip = orangeEntry != null ? orangeEntry.TipShort
+                    : !string.IsNullOrEmpty(l2.Tip) ? l2.Tip
+                    : "和其他 mod 有冲突，点击查看",
+            });
         return list;
     }
 
@@ -2323,20 +2342,9 @@ internal static class ConfigBridge
             }
     }
 
-    /// <summary>行内 L1 冲突图标（v4：红=确定不可用、橙=其余告警；tip=表内 TipShort 逐字，
-    /// 完整结论在弹窗卡片；G 字段随三标记体系退役）。</summary>
-    private static IcInfo EntryIc(ConflictEntry e)
-    {
-        return new IcInfo
-        {
-            K = e.Level,
-            Click = "cf",
-            Tip = e.TipShort,
-        };
-    }
-
-    /// <summary>MC_CF {guid} → MC_CF_DATA {guid,cards[]}：卡片顺序与行内 ics 同源（L1 色级序 →
-    /// L2 碰撞卡（v2 任务 12；v3.2 起全部碰撞一张卡）。（L3 同域卡随静态域表 v2.4.0 删除。）
+    /// <summary>MC_CF {guid} → MC_CF_DATA {guid,cards[]}：卡片顺序与行内 ics 同组同源（任务 15）：
+    /// 红 L1 冲突卡 → 运行异常卡（ErrorLog 命中时追加，Err=true）→ 橙 L1 → L2 碰撞卡
+    /// （v2 任务 12；v3.2 起全部碰撞一张卡）。（L3 同域卡随静态域表 v2.4.0 删除。）
     /// 未在链上/缺席行 → 空 cards（面板给空态壳，不误报）。</summary>
     private static void HandleCf(string guid)
     {
@@ -2346,15 +2354,36 @@ internal static class ConfigBridge
             foreach (var r in rows)
                 if (string.Equals(r.Guid, guid, StringComparison.OrdinalIgnoreCase)) { row = r; break; }
         var data = new CfData { Guid = guid };
+        var nRed = 0; var nOr = 0; var nErr = 0;
         if (row != null)
         {
-            var entries = EntriesFor(row, rows);
-            foreach (var e in entries) data.Cards.Add(EntryCard(e));
+            var entries = EntriesFor(row, rows); // red→orange 稳定序
+            foreach (var e in entries)
+                if (e.Level == "red") { data.Cards.Add(EntryCard(e)); nRed++; }
+            if (ErrorLog.HasErrors(row.Guid))
+            {
+                var recs = ErrorLog.ForGuid(row.Guid); // newest-first
+                var n = recs.Sum(r => r.Repeat); // Repeat 1 基且逐次 ++，本身即该族总次数（Task 14 验收口径）
+                var card = new CfCardInfo
+                {
+                    Lv = "red",
+                    Tag = "运行异常",
+                    Err = true,
+                    Title = "本次启动运行时报错 " + n.ToString(CultureInfo.InvariantCulture) + " 次，可能影响功能。",
+                    Reason = recs[0].Message, // 最新一条
+                };
+                card.Tips.Add("打开错误日志，复制详情反馈给作者");
+                card.Tips.Add("重启后仍出现，先停用该 mod 排查");
+                data.Cards.Add(card);
+                nErr = 1;
+            }
+            foreach (var e in entries)
+                if (e.Level != "red") { data.Cards.Add(EntryCard(e)); nOr++; }
             var cols = PatchScan.CollisionsFor(row.Guid);
             if (cols.Count > 0) data.Cards.Add(PatchCard(cols, row.Guid)); // T12 L2（v3.2：全部碰撞一张卡）
         }
         PushEvent(data.ToJson());
-        Log("cf " + guid + " → " + data.Cards.Count + " 卡片" + (row == null ? "（不在链上/缺席行）" : ""));
+        Log("cf " + guid + " → 红" + nRed + "/橙" + nOr + "/异常" + nErr + " 卡" + (row == null ? "（不在链上/缺席行）" : ""));
     }
 
     private static CfCardInfo EntryCard(ConflictEntry e)
@@ -2414,6 +2443,78 @@ internal static class ConfigBridge
         catch (Exception e) { Log("warn MC_SCAN_DATA 推送失败: " + e.Message); }
     }
 
+    // ============ 错误日志面板（任务 16：MC_ERR_GET → MC_ERR_DATA 快照即回） ============
+
+    /// <summary>错误日志数据装配：遍历 <see cref="ErrorLog.Keys"/>（会话级缓冲，无历史）。
+    /// 名称/版本 _repoRows 优先（RepoRow.Guid==key），缺省回退 SuiteRoster 显示名/名单版本，
+    /// 再缺省回退链上插件元数据（三方未入名单场景）；未归属行固定 name=未归属（suite=false）；
+    /// 自身行 name=Mod 管理中心、ver=本插件版本（spec：自身错误也须可见，名单含自身行则归套件组）。
+    /// count=折叠后记录条数（非 Repeat 总和）；last=最新一条 HH:mm:ss；entries=newest-first ≤50。</summary>
+    private static ErrData BuildErrData()
+    {
+        var data = new ErrData
+        {
+            GameVer = (GameVersion.ReadCached() ?? GameVersion.ReadLocal())?.Display ?? "",
+        };
+        foreach (var key in ErrorLog.Keys)
+        {
+            var recs = ErrorLog.ForGuid(key);
+            if (recs.Count == 0) continue; // 防 Keys 与列表瞬间不一致（理论不可达，Drain 只增不删）
+            var row = new ErrRowInfo
+            {
+                Guid = key,
+                Count = recs.Count,
+                Last = recs[0].At.ToString("HH:mm:ss", CultureInfo.InvariantCulture),
+            };
+            if (string.Equals(key, ErrorLog.Unattributed, StringComparison.OrdinalIgnoreCase))
+            {
+                row.Name = "未归属";
+            }
+            else if (string.Equals(key, ModCenterPlugin.Guid, StringComparison.OrdinalIgnoreCase))
+            {
+                row.Name = "Mod 管理中心";
+                row.Ver = ModCenterPlugin.Version;
+                row.Suite = SuiteRoster.TryGetByGuid(key, out _);
+            }
+            else
+            {
+                RepoRow rr = null;
+                if (_repoRows != null)
+                    foreach (var r in _repoRows)
+                        if (r != null && string.Equals(r.Guid, key, StringComparison.OrdinalIgnoreCase)) { rr = r; break; }
+                if (rr != null)
+                {
+                    row.Name = rr.Name;
+                    row.Ver = rr.Local ?? "";
+                }
+                else if (SuiteRoster.TryGetByGuid(key, out var e))
+                {
+                    row.Name = SuiteRoster.DisplayOf(e);
+                    row.Ver = e.Version ?? "";
+                }
+                else
+                {
+                    var p = PluginOfGuid(key);
+                    row.Name = p?.Metadata?.Name ?? key;
+                    row.Ver = p?.Metadata?.Version?.ToString() ?? "";
+                }
+                row.Suite = SuiteRoster.TryGetByGuid(key, out _);
+            }
+            foreach (var rec in recs)
+                row.Entries.Add(new ErrEntryInfo
+                {
+                    T = rec.At.ToString("HH:mm:ss", CultureInfo.InvariantCulture),
+                    Lv = rec.Level,
+                    Src = rec.Source,
+                    Msg = rec.Message,
+                    Stack = rec.Stack,
+                    Rep = rec.Repeat,
+                });
+            data.Rows.Add(row);
+        }
+        return data;
+    }
+
     // ============ 消息泵（主线程，Ticker 每帧调） ============
 
     internal static void EnqueueOutboxJson(string json) => Inbox.Enqueue(json);
@@ -2436,6 +2537,9 @@ internal static class ConfigBridge
                 }
             }
             while (Inbox.TryDequeue(out var json)) HandleOutbox(json);
+            // 任务 14：错误缓冲排空（主线程归属/去重/裁剪；隔离——ErrorLog 异常不炸桥泵）
+            try { ErrorLog.Drain(); }
+            catch (Exception e) { Log("warn ErrorLog 排空异常: " + e.Message); }
             if (Dirty.Count > 0)
             {
                 _dirtyAge += dt;
@@ -2561,6 +2665,10 @@ internal static class ConfigBridge
                         // v2 任务 12：L2 补丁碰撞手动刷新（重扫 → 快照橙标 + MC_SCAN_DATA 汇总）
                         case "MC_SCAN":
                             HandlePatchScan();
+                            break;
+                        // 任务 16：错误日志面板（会话级缓冲快照即回——无后台链路/无历史）
+                        case "MC_ERR_GET":
+                            PushEvent(BuildErrData().ToJson());
                             break;
                         // v2 任务 13：底部待生效条两钮（撤销全部待生效 / 一键重启）
                         case "MC_PENDING_UNDO":

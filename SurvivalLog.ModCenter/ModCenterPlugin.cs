@@ -136,6 +136,10 @@ public sealed class ModCenterPlugin : BasePlugin
 
         SuiteRoster.LoadCache(); // v2.4.0：套件名单缓存（主线程；只读文件不碰 Chainloader，失败只 warn）
 
+        // 任务 14：运行错误监听（Error/Fatal → 内存缓冲，面板红标数据源）——注册失败只 warn，不影响面板
+        try { ErrorLog.Register(); }
+        catch (Exception e) { Log("warn ErrorLog 注册失败: " + e.Message); }
+
         Log("loaded");
         Trace($"loaded v{Version}（配置桥：Meta 九表+快照/写/消息协议/Save 防抖；面板 UI 待任务 7）"
               + (ShellMissing ? " | WARN 启动清理组件缺失 MCShell.dll" : ""));
