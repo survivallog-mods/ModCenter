@@ -88,6 +88,10 @@ internal static class ConfigBridge
     private static string _pendSig;        // 摘要签名（变化才推送）；null=首拍未同步（只同步不推，MC_OPEN 会补推）
     private static float _pendAcc;         // Pump 2s 节拍累加器
 
+    // ---- 任务 14 修复（spec §11）：错误红标即时推送——Drain 入账且距上次错误推送 ≥2s 才推快照 ----
+    private static float _errRenderAge = 2f; // 距上次 ErrorLog 触发渲染的秒数（初值 2 = 首个错误立即推）
+    private static bool _errRenderDue;       // 有新错误但还在节流窗内 → 到点补推（防"最后一拨"漏推）
+
     // ---- v2.2.0：cfg 参数修改会话级跟踪（待生效明细 cfg 档数据源）----
     // key = "<guid小写>:<展示键>"，value = badge（reload|reboot）。只在面板写路径记录（HandleSet /
     // 第三方启停）；badge=now 不记（立即生效），cfg 缺省不记（未知时机）。重启后新会话为空 =
@@ -250,7 +254,7 @@ internal static class ConfigBridge
             if (e == null || string.IsNullOrEmpty(e.Mod)) continue;
             var guid = SuiteRoster.GuidOf(e);
             if (string.Equals(guid, ModCenterPlugin.Guid, StringComparison.OrdinalIgnoreCase)) continue;
-            seen.Add(guid);
+            if (!seen.Add(guid)) continue; // suite.json 重复行（同 GUID）只出一条侧栏行
             yield return new MetaMod { Guid = guid, Name = SuiteRoster.DisplayOf(e), En = e.Mod, Desc = e.Summary ?? "" };
         }
         if (SuiteRoster.Ready) yield break; // 名单就绪 = 唯一成员源，绝不做清单补偿（spec §4）
@@ -1421,7 +1425,8 @@ internal static class ConfigBridge
         });
     }
 
-    /// <summary>显式版本安装/回退（spec 2026-11-21 §6，MC_UPD_VER {repoKey, version}）：台账缓存
+    /// <summary>显式版本安装/回退（spec 2026-11-21 §6，MC_UPD_VER {repoKey, version}）：面板自身
+    /// 先拒（面板无入口，探针/直发同拒——repoKey 推导 GUID 比对）；台账缓存
     /// 必须命中（面板打开时拉的表——未命中/查无该版本=会话内无数据，同步拒"版本列表过期，
     /// 重新打开"）；行取 _repoRows（行不在=没检查过更新，dll/guid 就绪才有得装）；只过
     /// <see cref="RepoBlocked"/>（待生效/链闸）——显式版本允许降级/同版重装（方向闸不参与，
@@ -1429,6 +1434,15 @@ internal static class ConfigBridge
     /// （AssetUrl=桶内 zip 直连，COS 唯一来源），<see cref="StartRepoChainJobs"/> 复用整条下载链。</summary>
     private static void HandleUpdVer(string repoKey, string version)
     {
+        // spec §6：面板自身不提供版本选择（只能更新到最新版）——事件带 repoKey，按命名约定
+        // 推导 GUID 比对（"ModCenter" → com.local.survivallog.modcenter），链路启动前先拒。
+        if (!string.IsNullOrEmpty(repoKey)
+            && string.Equals(RepoDecision.GuidOf(repoKey), ModCenterPlugin.Guid, StringComparison.OrdinalIgnoreCase))
+        {
+            Log("upd-ver 拒绝：面板自身");
+            McToast("面板自身不提供版本选择", "err", "只能更新到最新版本");
+            return;
+        }
         if (!VersionCatalog.TryGet(repoKey, out var versions))
         {
             McToast("版本列表过期了", "info", "重新打开版本列表再选");
@@ -2364,13 +2378,15 @@ internal static class ConfigBridge
             {
                 var recs = ErrorLog.ForGuid(row.Guid); // newest-first
                 var n = recs.Sum(r => r.Repeat); // Repeat 1 基且逐次 ++，本身即该族总次数（Task 14 验收口径）
+                var reason = recs[0].Message ?? ""; // 最新一条（ErrorLog 已拆首行=单行；再按 spec §11 截长）
+                if (reason.Length > 200) reason = reason.Substring(0, 200) + "…";
                 var card = new CfCardInfo
                 {
                     Lv = "red",
                     Tag = "运行异常",
                     Err = true,
                     Title = "本次启动运行时报错 " + n.ToString(CultureInfo.InvariantCulture) + " 次，可能影响功能。",
-                    Reason = recs[0].Message, // 最新一条
+                    Reason = reason,
                 };
                 card.Tips.Add("打开错误日志，复制详情反馈给作者");
                 card.Tips.Add("重启后仍出现，先停用该 mod 排查");
@@ -2503,7 +2519,8 @@ internal static class ConfigBridge
             foreach (var rec in recs)
                 row.Entries.Add(new ErrEntryInfo
                 {
-                    T = rec.At.ToString("HH:mm:ss", CultureInfo.InvariantCulture),
+                    // spec §10：复制格式逐条 [yyyy-MM-dd HH:mm:ss]——T 给全文，面板显示自行截时分秒
+                    T = rec.At.ToString("yyyy-MM-dd HH:mm:ss", CultureInfo.InvariantCulture),
                     Lv = rec.Level,
                     Src = rec.Source,
                     Msg = rec.Message,
@@ -2537,9 +2554,21 @@ internal static class ConfigBridge
                 }
             }
             while (Inbox.TryDequeue(out var json)) HandleOutbox(json);
-            // 任务 14：错误缓冲排空（主线程归属/去重/裁剪；隔离——ErrorLog 异常不炸桥泵）
-            try { ErrorLog.Drain(); }
+            // 任务 14：错误缓冲排空（主线程归属/去重/裁剪；隔离——ErrorLog 异常不炸桥泵）。
+            // 入账 >0 → 面板开着也即时推快照（行内红标立刻出现，spec §11）；2s 节流挡错误风暴
+            // 逐拍刷屏，窗内到账的记 _errRenderDue 到点补推——不影响周期推送/pending 节拍。
+            var errNew = 0;
+            try { errNew = ErrorLog.Drain(); }
             catch (Exception e) { Log("warn ErrorLog 排空异常: " + e.Message); }
+            _errRenderAge += dt;
+            if (errNew > 0) _errRenderDue = true;
+            if (_errRenderDue && _errRenderAge >= 2f)
+            {
+                _errRenderDue = false;
+                _errRenderAge = 0f;
+                try { PushRender(BuildSnapshot().ToJson()); }
+                catch (Exception e) { Log("warn 错误红标快照推送失败: " + e.Message); }
+            }
             if (Dirty.Count > 0)
             {
                 _dirtyAge += dt;

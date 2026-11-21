@@ -68,15 +68,39 @@ internal static class ErrorLog
         {
             try
             {
+                var full = e.Data?.ToString();
+                if (!string.IsNullOrEmpty(full)) full += CaptureStack();
                 Queue.Enqueue(new RawEvent
                 {
                     At = DateTime.Now,
                     Level = e.Level.ToString(),
                     Source = e.Source?.SourceName,
-                    Full = e.Data?.ToString(),
+                    Full = full,
                 });
             }
             catch { } // 日志链路上的监听器绝不反抛（BepInEx 会兜，但仍不制造噪音）
+        }
+
+        /// <summary>补一段“记录线程栈”：部分框架（如 HarmonyX）只写异常消息+极短栈，
+        /// 这里把写入日志时的调用链一并留档，便于反馈时看到更完整的上下文。
+        /// 不截断行数（调用栈本身有限；50 条上限只约束错误记录数，不约束堆栈内容）。
+        /// 放在监听线程执行（错误本就低频），失败静默忽略。</summary>
+        private static string CaptureStack()
+        {
+            try
+            {
+                var lines = Environment.StackTrace.Split('\n');
+                var sb = new System.Text.StringBuilder();
+                sb.Append("\n--- 记录线程栈 ---\n");
+                for (var i = 0; i < lines.Length; i++)
+                {
+                    var s = lines[i].TrimEnd('\r');
+                    if (s.Length == 0) continue;
+                    sb.Append(s).Append('\n');
+                }
+                return sb.ToString().TrimEnd();
+            }
+            catch { return ""; }
         }
 
         public void Dispose() { } // 无资源；不主动摘除（随进程生命周期）
@@ -87,9 +111,11 @@ internal static class ErrorLog
     ///（IL2CPPChainloader.Instance.Plugins 匹配 Metadata.Name 或 GUID，OrdinalIgnoreCase；
     /// 匹配不到/插件表未就绪 → <see cref="Unattributed"/>）→ 入对应 key 的 newest-first 列表：
     /// 与 [0] 同 Source+Message 只 Repeat++（At 刷新为最近一次），否则 Insert(0)；超 50 裁最旧。
+    /// 返回本轮入账条数（新插 + 重复折叠各计 1）——Pump 据此触发红标即时推送（spec §11）。
     /// </summary>
-    internal static void Drain()
+    internal static int Drain()
     {
+        var changed = 0;
         while (Queue.TryDequeue(out var raw))
         {
             if (raw == null || string.IsNullOrEmpty(raw.Full)) continue;
@@ -116,11 +142,14 @@ internal static class ErrorLog
             {
                 list[0].Repeat++;
                 list[0].At = rec.At; // 重复族时间=最近一次出现
+                changed++;
                 continue;
             }
             list.Insert(0, rec);
             if (list.Count > Cap) list.RemoveRange(Cap, list.Count - Cap);
+            changed++;
         }
+        return changed;
     }
 
     /// <summary>SourceName → 插件 GUID（主线程；Chainloader 未就绪/异常/无匹配 → Unattributed）。</summary>

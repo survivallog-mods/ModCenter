@@ -183,6 +183,28 @@
     + '#__mc_overlay .__mc-mod-title h2{font-size:18px;font-weight:600;}'
     + '#__mc_overlay .__mc-mod-title .__mc-en{font-size:12px;color:#6b7180;font-weight:400;}'
     + '#__mc_overlay .__mc-mod-title .__mc-v{font-size:12px;color:#6b7180;font-weight:400;font-family:Consolas,monospace;}' /* v2.0.6：详情页标题行版本号（名 + 英文标识右侧） */
+    + '#__mc_overlay .__mc-mod-title .__mc-vsel{display:inline-flex;align-items:center;gap:4px;background:transparent;border:1px solid #2a2f3d;border-radius:5px;padding:1px 6px;cursor:pointer;font-family:Consolas,monospace;font-size:11.5px;color:#9aa0ad;transition:.15s;}'
+    + '#__mc_overlay .__mc-mod-title .__mc-vsel:hover{border-color:#e8a33d;color:#e8a33d;}'
+    + '#__mc_overlay .__mc-vcaret{font-size:9px;color:#6b7180;}'
+    + '#__mc_overlay .__mc-ver-row{display:flex;align-items:center;gap:10px;padding:7px 0;border-bottom:1px solid rgba(255,255,255,.06);}' /* 版本列表行：版本/日期/使用中 + 眼睛/安装图标 */
+    + '#__mc_overlay .__mc-ver-main{display:flex;align-items:center;gap:8px;min-width:0;flex:1;}'
+    + '#__mc_overlay .__mc-ver-date{font-size:11px;color:#6b7180;}'
+    + '#__mc_overlay .__mc-ver-cur{font-size:11px;color:#4ade80;}'
+    + '#__mc_overlay .__mc-ver-acts{display:flex;align-items:center;gap:6px;flex-shrink:0;}'
+    + '#__mc_overlay .__mc-iconbtn{width:28px;height:28px;border:1px solid #2a2f3d;background:transparent;border-radius:6px;color:#9aa0ad;display:inline-flex;align-items:center;justify-content:center;cursor:pointer;padding:0;font-family:inherit;transition:.15s;}'
+    + '#__mc_overlay .__mc-iconbtn svg{width:14px;height:14px;}'
+    + '#__mc_overlay .__mc-iconbtn:hover{border-color:#e8a33d;color:#e8a33d;}'
+    + '#__mc_overlay .__mc-iconbtn-pri{border-color:rgba(96,165,250,.5);color:#60a5fa;}'
+    + '#__mc_overlay .__mc-iconbtn-pri:hover{border-color:#60a5fa;background:rgba(96,165,250,.12);color:#93c5fd;}'
+    + '#__mc_overlay .__mc-md{font-size:12px;line-height:1.7;color:#cfd3dc;word-break:break-word;overflow-wrap:anywhere;}' /* 发版说明 markdown 预览 */
+    + '#__mc_overlay .__mc-md-h2{font-size:13px;color:#e8a33d;font-weight:600;margin:8px 0 4px;}'
+    + '#__mc_overlay .__mc-md-h3{font-size:12.5px;color:#e8e6e0;font-weight:600;margin:8px 0 3px;}'
+    + '#__mc_overlay .__mc-md-p{margin:3px 0;}'
+    + '#__mc_overlay .__mc-md-ul{margin:3px 0 3px 2px;}'
+    + '#__mc_overlay .__mc-md-li{position:relative;padding-left:12px;margin:2px 0;}'
+    + '#__mc_overlay .__mc-md-li:before{content:"\\2022";position:absolute;left:2px;color:#6b7180;}'
+    + '#__mc_overlay .__mc-md-gap{height:6px;}'
+    + '#__mc_overlay .__mc-md code{font-family:Consolas,monospace;font-size:11.5px;background:#0f1219;border:1px solid #2a2f3d;border-radius:3px;padding:0 3px;}'
     + '#__mc_overlay .__mc-mod-desc{margin:8px 0 4px;font-size:13px;color:#9aa0ad;line-height:1.6;}'
     + '#__mc_overlay .__mc-stop-banner{margin:10px 0 0;padding:9px 14px;border-radius:8px;font-size:12.5px;line-height:1.6;background:rgba(127,29,29,.2);border:1px solid rgba(248,113,113,.27);color:#fca5a5;display:none;}'
     + '#__mc_overlay .__mc-stop-banner.__mc-show{display:block;}'
@@ -390,8 +412,12 @@
     + '#__mc_overlay .__mc-lvl{font-size:10.5px;padding:1px 7px;border-radius:4px;border:1px solid rgba(248,113,113,.4);color:#f87171;background:rgba(248,113,113,.1);letter-spacing:.5px;font-family:"Segoe UI","Microsoft YaHei",system-ui,sans-serif;}' /* 级别徽章 */
     + '#__mc_overlay .__mc-lvl.__mc-lvl-fatal{border-color:rgba(239,68,68,.65);background:rgba(239,68,68,.18);color:#fca5a5;}'
     + '#__mc_overlay .__mc-emsg{margin:8px 0 0;font-size:12.5px;line-height:1.55;color:#e8e6e0;word-break:break-word;}'
-    + '#__mc_overlay .__mc-estack{margin:8px 0 0;padding:7px 0 0 10px;border-left:2px solid #2a2f3d;color:#9aa0ad;font:11.5px/1.6 Consolas,monospace;white-space:pre-wrap;word-break:break-word;overflow:hidden;max-height:38px;transition:max-height .2s ease;}' /* 堆栈默认折叠两行 */
-    + '#__mc_overlay .__mc-estack.__mc-eopen{max-height:400px;}'
+    + '#__mc_overlay .__mc-estack{margin:8px 0 0;padding:7px 0 0 10px;border-left:2px solid #2a2f3d;color:#9aa0ad;font:11.5px/1.6 Consolas,monospace;white-space:pre-wrap;word-break:break-word;overflow:hidden;max-height:54px;transition:max-height .2s ease;}' /* 堆栈默认折叠三行 */
+    + '#__mc_overlay .__mc-estack.__mc-eopen{max-height:55vh;overflow-y:auto;overflow-x:auto;padding-right:6px;}' /* 展开=完整内容可滚动，不截断 */
+    + '#__mc_overlay .__mc-estack.__mc-eopen::-webkit-scrollbar{width:8px;height:8px;}'
+    + '#__mc_overlay .__mc-estack.__mc-eopen::-webkit-scrollbar-track{background:#0f1219;border-radius:4px;}'
+    + '#__mc_overlay .__mc-estack.__mc-eopen::-webkit-scrollbar-thumb{background:#3a4050;border-radius:4px;}'
+    + '#__mc_overlay .__mc-estack.__mc-eopen::-webkit-scrollbar-thumb:hover{background:#4b5265;}'
     + '#__mc_overlay .__mc-eexp{margin-top:6px;border:0;background:transparent;color:#6b7180;font-size:11.5px;padding:0;cursor:pointer;font-family:inherit;}' /* 展开完整堆栈/收起 */
     + '#__mc_overlay .__mc-eexp:hover{color:#e8a33d;}'
     + '#__mc_overlay .__mc-copy-ta{width:100%;height:220px;background:#0f1219;border:1px solid #2a2f3d;color:#e8e6e0;border-radius:6px;padding:6px 8px;font:11.5px/1.5 Consolas,monospace;resize:vertical;user-select:text;}' /* 复制兜底：手动选中复制框 */
@@ -547,6 +573,14 @@
 
   function mods() { return ST.snap ? ST.snap.mods : []; }
   function tps() { return ST.snap ? ST.snap.tp : []; }
+  /* 固定展示序：按中文名（带拼音排序）升序，同名按 GUID 兜底；每次渲染复制后排序，
+   * 不改变快照数组本身。此前顺序随快照/COS 目录枚举变化，两次启动不一致。 */
+  function modNameCmp(a, b) {
+    var na = String((a && a.name) || ''), nb = String((b && b.name) || '');
+    var c = na.localeCompare(nb, 'zh-Hans-CN');
+    if (c !== 0) return c;
+    return String((a && a.guid) || '').localeCompare(String((b && b.guid) || ''));
+  }
   function findMod(guid) {
     var i, ms = mods();
     for (i = 0; i < ms.length; i++) if (ms[i].guid === guid) return ms[i];
@@ -609,7 +643,9 @@
     warn: '<path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3"/><path d="M12 9v4"/><path d="M12 17h.01"/>',
     up: '<circle cx="12" cy="12" r="10"/><path d="m16 12-4-4-4 4"/><path d="M12 16V8"/>',
     pend: '<path d="M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8"/><path d="M21 3v5h-5"/><path d="M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16"/><path d="M8 16H3v5"/>', /* v4：仅弹窗装饰 chip 用（行内 ⟳ 已退役） */
-    copy: '<rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/>' /* 任务 16：错误日志右上角复制图标（Lucide copy） */
+    copy: '<rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/>', /* 任务 16：错误日志右上角复制图标（Lucide copy） */
+    eye: '<path d="M2.06 12.35a1 1 0 0 1 0-.7 10.75 10.75 0 0 1 19.88 0 1 1 0 0 1 0 .7 10.75 10.75 0 0 1-19.88 0"/><circle cx="12" cy="12" r="3"/>',
+    down: '<path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><path d="m7 10 5 5 5-5"/><path d="M12 15V3"/>'
   };
   function icSvg(name) {
     return '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' + ICON_PATHS[name] + '</svg>';
@@ -678,7 +714,7 @@
     if (!S.side) return;
     if (ST.errView) { renderErrSide(); return; } // 任务 16：错误日志视图=侧栏完整变体分支
     if (ST.ord) { renderSideOrder(); return; } // v2 任务 9：排序模式=侧栏完整变体分支
-    var ms = mods(), ts = tps();
+    var ms = mods().slice().sort(modNameCmp), ts = tps().slice().sort(modNameCmp);
     var h = shellWarnHtml(); // T16 I-2：缺壳告警置顶
     h += '<div class="__mc-cat">\u5957\u4ef6 MOD\uff08' + ms.length + '\uff09</div>';
     for (var i = 0; i < ms.length; i++) {
@@ -1348,30 +1384,15 @@
     if (r && r.pending) {
       h += '<div class="__mc-kv"><span class="__mc-kk">\u66f4\u65b0</span>'
         + '<span style="color:#e8a33d;font-size:12px">\u27f3 \u5f85\u751f\u6548 \u00b7 \u91cd\u542f\u6e38\u620f\u540e\u5e94\u7528</span></div>';
-    } else if (r && r.remote != null && (r.status === 'update' || r.status === 'install' || r.local == null)) {
-      /* v4：降级入口退役（↓ 行内标记与详情按钮都撤）；v4.1 起降级态彻底不再产出
-       * （C# 只做 tag 版本比较，本地比 tag 高=静默零标记）。 */
-      var isInst = r.local == null || r.status === 'install';
-      var label = isInst ? '\u5b89\u88c5 ' + r.remote : '\u66f4\u65b0\u5230 ' + r.remote;
-      var cls = isInst ? '__mc-btn-blue' : '__mc-btn-pri';
-      var ver = isInst ? '\u672a\u5b89\u88c5 \u2192 ' + r.remote : r.local + ' \u2192 ' + r.remote;
-      h += '<div class="__mc-kv"><span class="__mc-kk">\u66f4\u65b0</span>'
-        + '<button type="button" class="__mc-btn ' + cls + ' __mc-btn-mini" data-ract="upd" data-repo="' + esc(r.repoKey) + '">' + esc(label) + '</button>'
-        + '<span style="font-size:11px;color:#6b7180">' + esc(ver) + '</span></div>';
-      /* v2.2.0 G5：详情页维护区带「更新内容」摘要（notes 前 2 行；完整说明在更新确认弹窗） */
-      if (r.notes) {
-        var nl = String(r.notes).split(/\r?\n/).filter(function (x) { return x.trim(); }).slice(0, 2);
-        h += '<div class="__mc-kv"><span class="__mc-kk">\u66f4\u65b0\u5185\u5bb9</span>'
-          + '<span style="font-size:11px;color:#8a90a0;flex:1">' + nl.map(esc).join('<br>') + '</span></div>';
-      }
+    } else if (r && r.local == null && r.remote != null) {
+      /* 未安装：保留安装入口（已安装 mod 的更新入口在列表/标题行版本下拉，维护区不再重复）。
+       * 2026-11-21 作者拍板：删除维护区“更新”与“更新内容”两块——顶部版本下拉/版本列表已覆盖。 */
+      h += '<div class="__mc-kv"><span class="__mc-kk">\u5b89\u88c5</span>'
+        + '<button type="button" class="__mc-btn __mc-btn-blue __mc-btn-mini" data-ract="upd" data-repo="' + esc(r.repoKey) + '">'
+        + '\u5b89\u88c5 ' + esc(r.remote) + '</button>'
+        + '<span style="font-size:11px;color:#6b7180">\u672a\u5b89\u88c5 \u2192 ' + esc(r.remote) + '</span></div>';
     }
-    /* 套件名单单源任务 13：版本选择入口——名单内（r 在场）且非自身（自身不提供该入口，
-     * brief 拍板）；未安装行的版本入口在安装确认弹窗内（openRepoModal「选择版本」）。 */
-    if (r && m.guid !== SELF_GUID) {
-      h += '<div class="__mc-kv"><span class="__mc-kk">\u7248\u672c</span>'
-        + '<button type="button" class="__mc-btn __mc-btn-mini" data-act="ver" data-guid="' + esc(m.guid) + '">\u7248\u672c</button>'
-        + '<span style="font-size:11px;color:#6b7180">\u67e5\u770b\u5e76\u9009\u62e9\u5386\u53f2\u7248\u672c</span></div>';
-    }
+    /* 版本选择入口已迁到详情页标题行版本号（verChipHtml）；维护区不再重复。 */
     if (!m.missing) {
       h += '<div class="__mc-kv"><span class="__mc-kk">\u5378\u8f7d</span>'
         + '<button type="button" class="__mc-btn __mc-btn-danger __mc-btn-mini" data-act="uninst" data-guid="' + esc(m.guid) + '">\u5378\u8f7d\u2026</button>'
@@ -1529,6 +1550,17 @@
   /* v2.0.6：详情页标题行版本号（名 + 英文标识右侧，等宽灰字）；未安装/读不到不显示 */
   function verHtml(v) { return v ? '<span class="__mc-v">v' + esc(v) + '</span>' : ''; }
 
+  /* 详情页标题行版本号：套件内已装 mod（仓行在场、非自身）渲染为可点版本选择钮，
+   * 其余保持纯文本（第三方/未安装/自身不提供版本选择）。 */
+  function verChipHtml(m) {
+    var v = m && m.ver;
+    if (!v) return '';
+    var r = (m.guid === SELF_GUID || isTpMod(m)) ? null : repoRowOfGuid(m.guid);
+    if (!r) return verHtml(v);
+    return '<button type="button" class="__mc-v __mc-vsel" data-act="ver" data-guid="' + esc(m.guid)
+      + '" title="选择版本">v' + esc(v) + '<span class="__mc-vcaret">\u25be</span></button>';
+  }
+
   function renderCfg() {
     if (!S.cfg) return;
     if (ST.errView) { renderErrCfg(); return; } // 任务 16：错误日志视图接管内容区（详情页同款变体）
@@ -1555,7 +1587,7 @@
       : (m.missing
         ? '\u672a\u5b89\u88c5\uff1a\u6b64\u9875\u53ea\u8bfb\u3002\u53ef\u5728\u4e0b\u65b9\u300c\u7ef4\u62a4\u300d\u5b89\u88c5\u3002'
         : '\u5df2\u505c\u7528\uff1a\u6539\u52a8\u4ecd\u4f1a\u4fdd\u5b58\uff0c\u91cd\u65b0\u542f\u7528\u540e\u751f\u6548\u3002');
-    var h = shellWarnHtml() + '<div class="__mc-mod-title"><h2>' + esc(m.name) + '</h2><span class="__mc-en">' + esc(m.en) + '</span>' + verHtml(m.ver) + usageBtnHtml(m.guid, m) + '</div>'
+    var h = shellWarnHtml() + '<div class="__mc-mod-title"><h2>' + esc(m.name) + '</h2><span class="__mc-en">' + esc(m.en) + '</span>' + verChipHtml(m) + usageBtnHtml(m.guid, m) + '</div>'
       + '<div class="__mc-mod-desc">' + esc(m.desc) + '</div>'
       + '<div class="__mc-stop-banner' + (m.enabled ? '' : ' __mc-show') + '">' + banner + '</div>';
     for (var gi = 0; gi < m.groups.length; gi++) {
@@ -1747,6 +1779,7 @@
     } else {
       var suite = [], tp = [];
       for (var i = 0; i < rows.length; i++) (rows[i].suite ? suite : tp).push(rows[i]);
+      suite.sort(modNameCmp); tp.sort(modNameCmp);
       if (suite.length) {
         h += '<div class="__mc-cat">\u5957\u4ef6</div>';
         for (var si = 0; si < suite.length; si++) h += errRowHtml(suite[si]);
@@ -1787,12 +1820,15 @@
     S.cfg.innerHTML = h;
   }
 
-  /* 条目卡：时间/级别/来源 + 消息（rep>1 内联「（重复 N 次）」）+ 可展开堆栈 */
+  /* 条目卡：时间/级别/来源 + 消息（rep>1 内联「（重复 N 次）」）+ 可展开堆栈。
+   * e.t 为完整 yyyy-MM-dd HH:mm:ss（spec §10 复制格式）——卡片只显示时分秒段（t.slice(11)），
+   * 复制文本仍用完整 t（copyErrAll）。 */
   function errEntryHtml(e, i) {
     var open = !!ST.errOpen[i];
     var rep = e.rep > 1 ? '\uff08\u91cd\u590d ' + e.rep + ' \u6b21\uff09' : '';
+    var tShow = e.t && e.t.length > 10 ? e.t.slice(11) : e.t;
     var h = '<article class="__mc-ecard">'
-      + '<div class="__mc-ecard-h"><span>' + esc(e.t) + '</span>'
+      + '<div class="__mc-ecard-h"><span>' + esc(tShow) + '</span>'
       + '<span class="__mc-lvl' + (e.lv === 'Fatal' ? ' __mc-lvl-fatal' : '') + '">' + esc(e.lv) + '</span>'
       + '<span>' + esc(e.src) + '</span></div>'
       + '<div class="__mc-emsg">' + esc(e.msg) + esc(rep) + '</div>';
@@ -1847,7 +1883,7 @@
       + '\nMod: ' + r.name + (r.ver ? ' ' + r.ver : '') + ' (' + r.guid + ')\n---';
     for (var i = 0; i < r.entries.length; i++) {
       var e = r.entries[i];
-      text += (i === 0 ? '\n' : '\n\n') + '[' + e.t + '] [' + e.lvl + '] ' + e.src
+      text += (i === 0 ? '\n' : '\n\n') + '[' + e.t + '] [' + e.lv + '] ' + e.src
         + '\n' + e.msg + (e.stack ? '\n' + e.stack : '');
     }
     copyText(text);
@@ -1989,19 +2025,39 @@
     return h;
   }
 
-  /* ---- v2.2.0：notes 发版说明渲染（CHANGELOG 节原文按行拆 <br>，不做 md 解析）+
-   * 安装态功能说明（USAGE.i 一句话 + 第一段前 3 条——用户自行决定是否安装，G4；
-   * 无 USAGE 的 guid 给通用兜底一句话）。 ---- */
-  function notesLinesHtml(notes) {
-    var lines = String(notes || '').split(/\r?\n/), h = '';
-    for (var i = 0; i < lines.length; i++)
-      h += (i > 0 ? '<br>' : '') + esc(lines[i]);
+  /* ---- v2.2.0：notes 发版说明渲染。2026-11-21 起改为轻量 markdown 预览：
+   * 先整段 esc（防 XSS），再识别标题/加粗/行内代码/无序与有序列表；不引外部库。
+   * 覆盖 CHANGELOG 节实际用到的语法，未知语法按段落原文显示。 ---- */
+  function mdInline(s) {
+    return esc(s)
+      .replace(/\*\*([^*]+)\*\*/g, '<b>$1</b>')
+      .replace(/`([^`]+)`/g, '<code>$1</code>');
+  }
+
+  function mdHtml(md) {
+    var lines = String(md || '').split(/\r?\n/), h = '', inList = false;
+    function closeList() { if (inList) { h += '</div>'; inList = false; } }
+    for (var i = 0; i < lines.length; i++) {
+      var t = lines[i].trim();
+      if (!t) { closeList(); h += '<div class="__mc-md-gap"></div>'; continue; }
+      if (/^###\s+/.test(t)) { closeList(); h += '<div class="__mc-md-h3">' + mdInline(t.replace(/^###\s+/, '')) + '</div>'; continue; }
+      if (/^##\s+/.test(t)) { closeList(); h += '<div class="__mc-md-h2">' + mdInline(t.replace(/^##\s+/, '')) + '</div>'; continue; }
+      if (/^#\s+/.test(t)) { closeList(); h += '<div class="__mc-md-h2">' + mdInline(t.replace(/^#\s+/, '')) + '</div>'; continue; }
+      if (/^[-*]\s+/.test(t) || /^\d+[.)]\s+/.test(t)) {
+        if (!inList) { h += '<div class="__mc-md-ul">'; inList = true; }
+        h += '<div class="__mc-md-li">' + mdInline(t.replace(/^[-*]\s+/, '').replace(/^\d+[.)]\s+/, '')) + '</div>';
+        continue;
+      }
+      closeList();
+      h += '<div class="__mc-md-p">' + mdInline(t) + '</div>';
+    }
+    closeList();
     return h;
   }
 
   function notesSecHtml(notes) {
     return '<div class="__mc-m-sec"><div class="__mc-m-h">\u66f4\u65b0\u5185\u5bb9</div>'
-      + '<div class="__mc-m-txt" style="font-size:11px;line-height:1.6">' + notesLinesHtml(notes) + '</div></div>';
+      + '<div class="__mc-md">' + mdHtml(notes) + '</div></div>';
   }
 
   function usageIntroHtml(guid) {
@@ -2041,7 +2097,7 @@
         + '<span style="color:#6b7180">\u2192</span>'
         + '<span style="color:#60a5fa;font-size:12px">v' + esc(r.remote) + '</span></label>';
       if (r.notes) h += '<details style="margin:4px 0 0 26px"><summary style="cursor:pointer;color:#8a90a0;font-size:11px;user-select:none">\u53d1\u7248\u8bf4\u660e</summary>'
-        + '<div class="__mc-m-txt" style="font-size:11px;line-height:1.6;padding:4px 0 2px">' + notesLinesHtml(r.notes) + '</div></details>';
+        + '<div class="__mc-md" style="padding:4px 0 2px">' + mdHtml(r.notes) + '</div></details>';
       h += '</div>';
     }
     h += '</div>'
@@ -2166,14 +2222,6 @@
     if (verTimer != null) { clearTimeout(verTimer); verTimer = null; }
   }
 
-  /* notes 摘要：首个非空行（长说明只留一句占行） */
-  function verNoteOf(notes) {
-    if (!notes) return '';
-    var ls = String(notes).split(/\r?\n/);
-    for (var i = 0; i < ls.length; i++) { var s = ls[i].trim(); if (s) return s; }
-    return '';
-  }
-
   function verLoadingHtml(name) {
     return '<h3>' + chipHtml('blue', icSvg('up')) + '\u7248\u672c \u00b7 ' + esc(name) + '</h3>'
       + '<div class="__mc-m-sub">\u8bfb\u53d6\u7248\u672c\u5217\u8868\u2026</div>'
@@ -2188,27 +2236,41 @@
 
   function verListHtml(d) {
     var h = '<h3>' + chipHtml('blue', icSvg('up')) + '\u7248\u672c \u00b7 ' + esc(d.name) + '</h3>'
-      + '<div class="__mc-m-sub">\u9009\u62e9\u8981\u5b89\u88c5\u7684\u7248\u672c\uff1b\u4f4e\u4e8e\u5f53\u524d\u7248\u672c\u9700\u4e8c\u6b21\u786e\u8ba4\uff0c\u4e0b\u8f7d\u5b8c\u91cd\u542f\u6e38\u620f\u540e\u751f\u6548\u3002</div>'
+      + '<div class="__mc-m-sub">\u9009\u62e9\u8981\u5b89\u88c5\u7684\u7248\u672c\uff1b\u4f4e\u4e8e\u5f53\u524d\u7248\u672c\u9700\u4e8c\u6b21\u786e\u8ba4\uff0c\u4e0b\u8f7d\u5b8c\u91cd\u542f\u6e38\u620f\u540e\u751f\u6548\u3002\u70b9\u773c\u775b\u56fe\u6807\u67e5\u770b\u66f4\u65b0\u8bf4\u660e\u3002</div>'
       + '<div class="__mc-m-sec">';
-    if (!d.versions.length) return h + '<div class="__mc-m-txt">\u6682\u65e0\u7248\u672c\u8bb0\u5f55\u3002</div></div>'
-      + '<div class="__mc-m-acts"><button type="button" class="__mc-btn __mc-btn-mini" data-mact="close">\u5173\u95ed</button></div>';
+    var acts = '<div class="__mc-m-acts"><button type="button" class="__mc-btn __mc-btn-mini" data-mact="close">\u5173\u95ed</button></div>';
+    if (!d.versions.length) return h + '<div class="__mc-m-txt">\u6682\u65e0\u7248\u672c\u8bb0\u5f55\u3002</div></div>' + acts;
     for (var i = 0; i < d.versions.length; i++) {
       var it = d.versions[i] || {};
-      var note = verNoteOf(it.notes);
-      h += '<div style="padding:6px 0;border-bottom:1px solid rgba(255,255,255,.06)">'
-        + '<div style="display:flex;align-items:center;gap:8px">'
-        + '<b style="color:#e8e6e0">v' + esc(it.v) + '</b>'
-        + (it.date ? '<span style="color:#6b7180;font-size:11px">' + esc(it.date) + '</span>' : '')
-        + (d.current != null && String(it.v).toLowerCase() === String(d.current).toLowerCase()
-          ? '<span style="color:#4ade80;font-size:11px">\u2713 \u4f7f\u7528\u4e2d</span>' : '')
-        + '<span style="flex:1"></span>'
-        + '<button type="button" class="__mc-btn __mc-btn-blue __mc-btn-mini" data-ver="' + esc(it.v) + '">\u5b89\u88c5\u6b64\u7248\u672c</button>'
-        + '</div>'
-        + (note ? '<div style="font-size:11px;color:#8a90a0;padding:3px 0 0">' + esc(note) + '</div>' : '')
-        + '</div>';
+      var cur = d.current != null && String(it.v).toLowerCase() === String(d.current).toLowerCase();
+      h += '<div class="__mc-ver-row">'
+        + '<div class="__mc-ver-main"><b style="color:#e8e6e0">v' + esc(it.v) + '</b>'
+        + (it.date ? '<span class="__mc-ver-date">' + esc(it.date) + '</span>' : '')
+        + (cur ? '<span class="__mc-ver-cur">\u2713 \u4f7f\u7528\u4e2d</span>' : '')
+        + '</div><div class="__mc-ver-acts">'
+        + (it.notes
+          ? '<button type="button" class="__mc-iconbtn" data-vnote="' + esc(it.v) + '" title="\u67e5\u770b\u66f4\u65b0\u8bf4\u660e" aria-label="\u67e5\u770b\u66f4\u65b0\u8bf4\u660e">' + icSvg('eye') + '</button>'
+          : '')
+        + '<button type="button" class="__mc-iconbtn __mc-iconbtn-pri" data-ver="' + esc(it.v) + '" title="\u5b89\u88c5\u6b64\u7248\u672c" aria-label="\u5b89\u88c5\u6b64\u7248\u672c">' + icSvg('down') + '</button>'
+        + '</div></div>';
     }
-    return h + '</div>'
-      + '<div class="__mc-m-acts"><button type="button" class="__mc-btn __mc-btn-mini" data-mact="close">\u5173\u95ed</button></div>';
+    return h + '</div>' + acts;
+  }
+
+  /* 更新说明详情：markdown 预览（列表不再塞原文，避免长说明撑破弹窗/横向滚动） */
+  function showVerNotes(v) {
+    if (!verData || !v) return;
+    var it = null;
+    for (var i = 0; i < verData.versions.length; i++)
+      if (verData.versions[i] && String(verData.versions[i].v) === String(v)) { it = verData.versions[i]; break; }
+    if (!it) return;
+    if (!setModal('<h3>' + chipHtml('blue', icSvg('up')) + '\u66f4\u65b0\u8bf4\u660e \u00b7 v' + esc(it.v) + '</h3>'
+      + (it.date ? '<div class="__mc-m-sub">' + esc(it.date) + '</div>' : '')
+      + '<div class="__mc-md">' + (it.notes ? mdHtml(it.notes) : '<div class="__mc-md-p">\u8be5\u7248\u672c\u6ca1\u6709\u8bf4\u660e\u3002</div>') + '</div>'
+      + '<div class="__mc-m-acts"><button type="button" class="__mc-btn __mc-btn-mini" data-mact="verback">\u8fd4\u56de</button>'
+      + '<button type="button" class="__mc-btn __mc-btn-mini" data-mact="close">\u5173\u95ed</button></div>')) return;
+    var back = S.mdl.querySelector('[data-mact="verback"]');
+    if (back) back.addEventListener('click', function (e) { e.stopPropagation(); renderVerList(); });
   }
 
   function renderVerList() {
@@ -2219,6 +2281,12 @@
       btns[i].addEventListener('click', function (e) {
         e.stopPropagation();
         verPick(this.getAttribute('data-ver'));
+      });
+    var eyes = S.mdl.querySelectorAll('[data-vnote]');
+    for (var j = 0; j < eyes.length; j++)
+      eyes[j].addEventListener('click', function (e) {
+        e.stopPropagation();
+        showVerNotes(this.getAttribute('data-vnote'));
       });
   }
 

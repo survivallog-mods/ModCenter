@@ -578,7 +578,8 @@ public sealed class ErrRowInfo
     }
 }
 
-/// <summary>一条错误记录（MC_ERR_DATA.entries 元素）：t=HH:mm:ss、lv=Error/Fatal、
+/// <summary>一条错误记录（MC_ERR_DATA.entries 元素）：t=yyyy-MM-dd HH:mm:ss（spec §10 复制格式
+/// 全文；面板条目卡只显示时分秒段）、lv=Error/Fatal、
 /// src=日志源名、msg=全文首行、stack=堆栈段（可空）、rep=连续重复次数（面板 &gt;1 才内联显示）。</summary>
 public sealed class ErrEntryInfo
 {

@@ -189,8 +189,7 @@ internal static class SuiteRoster
             }
             sb.Append("]}");
             File.WriteAllText(tmp, sb.ToString(), new UTF8Encoding(false));
-            if (File.Exists(CachePath)) File.Delete(CachePath);
-            File.Move(tmp, CachePath); // 同卷原子落位（Delete+Move 同 RepoClient.DownloadAsset 尾部模式）
+            File.Move(tmp, CachePath, true); // net6 单 API 原子覆盖（无 Delete+Move 的空窗/半态窗口）
         }
         catch (Exception e)
         {
