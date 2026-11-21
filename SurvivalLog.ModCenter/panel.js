@@ -28,8 +28,9 @@
  * v2 生命周期任务 10 = 彻底卸载（原型 delHtml 照抄）：详情页维护动作区"卸载…"按钮 →
  * MC_UNINST{guid} → MC_UNINST_DATA{guid,name,self,files[],note?} 渲染确认弹窗（⚠ 红+名称；
  * "将删除".files 三行红字（dll/cfg/记录说明）；"不受影响"；取消/确认卸载 danger 钮）→ 确认
- * MC_UNINST_DO{guid} → 关弹窗（结果 toast/快照由 C# 回推：底条"卸载 X"）；ModCenter
- * 自身（__self 页按钮）走特别文案分支（面板本体消失+清理器保留说明）。带出：T9 三小件
+ * MC_UNINST_DO{guid} → 关弹窗（结果 toast/快照由 C# 回推：底条"卸载 X"）。套件名单
+ * 单源任务 10：面板自身移出 mod 列表——侧栏无自身行/无 __self 页，C# HandleUninst*
+ * 拒绝自身 GUID，自更新入口迁头部版本区。带出：T9 三小件
  * （ORD.src 改存 guid / ordbar 两钮未加载禁用 / HandleOrderSave 兜底在 C# 侧）+ 待生效条
  * 中性档（MC_PENDING_SUMMARY.applied="自定义加载序生效中"——不计入计数、弱化样式）。
  * v2 生命周期任务 11 = 冲突详情弹窗（原型 cfHtml 照抄）：行内 ics 的 click:"cf"（⚠红冲突 /
@@ -105,11 +106,10 @@
     err:    { t: '\u2716 \u6ca1\u6210\u529f', cls: '__mc-t-err', ms: 4500 },
   };
   var SELF_NAME = 'Mod \u7ba1\u7406\u4e2d\u5fc3'; // Mod 管理中心
-  var SELF_GUID = 'com.local.survivallog.modcenter'; // v2.0.4：自身真实 GUID（仓库徽标路由/弹窗用；行选仍用 '__self'）
-  var SELF_EN = 'ModCenter\uff08\u672c\u9762\u677f\uff09';
+  var SELF_GUID = 'com.local.survivallog.modcenter'; // v2.0.4：自身真实 GUID（C# ModCenterPlugin.Guid 同源；头部更新入口/排序面路由用）
   var OVR_SECTION = '\u5176\u4ed6', OVR_KEY = 'Overrides'; // 宿主 cfg 键与动作加速清单声明（modcenter.json lists.key）同源
 
-  /* ---- 状态：host/root=宿主文档与面板根；snap=最近快照；sel='__self'|guid ----
+  /* ---- 状态：host/root=宿主文档与面板根；snap=最近快照；sel=guid ----
    * v2 任务 7：pend=最近 MC_PENDING_SUMMARY（底部待生效条数据，跨开关面板保留）；
    * pendEl/pendTx/mbg/mdl=待生效条与浮层弹窗元素（随面板建/拆）。
    * v2 任务 8：repo=仓库视图开着；repoData=最近 MC_REPO_DATA（跨开关保留）；dl=当前下载链
@@ -125,7 +125,6 @@
   var uninstTimer = null;       // v2 任务 10：MC_UNINST_DATA 等待超时句柄
   var cfTimer = null;           // v2 任务 11：MC_CF_DATA 等待超时句柄
   var chkTimer = null;          // v3.3：MC_CHK 检查超时兜底句柄（busy 复位）
-  var SELF_GUID = 'com.local.survivallog.modcenter'; // __self 页卸载按钮的目标 guid（C# ModCenterPlugin.Guid 同源）
 
   var CSS = ''
     + '#__mc_overlay{position:fixed;inset:0;z-index:2147483647;display:flex;align-items:center;justify-content:center;background:rgba(5,6,10,.8);}'
@@ -135,6 +134,7 @@
     + '#__mc_overlay .__mc-head{display:flex;align-items:center;gap:12px;padding:13px 18px;border-bottom:1px solid #2a2f3d;background:#1d212c;}'
     + '#__mc_overlay .__mc-title{font-size:17px;letter-spacing:2px;font-weight:600;}'
     + '#__mc_overlay .__mc-sub{font-size:12px;color:#6b7180;}'
+    + '#__mc_overlay .__mc-sub.__mc-sub-upd{color:#facc15;cursor:pointer;}' /* 名单任务 10：自身可更新态（↑黄同色，头部版本区=自更新唯一入口） */
     + '#__mc_overlay .__mc-close{margin-left:auto;width:32px;height:32px;border-radius:8px;border:1px solid #2a2f3d;background:transparent;color:#9aa0ad;font-size:15px;cursor:pointer;line-height:1;font-family:inherit;}'
     + '#__mc_overlay .__mc-close:hover{border-color:#f87171;color:#f87171;}'
     /* 主体：左列 + 右区 */
@@ -410,6 +410,15 @@
       chkTimer = setTimeout(function () { chkTimer = null; setChkBusy(false); }, 20000); // C# 未回包兜底
     });
     x.style.marginLeft = '0';
+    /* 套件名单任务 10：自更新入口迁此——自身行/页退役后头部版本区接管（可点态由 renderSub
+     * 按 snap.self.ics ↑黄切换）。点击需仓库行在场（未查/失败不响应），
+     * openUpdModal → MC_UPD('ModCenter') 与原行内徽标同链。 */
+    sub.addEventListener('click', function (e) {
+      e.stopPropagation();
+      if (!repoRowOfGuid(SELF_GUID)) return;
+      var m = findMod(SELF_GUID);
+      if (m) openUpdModal(m);
+    });
     head.appendChild(t); head.appendChild(sub); head.appendChild(chk); head.appendChild(x);
 
     var body = doc.createElement('div'); body.className = '__mc-body';
@@ -494,14 +503,14 @@
     for (i = 0; i < ms.length; i++) if (ms[i].guid === guid) return ms[i];
     var ts = tps();
     for (i = 0; i < ts.length; i++) if (ts[i].guid === guid) return ts[i];
-    /* v2.0.4：自身行徽标路由——自身不在 mods/tp（TpExempt 排除），给虚拟行对象，
+    /* v2.0.4：自身虚拟行——自身不在 mods/tp（TpExempt 排除）也无侧栏行/详情页（套件名单
+     * 任务 10 移出列表），仅头部更新入口与排序面按 guid 取名/路由用，
      * openUpdModal → repoRowOfGuid(SELF_GUID) 命中仓库行（RepoKeys 含 ModCenter）。 */
     if (guid === SELF_GUID) return { guid: SELF_GUID, name: SELF_NAME, self: true };
     return null;
   }
   function isTpMod(m) { return tps().indexOf(m) !== -1; }
   function curMod() {
-    if (ST.sel === '__self') return null;
     var m = ST.sel ? findMod(ST.sel) : null;
     return m || mods()[0] || null;
   }
@@ -635,14 +644,6 @@
             ? '<span class="__mc-mini-sw __mc-on __mc-lock" title="\u8be5 mod \u65e0\u603b\u5f00\u5173\uff1a\u4fdd\u6301\u5f00\u542f\uff0c\u9762\u677f\u4e0d\u652f\u6301\u542f\u505c"></span>'
             : swBtn(m.enabled, ' data-act="toggle" data-guid="' + esc(m.guid) + '"'))) + '</div>';
     }
-    h += '<div class="__mc-cat">\u9762\u677f\u81ea\u8eab</div>';
-    /* v2.0.4：自身行挂仓库徽标（快照 self.ics；data-guid 用真实 GUID——findMod 路由到
-     * openUpdModal → MC_UPD('ModCenter') 自更新链。仓库页退役后这是自更新唯一入口）。 */
-    h += '<div class="__mc-mod-row __mc-lock' + (ST.sel === '__self' ? ' __mc-sel' : '')
-      + '" data-interactive data-guid="__self">'
-      + '<span class="__mc-st" style="background:#e8a33d;"></span><span class="__mc-nm">' + esc(SELF_NAME) + '</span>'
-      + icsHtml({ guid: SELF_GUID, ics: ST.snap && ST.snap.self ? ST.snap.self.ics : null })
-      + '<span class="__mc-mini-sw __mc-lock" title="\u9632\u5446\uff1a\u9762\u677f\u4e0d\u53ef\u505c\u7528\u81ea\u8eab"></span></div>';
     h += '<div class="__mc-cat">\u7b2c\u4e09\u65b9 MOD\uff08\u901a\u7528 / \u58f0\u660e\u5f0f\uff09</div>';
     if (ts.length === 0) {
       h += '<div class="__mc-tp-empty">\uff08\u6682\u65e0\u7b2c\u4e09\u65b9 mod \u63a5\u5165\uff09</div>';
@@ -1312,17 +1313,10 @@
     return h + '</div>';
   }
 
-  /* __self 页专用：只有卸载入口（v3 精简 hint）。 */
-  function uninstActHtml(guid) {
-    return '<div class="__mc-maint"><h3>\u7ef4\u62a4</h3>'
-      + '<div class="__mc-kv"><span class="__mc-kk">\u5378\u8f7d</span>'
-      + '<button type="button" class="__mc-btn __mc-btn-danger __mc-btn-mini" data-act="uninst" data-guid="' + esc(guid) + '">\u5378\u8f7d\u2026</button>'
-      + '<span style="font-size:11px;color:#6b7180">\u9700\u91cd\u542f\u4e24\u6b21</span></div></div>';
-  }
-
   /* 确认弹窗（v3 精简）：⚠ 红片+名称 / 一句执行说明（存档与其他 mod 不受影响并入）/
    * "将删除".files 真值明细红字（BepInEx\ 前缀反斜杠呈现）+ 固定行"停用 / 排序记录（如有）"/
-   * note 补充可省 / self 特别红字（两靴 + 引导壳保留）/ 取消 + danger"确认卸载"。 */
+   * note 补充可省 / 取消 + danger"确认卸载"。（套件名单任务 10：self 特别红字随 __self 页
+   * 退役删除——C# HandleUninst 已拒绝自身 GUID，self 恒为 false。） */
   function uninstModalHtml(d) {
     var h = '<h3>' + chipHtml('red', icSvg('warn')) + '\u5378\u8f7d \u00b7 ' + esc(d.name) + '</h3>'
       + '<div class="__mc-m-sub">\u5c06\u5220\u9664\u4ee5\u4e0b\u5185\u5bb9\uff0c\u91cd\u542f\u6e38\u620f\u540e\u6267\u884c\u3002\u5b58\u6863\u548c\u5176\u4ed6 mod \u4e0d\u53d7\u5f71\u54cd\u3002</div>'
@@ -1332,7 +1326,6 @@
       h += '<div class="__mc-file-del">BepInEx\\' + esc(String(fs[i]).replace(/\//g, '\\')) + '</div>';
     h += '<div class="__mc-file-del">\u505c\u7528 / \u6392\u5e8f\u8bb0\u5f55\uff08\u5982\u6709\uff09</div></div>';
     if (d.note) h += '<div class="__mc-m-sec"><div class="__mc-m-txt" style="font-size:11px;color:#8a90a0">\u24d8 ' + esc(d.note) + '</div></div>';
-    if (d.self) h += '<div class="__mc-risk">\u26a0 \u8fd9\u662f\u9762\u677f\u81ea\u5df1\uff1a\u8981\u91cd\u542f\u4e24\u6b21\u624d\u80fd\u5220\u5e72\u51c0\uff08\u7b2c\u4e00\u6b21\u6253\u6807\u8bb0\uff0c\u7b2c\u4e8c\u6b21\u5220\u6587\u4ef6\u3001\u5165\u53e3\u6d88\u5931\uff09\u3002\u5f15\u5bfc\u58f3\u5c5e\u57fa\u5ea7\u7ec4\u4ef6\u4f1a\u4fdd\u7559\u3002</div>';
     h += '<div class="__mc-m-acts"><button type="button" class="__mc-btn __mc-btn-mini" data-mact="close">\u53d6\u6d88</button>'
       + '<button type="button" class="__mc-btn __mc-btn-danger" data-mact="douninst" data-guid="' + esc(d.guid) + '">\u786e\u8ba4\u5378\u8f7d</button></div>';
     return h;
@@ -1346,7 +1339,6 @@
   }
 
   function uninstNameOf(guid) {
-    if (guid === SELF_GUID) return SELF_NAME;
     var m = findMod(guid);
     return m ? m.name : (guid || '');
   }
@@ -1426,25 +1418,12 @@
    * 结构：i=一句话简介；secs=[{h:段名,ls:[要点]}]——复用 .__mc-modal 弹窗与
    * .__mc-m-sec/.__mc-m-h/.__mc-m-txt 段式，编号列表与冲突弹窗 tips 同款。 */
   var USAGE = {
-    /* mcSpec 2 阶段 3：九套件条目已随各 mod 清单内嵌迁移（快照 mod.usage），本表仅剩
-     * 面板自身（__self 无 ModInfo/清单载体，永久静态） */
-    'com.local.survivallog.modcenter': { i: '\u672c\u9762\u677f\uff1a\u5957\u4ef6 mod \u7edf\u4e00\u7ba1\u7406\u4e2d\u5fc3\u2014\u2014\u5f00\u5173\u3001\u8c03\u53c2\u3001\u66f4\u65b0\u3001\u5378\u8f7d\u90fd\u5728\u8fd9\u91cc\uff0c\u6539\u52a8\u5b9e\u65f6\u5199\u5165\u914d\u7f6e\u6587\u4ef6\uff0c\u591a\u6570\u65e0\u9700\u91cd\u542f\u3002', secs: [
-      { h: '\u600e\u4e48\u7528', ls: [
-        '\u5de6\u5217\u70b9 mod \u540d\u8fdb\u8be6\u60c5\u9875\uff1b\u884c\u5185\u5c0f\u5f00\u5173\u5373\u65f6\u542f\u505c\uff08\u5957\u4ef6\u7acb\u5373\u751f\u6548\uff0c\u7b2c\u4e09\u65b9\u91cd\u542f\u540e\u751f\u6548\uff09',
-        '\u53f3\u4fa7\u6ed1\u6761 / \u5f00\u5173 / \u4e0b\u62c9\u6539\u52a8\u5373\u65f6\u4fdd\u5b58\uff1b\u6bcf\u884c\u53f3\u4fa7\u5fbd\u6807\u6ce8\u660e\u751f\u6548\u65f6\u673a\uff08\u26a1\u7acb\u5373 / \ud83d\udcc1\u8bfb\u6863\u540e / \ud83d\udd04\u91cd\u542f\u540e\uff09',
-        '\u884c\u5185 \u26a0 \u56fe\u6807 = \u51b2\u7a81\u6216\u544a\u8b66\uff0c\u70b9\u5f00\u770b\u539f\u56e0\u4e0e\u5904\u7406\u5efa\u8bae\uff1b\u2191 \u9ec4\u8272 = \u6709\u65b0\u7248\u672c\uff0c\u70b9\u5f00\u8fdb\u66f4\u65b0\u786e\u8ba4',
-        '\u53f3\u4e0a\u300c\u68c0\u67e5\u66f4\u65b0\u300d\u624b\u52a8\u5237\u65b0\u7248\u672c\uff1b\u5e95\u90e8\u5f85\u751f\u6548\u6761\u6c47\u603b\u9700\u91cd\u542f\u7684\u64cd\u4f5c\uff0c\u53ef\u64a4\u9500\u6216\u4e00\u952e\u91cd\u542f',
-        '\u5b89\u88c5 / \u5378\u8f7d\u5165\u53e3\u5728\u6bcf\u4e2a mod \u8be6\u60c5\u9875\u5e95\u90e8\u7684\u300c\u7ef4\u62a4\u300d\u533a',
-      ] },
-      { h: '\u63d0\u793a', ls: [
-        '\u6807\u300c\u26a1\u7acb\u5373\u751f\u6548\u300d\u7684\u6539\u52a8\u5f53\u62cd\u751f\u6548\uff1b\u6807\u300c\ud83d\udcc1\u8bfb\u6863\u540e\u300d\u7684\u8981\u91cd\u8fdb\u4e00\u6b21\u5b58\u6863',
-        '\u7b2c\u4e09\u65b9 mod \u53ea\u6709\u542f\u7528 / \u505c\u7528\uff08\u91cd\u542f\u7ea7\uff09\uff0c\u6ca1\u6709\u4e2d\u6587\u5b9a\u5236\u9875',
-      ] },
-    ] },
+    /* mcSpec 2 阶段 3：九套件条目已随各 mod 清单内嵌迁移（快照 mod.usage）；套件名单任务 10
+     * 面板自身页退役后本表清空（原唯一静态条目是 __self 的使用说明） */
   };
   /* 标题行右侧「使用说明」按钮（无说明的 mod 不渲染；button 天然进 clickThrough 白名单） */
   /* mcSpec 2：使用说明双源——快照 mod.usage（清单内嵌）优先，USAGE 静态表兜底（迁移过渡，
-   * 阶段 3 清表仅剩 __self）；两者皆无 = 按钮不渲染（现状同形）。 */
+   * 套件名单任务 10 后表已空）；两者皆无 = 按钮不渲染（现状同形）。 */
   function usageOf(guid, m) {
     if (m && m.usage) return m.usage;
     return USAGE[guid] || null;
@@ -1469,11 +1448,11 @@
     return h;
   }
   /* 按钮点击（wireCfg data-act=usage 分支调用）：名字运行时取
-   * （自身=SELF_NAME；mod=findMod；陈旧 guid 兜底显示原串），静态内容直接开弹窗。 */
+   * （mod=findMod；陈旧 guid 兜底显示原串），静态内容直接开弹窗。 */
   function openUsageModal(guid) {
-    var u = usageOf(guid, findMod(guid)); // __self 不在 mods → findMod 虚拟行无 usage → 走 USAGE 表（永久静态）
+    var u = usageOf(guid, findMod(guid));
     if (!u) return;
-    var name = guid === SELF_GUID ? SELF_NAME : ((findMod(guid) || {}).name || guid);
+    var name = (findMod(guid) || {}).name || guid;
     openModal(usageModalHtml(name, u));
   }
 
@@ -1489,11 +1468,10 @@
       S.cfg.innerHTML = '<div class="__mc-loading">\u6b63\u5728\u8bfb\u53d6 mod \u914d\u7f6e\u2026</div>';
       return;
     }
-    if (ST.sel === '__self' || !mods().length) {
-      S.cfg.innerHTML = shellWarnHtml() + '<div class="__mc-mod-title"><h2>' + esc(SELF_NAME) + '</h2>'
-        + '<span class="__mc-en">' + esc(SELF_EN) + '</span>' + verHtml(ST.snap && ST.snap.self ? ST.snap.self.ver : null) + usageBtnHtml(SELF_GUID) + '</div>'
-        + '<div class="__mc-mod-desc">\u9762\u677f\u81ea\u8eab\u3002\u4e0d\u53ef\u505c\u7528\uff1b\u5982\u9700\u79fb\u9664\uff0c\u7528\u4e0b\u65b9\u5378\u8f7d\u3002</div>'
-        + uninstActHtml(SELF_GUID);
+    /* 套件名单任务 10：__self 详情页退役（自身移出列表，更新入口在头部版本区）——本分支
+     * 只剩名单为空/不可用的兜底占位（常态套件行恒在，走不到这里）。 */
+    if (!mods().length) {
+      S.cfg.innerHTML = shellWarnHtml() + '<div class="__mc-loading">\uff08\u6ca1\u6709\u53ef\u7ba1\u7406\u7684\u5957\u4ef6 mod\uff1a\u540d\u5355\u4e3a\u7a7a\u6216\u4e0d\u53ef\u7528\uff09</div>';
       return;
     }
     var m = curMod();
@@ -1779,7 +1757,7 @@
   }
 
   function usageIntroHtml(guid) {
-    var u = usageOf(guid, findMod(guid)); // mcSpec 2：已装 mod 用清单 usage；__self 回 USAGE 表
+    var u = usageOf(guid, findMod(guid)); // mcSpec 2：已装 mod 用清单 usage；USAGE 表（现已清空）兜底
     if (!u) {
       /* 未安装套件 mod 无清单 usage——回落快照行 desc（roster 最小行/已装行都带），
        * 仍无才给通用一句话（v2.2.0 功能说明段语义尽可能保留） */
@@ -2065,7 +2043,6 @@
   }
 
   function toggleMod(guid) {
-    if (guid === '__self') return; // 防呆：面板不可停用自身
     var m = findMod(guid);
     if (!m) return;
     if (m.noToggle) return; // mcSpec 2：无总开关（锁定开关本不发，防御兼容路径）
@@ -2119,11 +2096,11 @@
         }
         return;
       }
-      /* v2 任务 10：卸载…按钮 → 拉明细确认弹窗（__self 页 curMod 为 null——须在 curMod
-       * 判空之前；停用/启用动作不在此区，仍走左列开关）。 */
+      /* v2 任务 10：卸载…按钮 → 拉明细确认弹窗（按钮只在 mod 详情页维护区；仍先于 curMod
+       * 判空处理——停用/启用动作不在此区，仍走左列开关）。 */
       var un = t.closest('[data-act="uninst"]');
       if (un) { e.stopPropagation(); openUninstModal(un.getAttribute('data-guid')); return; }
-      /* v2.0.9：使用说明按钮 → 静态弹窗（USAGE 表；__self 页 curMod 为 null，故先于 curMod 判空） */
+      /* v2.0.9：使用说明按钮 → 静态弹窗（清单 usage / USAGE 表） */
       var us = t.closest('[data-act="usage"]');
       if (us) { e.stopPropagation(); openUsageModal(us.getAttribute('data-guid')); return; }
       var m = curMod();
@@ -2464,9 +2441,30 @@
 
   /* ================= C# → JS 推送 ================= */
 
+  /* 头部版本区（套件名单任务 10：自身行/页退役，自更新入口迁此）：常态只显版本文本；
+   * snap.self.ics 含 ↑黄（k==='yellow'，有新版本）→ “vX → 可更新”可点态（title 用
+   * ics.tip，点击路由在 build() 的 sub 监听；仓库行未命中时仍显示但不响应）。 */
+  function renderSub() {
+    var se = ST.snap.self;
+    var up = null;
+    if (se.ics) for (var i = 0; i < se.ics.length; i++)
+      if (se.ics[i] && se.ics[i].k === 'yellow') { up = se.ics[i]; break; }
+    if (up) {
+      S.sub.textContent = 'v' + se.ver + ' \u2192 \u53ef\u66f4\u65b0';
+      S.sub.title = up.tip || '';
+      S.sub.className = '__mc-sub __mc-sub-upd';
+      S.sub.setAttribute('data-interactive', ''); // div 非原生可点元素，进宿主页 clickThrough 白名单
+    } else {
+      S.sub.textContent = 'v' + se.ver + ' \u00b7 \u591a\u6570\u6539\u52a8\u5373\u65f6\u751f\u6548';
+      S.sub.title = '';
+      S.sub.className = '__mc-sub';
+      S.sub.removeAttribute('data-interactive');
+    }
+  }
+
   function renderAll() {
     if (!S.root || !S.root.isConnected) return;
-    if (S.sub && ST.snap && ST.snap.self) S.sub.textContent = 'v' + ST.snap.self.ver + ' \u00b7 \u591a\u6570\u6539\u52a8\u5373\u65f6\u751f\u6548';
+    if (S.sub && ST.snap && ST.snap.self) renderSub();
     renderSide();
     renderCfg();
     renderPending(); // v2 任务 7：面板重开时按已存摘要恢复底部待生效条

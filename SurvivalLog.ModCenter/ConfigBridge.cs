@@ -1969,6 +1969,13 @@ internal static class ConfigBridge
     /// （files=BepInEx 根相对'/'路径，面板渲染 BepInEx\ 前缀）。不在链上/解析失败→MC_TOAST 拒绝。</summary>
     private static void HandleUninst(string guid)
     {
+        // 套件名单任务 10：面板自身不可卸载（面板内入口已退役，探针/直发同样拒绝）
+        if (string.Equals(guid, ModCenterPlugin.Guid, StringComparison.OrdinalIgnoreCase))
+        {
+            Log("uninst 拒绝：面板自身");
+            McToast("面板自身不能卸载", "err", @"想删除请手动删除 BepInEx\plugins\SurvivalLog.ModCenter.dll");
+            return;
+        }
         var u = BuildUninst(guid);
         if (u == null || string.IsNullOrEmpty(u.DllBaseRel))
         {
@@ -2008,6 +2015,13 @@ internal static class ConfigBridge
     /// 终审必修 1：该仓下载/更新链在跑 → 整单拒绝（toast），绝不与链尾 AddUpdate 竞争。</summary>
     private static void HandleUninstDo(string guid)
     {
+        // 套件名单任务 10：面板自身不可卸载（与 HandleUninst 同拒，防绕过明细直接确认）
+        if (string.Equals(guid, ModCenterPlugin.Guid, StringComparison.OrdinalIgnoreCase))
+        {
+            Log("uninst-do 拒绝：面板自身");
+            McToast("面板自身不能卸载", "err", @"想删除请手动删除 BepInEx\plugins\SurvivalLog.ModCenter.dll");
+            return;
+        }
         var u = BuildUninst(guid);
         if (u == null || string.IsNullOrEmpty(u.DllBaseRel))
         {
