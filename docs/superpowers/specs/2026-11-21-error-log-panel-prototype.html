@@ -1,0 +1,365 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>ModCenter 错误日志面板 · 交互原型</title>
+<style>
+:root{
+  --bg:#0a0c11; --panel:#171a23; --panel2:#1d212c; --deep:#0f1219;
+  --line:#2a2f3d; --text:#e8e6e0; --muted:#9aa0ad; --dim:#6b7180;
+  --amber:#e8a33d; --red:#f87171; --green:#4ade80; --blue:#60a5fa;
+}
+*{box-sizing:border-box}
+body{margin:0;min-height:100vh;display:flex;align-items:center;justify-content:center;
+  background:radial-gradient(900px 600px at 50% 0%,#151926 0%,#0a0c11 70%);
+  color:var(--text);font-family:"Microsoft YaHei","PingFang SC","Noto Sans SC",sans-serif;font-size:13px}
+button{font-family:inherit;cursor:pointer}
+.viewport{width:1180px;height:740px;background:var(--panel);border:1px solid var(--line);
+  border-radius:12px;overflow:hidden;display:flex;flex-direction:column;
+  box-shadow:0 30px 80px rgba(0,0,0,.65);position:relative}
+header{height:52px;flex-shrink:0;display:flex;align-items:center;gap:10px;padding:0 16px;
+  border-bottom:1px solid var(--line);background:var(--panel)}
+.htitle{font-size:15px;font-weight:600;white-space:nowrap}
+.htitle .ver{font-size:12px;color:var(--dim);font-weight:400;font-family:Consolas,monospace;margin-left:6px}
+.htitle .sub{font-size:12px;color:var(--dim);font-weight:400;margin-left:8px}
+.hspace{flex:1}
+.btn{border-radius:6px;padding:5px 11px;font-size:12px;background:transparent;border:1px solid var(--line);color:var(--muted);transition:.15s}
+.btn:hover{border-color:var(--amber);color:var(--amber)}
+.btn.primary{background:rgba(232,163,61,.12);border-color:var(--amber);color:var(--amber);padding:7px 18px;font-size:12.5px}
+.btn.primary:hover{background:rgba(232,163,61,.22)}
+.err-entry{position:relative}
+.err-entry .dot{position:absolute;top:5px;right:6px;width:6px;height:6px;border-radius:50%;background:var(--red);display:none}
+.err-entry.has-err .dot{display:block}
+.x{width:28px;height:28px;border:0;background:transparent;color:var(--dim);font-size:18px;line-height:1}
+.x:hover{color:var(--text)}
+.back{border:0;background:transparent;color:var(--muted);font-size:13px;padding:4px 6px}
+.back:hover{color:var(--amber)}
+.crumb{font-size:14px;font-weight:600}
+.body{flex:1;display:flex;min-height:0}
+.side{width:272px;flex-shrink:0;border-right:1px solid var(--line);background:var(--deep);
+  overflow-y:auto;padding:10px 0}
+.sec{font-size:11px;color:var(--dim);letter-spacing:1.5px;padding:8px 18px 6px}
+.row{display:flex;align-items:center;gap:8px;padding:9px 16px;cursor:pointer;border-left:2px solid transparent;transition:background .12s}
+.row:hover{background:rgba(255,255,255,.03)}
+.row.sel{background:rgba(232,163,61,.10);border-left-color:var(--amber)}
+.row .st{width:8px;height:8px;border-radius:50%;background:var(--green);flex-shrink:0}
+.row .nm{flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-size:13.5px}
+.row .ics{display:flex;align-items:center;gap:6px;flex-shrink:0}
+.row .ics .tri{display:inline-flex}
+.row .ver{font-size:11px;color:var(--dim);font-family:Consolas,monospace;flex-shrink:0}
+.tri{width:15px;height:15px;flex-shrink:0;color:var(--red);display:none}
+.tri svg{width:100%;height:100%;display:block}
+.tri.show{display:inline-flex}
+.sw{width:30px;height:17px;border-radius:9px;background:#565d6d;position:relative;flex-shrink:0;border:0;transition:.15s;padding:0}
+.sw::after{content:"";position:absolute;left:2px;top:2px;width:13px;height:13px;border-radius:50%;background:#cfd3dc;transition:.15s}
+.sw.on{background:#4ade80}
+.sw.on::after{left:15px}
+.cfg{flex:1;overflow-y:auto;padding:20px 26px 30px;min-width:0}
+.cfg h2{font-size:18px;margin:0 0 8px;font-weight:600}
+.cfg h2 .ver{font-size:12px;color:var(--dim);font-weight:400;font-family:Consolas,monospace;margin-left:6px}
+.desc{font-size:13px;color:var(--muted);line-height:1.6;margin:0 0 6px}
+.grp h3{font-size:12.5px;color:var(--amber);letter-spacing:2px;font-weight:500;padding-bottom:7px;
+  border-bottom:1px solid var(--line);margin:22px 0 4px}
+.item{display:flex;align-items:center;gap:14px;padding:10px 4px;border-bottom:1px dashed rgba(255,255,255,.06)}
+.item .lb{font-size:13.5px}
+.item .ck{font-size:11px;color:var(--dim);font-family:Consolas,monospace;margin-top:2px}
+.item input[type=range]{flex:1;accent-color:var(--amber);height:16px;background:transparent}
+.item .val{width:54px;text-align:right;font-family:Consolas,monospace;font-size:12.5px;color:var(--muted)}
+.foot{height:34px;flex-shrink:0;display:flex;align-items:center;gap:16px;padding:0 18px;
+  border-top:1px solid var(--line);background:var(--panel2);font-size:11.5px;color:var(--dim)}
+.foot .legend{display:flex;align-items:center;gap:5px}
+.foot .legend .tri{display:inline-flex;width:14px;height:14px;color:var(--red)}
+/* ---- 错误日志页 ---- */
+.err-side{padding-top:8px;display:flex;flex-direction:column}
+.eitem{display:grid;grid-template-columns:16px 1fr auto;grid-template-rows:auto auto;column-gap:7px;
+  row-gap:2px;padding:8px 16px;cursor:pointer;border-left:2px solid transparent}
+.eitem:hover{background:rgba(255,255,255,.03)}
+.eitem.sel{background:rgba(232,163,61,.10);border-left-color:var(--amber)}
+.eitem .tri{grid-row:1/3;align-self:center;display:inline-flex;width:14px;height:14px}
+.eitem .enm{font-size:13px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.eitem .ecnt{font-size:11px;color:var(--dim);font-family:Consolas,monospace}
+.eitem .etime{grid-column:2/4;font-size:11px;color:var(--dim);font-family:Consolas,monospace}
+.eempty{padding:22px 18px;text-align:center;font-size:12px;color:var(--dim);letter-spacing:1px}
+.detail{flex:1;min-width:0;display:flex;flex-direction:column}
+.dhead{display:flex;align-items:flex-start;gap:12px;padding:18px 24px 12px;border-bottom:1px solid var(--line);flex-shrink:0}
+.dhead h2{font-size:17px;margin:0;font-weight:600}
+.dhead h2 .ver{font-size:12px;color:var(--dim);font-weight:400;font-family:Consolas,monospace;margin-left:6px}
+.dguid{font-size:11px;color:var(--dim);font-family:Consolas,monospace;margin-top:5px}
+.dhint{margin-left:auto;align-self:center;font-size:11px;color:var(--dim)}
+.elist{flex:1;overflow-y:auto;padding:14px 24px 18px;display:flex;flex-direction:column;gap:10px}
+.ecard{background:var(--deep);border:1px solid var(--line);border-radius:8px;padding:11px 13px}
+.ecard-h{display:flex;align-items:center;gap:9px}
+.ecard .ets{font-size:11.5px;color:var(--dim);font-family:Consolas,monospace}
+.lvl{font-size:10.5px;padding:1px 7px;border-radius:4px;border:1px solid rgba(248,113,113,.4);
+  color:var(--red);background:rgba(248,113,113,.10);letter-spacing:.5px}
+.lvl.fatal{border-color:rgba(239,68,68,.65);background:rgba(239,68,68,.18);color:#fca5a5}
+.hspace{flex:1}
+.icbtn{width:28px;height:28px;border:1px solid var(--line);background:transparent;border-radius:6px;color:var(--muted);
+  display:inline-flex;align-items:center;justify-content:center;flex-shrink:0;transition:.15s}
+.icbtn svg{width:14px;height:14px}
+.icbtn:hover{border-color:var(--amber);color:var(--amber)}
+.emsg{margin:8px 0 0;font-size:12.5px;line-height:1.55;color:var(--text);word-break:break-word}
+.stack{margin:8px 0 0;padding:7px 0 0 10px;border-left:2px solid var(--line);color:var(--muted);
+  font:11.5px/1.6 Consolas,monospace;white-space:pre-wrap;word-break:break-word;overflow:hidden;
+  max-height:38px;transition:max-height .2s ease}
+.stack.open{max-height:340px}
+.expand{margin-top:6px;border:0;background:transparent;color:var(--dim);font-size:11.5px;padding:0}
+.expand:hover{color:var(--amber)}
+.empty{flex:1;display:flex;align-items:center;justify-content:center;color:var(--dim);font-size:13px;letter-spacing:1px}
+.modal{position:absolute;inset:0;background:rgba(0,0,0,.62);display:none;align-items:center;justify-content:center;z-index:20}
+.modal.show{display:flex}
+.dialog{width:380px;background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:20px 22px;
+  box-shadow:0 20px 60px rgba(0,0,0,.6)}
+.dialog h3{margin:0 0 10px;font-size:15px}
+.dialog p{margin:0;font-size:12.5px;line-height:1.65;color:var(--muted)}
+.drow{display:flex;justify-content:flex-end;gap:10px;margin-top:18px}
+.drow button{border-radius:6px;padding:6px 16px;font-size:12.5px;background:transparent;border:1px solid var(--line);color:var(--muted)}
+.drow button:hover{color:var(--text)}
+.drow .primary{border-color:var(--amber);color:var(--amber)}
+.drow .primary:hover{background:rgba(232,163,61,.12)}
+/* ---- 告警弹窗（沿用现有卡片结构，新增运行异常卡） ---- */
+.dialog.warn{width:470px}
+.dialog.warn h3{display:flex;align-items:center;gap:7px;margin:0 0 6px;font-size:14px}
+.wchip{width:17px;height:17px;color:var(--red);display:inline-flex;flex-shrink:0}
+.wchip svg{width:100%;height:100%}
+.msub{font-size:12.5px;color:var(--muted);line-height:1.6}
+.msec{margin-top:12px}
+.mh{font-size:11px;color:var(--dim);letter-spacing:1px;margin-bottom:4px}
+.mtxt{font-size:12.5px;line-height:1.65}
+.wsep{border-top:1px solid var(--line);margin:16px 0}
+.toast{position:absolute;left:50%;bottom:54px;transform:translate(-50%,8px);opacity:0;pointer-events:none;
+  background:rgba(15,18,25,.96);border:1px solid var(--green);color:var(--text);border-radius:8px;
+  padding:9px 18px;font-size:12.5px;box-shadow:0 10px 30px rgba(0,0,0,.5);transition:.2s}
+.toast.show{opacity:1;transform:translate(-50%,0)}
+.toast.err{border-color:var(--red)}
+</style>
+</head>
+<body>
+<div class="viewport" id="app">
+  <header id="hdr"></header>
+  <div class="body" id="body"></div>
+  <footer class="foot" id="foot"></footer>
+  <div class="modal" id="confirm"><div class="dialog" id="dialog"></div></div>
+  <div class="toast" id="toast"></div>
+</div>
+<script>
+const TRI_SVG = '<svg viewBox="0 0 24 24" fill="none"><path d="M12 3.5 2.6 20h18.8L12 3.5Z" stroke="currentColor" stroke-width="1.9" stroke-linejoin="round"/><path d="M12 9.2v4.6" stroke="currentColor" stroke-width="1.9" stroke-linecap="round"/><circle cx="12" cy="16.8" r="1.15" fill="currentColor"/></svg>';
+const TRI = '<span class="tri">' + TRI_SVG + '</span>';
+const COPY_ICON = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>';
+const ENV = 'ModCenter v2.4.0 · 游戏 0.9.31 · 2026-11-21 12:34:56';
+
+const DB = [
+  {id:'cab', name:'更好的储物柜', ver:'v2.2.4', guid:'com.local.survivallog.cabineteverywhere', third:false, errors:[
+    {id:1, t:'2026-11-21 12:30:01', lvl:'Error', src:'CabinetEverywhere',
+     msg:'NullReferenceException: Object reference not set to an instance of an object.',
+     stack:'  at CabinetEverywhere.Patches.CabinetViewPatch.Postfix(Int32 __instance) in CabinetViewPatch.cs:line 214\n  at Game.CabinetView.Refresh()\n  at Game.CabinetView.OnOpen()\n  at UnityEngine.Events.UnityAction.Invoke()'},
+    {id:2, t:'2026-11-21 12:28:44', lvl:'Error', src:'CabinetEverywhere',
+     msg:'InvalidOperationException: Collection was modified; enumeration operation may not execute.',
+     stack:'  at System.Collections.Generic.List`1.Enumerator.MoveNext()\n  at CabinetEverywhere.CabinetIndex.Rebuild() in CabinetIndex.cs:line 88'},
+    {id:3, t:'2026-11-21 12:12:09', lvl:'Fatal', src:'CabinetEverywhere',
+     msg:'Exception: Failed to apply cabinet height preset (preset #12).',
+     stack:'  at CabinetEverywhere.Presets.Apply(Int32 id) in Presets.cs:line 57'}
+  ]},
+  {id:'craft', name:'制作队列', ver:'v1.0.0', guid:'com.local.survivallog.craftqueue', third:false, errors:[
+    {id:6, t:'2026-11-21 11:02:18', lvl:'Error', src:'CraftQueue',
+     msg:'NullReferenceException: Object reference not set to an instance of an object.',
+     stack:'  at CraftQueue.QueueManager.Tick() in QueueManager.cs:line 132\n  at CraftQueue.CraftQueuePlugin.Update()'}
+  ]},
+  {id:'codex', name:'图鉴解锁方案', ver:'v1.0.0', guid:'com.local.survivallog.codexhint', third:false, errors:[]},
+  {id:'fridge', name:'保鲜增强', ver:'v1.3.6', guid:'com.local.survivallog.fridgechill', third:false, errors:[]},
+  {id:'unattr', name:'未归属', ver:'', guid:'（来源无法归属到具体插件）', third:false, unattr:true, errors:[
+    {id:9, t:'2026-11-21 12:31:10', lvl:'Error', src:'BepInEx',
+     msg:'Exception: Failed to read config file BepInEx\\config\\com.example.unknown.cfg',
+     stack:'  at BepInEx.Configuration.ConfigFile.Load()'},
+    {id:10, t:'2026-11-21 12:31:11', lvl:'Error', src:'BepInEx',
+     msg:'Error loading plugin com.example.unknown: TypeLoadException',
+     stack:'  at BepInEx.Unity.IL2CPP.IL2CPPChainloader.LoadPlugin(PluginInfo pluginInfo)'}
+  ]},
+  {id:'tp', name:'储物扩容', ver:'v2.1.0', guid:'com.jangfullmoon.storagecapacityexpansion', third:true, errors:[]}
+];
+
+const st = {view:'main', sel:'cab', errSel:'cab', open:new Set()};
+const $ = s => document.querySelector(s);
+const mod = id => DB.find(m => m.id === id);
+const cnt = m => m.errors.length;
+const anyErr = () => DB.some(m => m.errors.length > 0);
+const esc = s => s.replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+
+function header(){
+  const err = st.view === 'err';
+  let h = '';
+  if (err) h += '<button class="back" data-act="back">← 返回</button><span class="crumb">错误日志</span>';
+  else h += '<span class="htitle">Mod 管理中心 <span class="ver">v2.4.0</span><span class="sub">· 多数改动即时生效</span></span>';
+  h += '<span class="hspace"></span><button class="btn">检查更新</button>';
+  h += '<button class="btn err-entry' + (anyErr() ? ' has-err' : '') + '" data-act="open-err">错误日志<span class="dot"></span></button>';
+  h += '<button class="x" title="关闭">×</button>';
+  $('#hdr').innerHTML = h;
+}
+
+function sideRow(m){
+  const hasErr = cnt(m) > 0;
+  const hasConflict = m.third || m.id === 'cab'; // 原型：储物扩容与储物 mod 互斥；更好的储物柜被波及
+  const hasRed = hasConflict || hasErr;
+  const tip = hasConflict && hasErr ? '严重告警：冲突与运行报错，点看列表'
+    : hasConflict ? '严重冲突：和第三方「储物扩容」只能留一个，点看详情'
+    : '运行报错，点击查看';
+  return `<div class="row${st.sel === m.id ? ' sel' : ''}" data-act="sel" data-id="${m.id}">
+    <span class="st"></span>
+    <span class="nm">${esc(m.name)}</span>
+    <span class="ics">
+      ${hasRed ? `<span class="tri show" data-act="warn" data-id="${m.id}" title="${tip}">${TRI_SVG}</span>` : ''}
+    </span>
+    <button class="sw${m.id === 'tp' ? '' : ' on'}" data-act="sw" data-id="${m.id}" aria-label="启用"></button>
+  </div>`;
+}
+
+function mainView(){
+  const suites = DB.filter(m => !m.third && !m.unattr);
+  const tps = DB.filter(m => m.third);
+  $('#body').innerHTML = `<aside class="side">
+      <div class="sec">套件</div>${suites.map(sideRow).join('')}
+      <div class="sec" style="padding-top:14px">三方</div>${tps.map(sideRow).join('')}
+    </aside><main class="cfg">${fakeCfg(mod(st.sel) || DB[0])}</main>`;
+  $('#foot').innerHTML = `<span class="legend">${TRI} 本次启动运行报错</span>
+    <span>红标在原位置（开关前），点开仍是告警列表</span><span class="hspace"></span><span>原型：交互可点</span>`;
+}
+
+function fakeCfg(m){
+  return `<h2>${esc(m.name)} <span class="ver">${m.ver || ''}</span></h2>
+    <p class="desc">${m.third ? '第三方 mod：配置页由其 cfg 自动生成。' : '全容器作为制作/烹饪/酿造等取料源直达；柜子页签标签筛选与场景固定视图。'}</p>
+    <div class="grp"><h3>通用</h3>
+      <div class="item"><div><div class="lb">总开关</div><div class="ck">General.Enabled</div></div>
+        <span class="hspace"></span><button class="sw on" data-act="sw"></button></div>
+      <div class="item"><div><div class="lb">示例滑条</div><div class="ck">General.SampleValue</div></div>
+        <input type="range" min="0" max="30" value="18"><div class="val">18</div></div>
+    </div>`;
+}
+
+function errItem(m){
+  const last = m.errors[0];
+  return `<div class="eitem${st.errSel === m.id ? ' sel' : ''}" data-act="err-sel" data-id="${m.id}">
+      ${TRI}<span class="enm">${esc(m.name)}</span><span class="ecnt">${m.errors.length} 条</span>
+      <span class="etime">${last ? last.t.slice(11) : ''} 最近</span></div>`;
+}
+
+function errView(){
+  const withErr = DB.filter(m => m.errors.length > 0);
+  const suites = withErr.filter(m => !m.third && !m.unattr);
+  const tps = withErr.filter(m => m.third || m.unattr);
+  let groups = '';
+  if (suites.length) groups += `<div class="sec">套件</div>${suites.map(errItem).join('')}`;
+  if (tps.length) groups += `<div class="sec"${suites.length ? ' style="padding-top:14px"' : ''}>三方</div>${tps.map(errItem).join('')}`;
+  if (!groups) groups = '<div class="eempty">暂无错误</div>';
+  $('#body').innerHTML = `<aside class="side err-side">${groups}</aside>
+    <main class="detail" id="detail">${detailHtml()}</main>`;
+  $('#foot').innerHTML = `<span class="legend">${TRI} 本次启动报过错（无数字，重启才重置）</span>
+    <span>右上角复制全部、堆栈可展开</span><span class="hspace"></span><span>原型：交互可点</span>`;
+}
+
+function detailHtml(){
+  const m = mod(st.errSel);
+  if (!m || !m.errors.length) return '<div class="empty">选择一个 mod 查看错误详情</div>';
+  const list = m.errors.map(e => {
+    const open = st.open.has(e.id);
+    return `<article class="ecard">
+      <div class="ecard-h"><span class="ets">${e.t.slice(11)}</span>
+        <span class="lvl${e.lvl === 'Fatal' ? ' fatal' : ''}">${e.lvl}</span></div>
+      <div class="emsg">${esc(e.msg)}</div>
+      <pre class="stack${open ? ' open' : ''}">${esc(e.stack)}</pre>
+      <button class="expand" data-act="expand" data-id="${e.id}">${open ? '收起堆栈 ▴' : '展开完整堆栈 ▾'}</button>
+    </article>`;
+  }).join('');
+  return `<div class="dhead"><div><h2>${esc(m.name)} <span class="ver">${m.ver || ''}</span></h2>
+      <div class="dguid">${esc(m.guid)}</div></div><span class="dhint">仅保留最近 50 条</span>
+      <button class="icbtn" data-act="copy-all" title="复制全部错误日志" aria-label="复制全部错误日志">${COPY_ICON}</button></div>
+    <div class="elist">${list}</div>`;
+}
+
+function render(){
+  header();
+  if (st.view === 'err') errView(); else mainView();
+}
+
+function toast(text, isErr){
+  const t = $('#toast'); t.textContent = text;
+  t.className = 'toast show' + (isErr ? ' err' : '');
+  clearTimeout(toast._h); toast._h = setTimeout(() => t.className = 'toast', 1800);
+}
+
+async function copyText(text){
+  try { await navigator.clipboard.writeText(text); }
+  catch(e){
+    const ta = document.createElement('textarea');
+    ta.value = text; ta.style.position = 'fixed'; ta.style.opacity = '0';
+    document.body.appendChild(ta); ta.select(); document.execCommand('copy'); ta.remove();
+  }
+  toast('已复制到剪贴板');
+}
+const errBlock = e => `[${e.t}] [${e.lvl}] ${e.src}\n${e.msg}\n${e.stack}`;
+const modHeader = m => `${ENV}\nMod: ${m.name} ${m.ver || ''} (${m.guid})\n---`;
+const copyAll = m => copyText(modHeader(m) + '\n' + m.errors.map(errBlock).join('\n\n'));
+
+const CONFLICT = {
+  tag:'严重冲突',
+  title:'和第三方「储物扩容」只能留一个：同时开启会互相覆盖柜子和背包的容量数值。',
+  who:'更好的储物柜（CabinetEverywhere）',
+  reason:'「储物扩容」改写 73 件柜子的内部数据并强改数值，与套件的修改相乘叠加（×1.5 ×1.5 = ×2.25）。',
+  tips:['停用或卸载「储物扩容」（推荐）','或者停用套件里的储物 mod','调加载顺序没有用']
+};
+
+function openWarn(id){
+  const m = mod(id); if (!m) return;
+  const errs = m.errors;
+  let h = '', first = true;
+  const sep = () => { const s = first ? '' : '<div class="wsep"></div>'; first = false; return s; };
+  if (m.third || m.id === 'cab'){
+    h += sep() + `<h3><span class="wchip">${TRI_SVG}</span>${CONFLICT.tag} · ${esc(m.name)}</h3>
+      <div class="msub">${esc(CONFLICT.title)}</div>
+      <div class="msec"><div class="mh">涉及 mod</div><div class="mtxt"><b>${esc(CONFLICT.who)}</b></div></div>
+      <div class="msec"><div class="mh">原因</div><div class="mtxt">${esc(CONFLICT.reason)}</div></div>
+      <div class="msec"><div class="mh">怎么办</div><div class="mtxt">${CONFLICT.tips.map((t,i)=> (i? '<br>':'') + (i+1) + '. ' + esc(t)).join('')}</div></div>`;
+  }
+  if (errs.length){
+    h += sep() + `<h3><span class="wchip">${TRI_SVG}</span>运行异常 · ${esc(m.name)}</h3>
+      <div class="msub">本次启动运行时报错 ${errs.length} 次，可能影响功能。</div>
+      <div class="msec"><div class="mh">原因</div><div class="mtxt">${esc(errs[0].msg)}</div></div>
+      <div class="msec"><div class="mh">怎么办</div><div class="mtxt">1. 打开错误日志，复制详情反馈给作者<br>2. 重启后仍出现，先停用该 mod 排查</div></div>`;
+  }
+  h += `<div class="drow"><button data-act="cancel">关闭</button>`
+    + (errs.length ? `<button class="primary" data-act="goto-log" data-id="${m.id}">查看错误日志</button>` : '')
+    + `</div>`;
+  $('#dialog').className = 'dialog warn';
+  $('#dialog').innerHTML = h;
+  $('#confirm').classList.add('show');
+}
+
+function bind(){
+  document.addEventListener('click', ev => {
+    const el = ev.target.closest('[data-act]'); if (!el) return;
+    const act = el.dataset.act, id = el.dataset.id;
+    if (act === 'open-err'){
+      st.view = 'err';
+      st.errSel = (DB.find(m => m.errors.length > 0) || {}).id || null;
+      render(); return;
+    }
+    if (act === 'warn'){ ev.stopPropagation(); openWarn(id); return; }
+    if (act === 'goto-log'){ $('#confirm').classList.remove('show'); st.view = 'err'; st.errSel = id; render(); return; }
+    if (act === 'back'){ st.view = 'main'; render(); return; }
+    if (act === 'sel'){ st.sel = id; render(); return; }
+    if (act === 'sw'){ ev.stopPropagation(); el.classList.toggle('on'); return; }
+    if (act === 'err-sel'){ st.errSel = id; render(); return; }
+    if (act === 'expand'){
+      const n = +id; st.open.has(n) ? st.open.delete(n) : st.open.add(n); render(); return;
+    }
+    if (act === 'copy-all'){ copyAll(mod(st.errSel)); return; }
+    if (act === 'cancel'){ $('#confirm').classList.remove('show'); return; }
+  });
+  document.addEventListener('keydown', ev => {
+    if (ev.key === 'Escape') $('#confirm').classList.remove('show');
+  });
+}
+
+bind(); render();
+</script>
+</body>
+</html>
