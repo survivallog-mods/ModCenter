@@ -33,13 +33,16 @@ public sealed class RepoRow
     public bool Kbw;       // v2.2.0 gamekb 门退役：恒 false（同上）
     public string KbWhy;   // v2.2.0 gamekb 门退役：恒空（同上）
     public int? HttpStatus; // T16/D：本轮 fetch 的 HTTP 状态（403=GitHub 限流；面板专门提示）
+    public string Dll;      // v2.4.0：安装/替换目标 dll 的 BepInEx 根相对路径（名单 dll 字段经 SuiteRoster.DllOf 归一；null = 旧路径行，消费方回退 DllRelOf）
 
     /// <summary>面板态字符串（控制器裁定 2 固定口径，小写）。</summary>
     public string Status => State.ToString().ToLowerInvariant();
 }
 
 /// <summary>
-/// 仓库决策层（ModCenter v2 生命周期任务 6）：10 仓清单 + 本地插件快照 + 三态决策。
+/// 仓库决策层（ModCenter v2 生命周期任务 6）：本地版本捕获 + 三态决策。
+/// v2.4.0 名单单源：仓清单不再静态硬编码（RepoKeys/SnapshotLocal 过渡件已删）——行构建走
+/// <see cref="SuiteRoster.BuildRows"/>（名单 = COS suite.json 的客户端驻留副本）。
 /// 决策口径（v4.1 作者拍板 + v2.2.0 gamekb 门退役）：
 /// - 远端 tag &gt; 本地 = Update；未安装 = Install；相等或本地更高（超前构建）= Ok 静默
 ///   （不提示、无任何动作入口）；fetch 失败（Remote=null）= Ok + Remote null（面板按
@@ -48,22 +51,10 @@ public sealed class RepoRow
 ///   拍板：制作基线与玩家游戏版本不一致不构成告警（更新到同版本只是同 zip 反复覆盖，
 ///   死循环无意义）；Warn/Kbw/VerNote 恒空（字段保留防新旧面板互炸）。
 /// <see cref="Build"/> 为纯函数（不碰 IO/interop，任意线程可调）；本地枚举在
-/// <see cref="SnapshotLocal"/>（主线程，IL2CPPChainloader 契约）。
+/// <see cref="CaptureLocalVersions"/>（主线程，IL2CPPChainloader 契约）。
 /// </summary>
 public static class RepoDecision
 {
-    /// <summary>10 仓清单（Ruling 5：仓键 = 组织仓名；GUID 映射见 <see cref="GuidOf"/>）。
-    /// 2026-10-31 +SaveMgr（第 13 仓，GUID 符合约定；Release 未发 → 面板显示未发版）。
-    /// 2026-11-02 RoleUnlock 更名 UnlockHub（GitHub 仓同步改名，旧名 URL 自动重定向；仓键跟随新名）。
-    /// 2026-11-07 -BackpackExpand/-CabinetSize/-CabinetBurden（负重批退役：背包/柜子高度与负重
-    /// 全部并入「更好的储物系统」CabinetEverywhere v1.8.6，三仓不再随套件发版/检查更新）。</summary>
-    public static readonly string[] RepoKeys =
-    {
-        "CabinetEverywhere",
-        "EndlessGuard", "FridgeChill", "ModCenter", "PlanPick",
-        "PreDisasterSpeed", "QuickAction", "RobotSpeed", "SaveMgr", "UnlockHub",
-    };
-
     /// <summary>仓键 → 套件插件 GUID（com.local.survivallog.&lt;小写仓键&gt;）。</summary>
     public static string GuidOf(string repoKey) => "com.local.survivallog." + repoKey.ToLowerInvariant();
 
@@ -71,26 +62,25 @@ public static class RepoDecision
     public static string DllRelOf(string repoKey) => "plugins/SurvivalLog." + repoKey + ".dll";
 
     /// <summary>
-    /// 本地插件快照（**主线程**：IL2CPPChainloader.Instance.Plugins，v1 §4.1①实证 API）：
-    /// 构造 N 行，Local 填 PluginInfo.Metadata.Version（SemanticVersioning.Version），
-    /// 未安装 = null。Remote/Gamekb 由调用方 fetch 后附（T8 / 探针）。
+    /// 本地版本捕获（v2.4.0 名单单源，**主线程**：IL2CPPChainloader 契约）：Chainloader
+    /// 全量插件 GUID → 版本串字典（OrdinalIgnoreCase——名单 guid 发布侧小写、Chainloader
+    /// 键按插件声明原样）。含第三方多余键无害：调用方按名单 GUID 查询；名单行构建走
+    /// <see cref="SuiteRoster.BuildRows"/>（只读传入字典，不碰 Chainloader）。
     /// </summary>
-    public static List<RepoRow> SnapshotLocal()
+    public static Dictionary<string, string> CaptureLocalVersions()
     {
+        var map = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
         Dictionary<string, BepInEx.PluginInfo> plugins = null;
         try { plugins = IL2CPPChainloader.Instance?.Plugins; }
-        catch { plugins = null; } // Chainloader 未就绪（理论不可达：探针 10s 起跑晚于插件全 Load）
+        catch { plugins = null; } // Chainloader 未就绪 = 空表（全部行按未安装处理，不抛）
 
-        var rows = new List<RepoRow>(RepoKeys.Length);
-        foreach (var key in RepoKeys)
+        if (plugins == null) return map;
+        foreach (var kv in plugins)
         {
-            var guid = GuidOf(key);
-            string ver = null;
-            if (plugins != null && plugins.TryGetValue(guid, out var pi) && pi?.Metadata?.Version != null)
-                ver = pi.Metadata.Version.ToString();
-            rows.Add(new RepoRow { Name = key, RepoKey = key, Guid = guid, Local = ver });
+            var v = kv.Value?.Metadata?.Version;
+            if (v != null) map[kv.Key] = v.ToString();
         }
-        return rows;
+        return map;
     }
 
     /// <summary>
@@ -174,12 +164,16 @@ public static class PendingWriter
         if (string.IsNullOrEmpty(stagedAbsPath) || !File.Exists(stagedAbsPath))
             throw new ArgumentException("staged dll 不在场: " + stagedAbsPath, nameof(stagedAbsPath));
 
+        // v2.4.0：目标 dll 统一走 RepoRow.Dll（名单 dll 字段经 SuiteRoster.DllOf 归一）；
+        // null（旧路径行）回退 DllRelOf 缺省推导——下载链不再直接依赖静态仓清单。
+        var target = row.Dll ?? RepoDecision.DllRelOf(row.RepoKey);
+
         AppendOps(McPending.File, new List<McPending.Op>
         {
             new()
             {
                 Type = string.IsNullOrEmpty(row.Local) ? McPending.TypeInstall : McPending.TypeReplace,
-                Target = RepoDecision.DllRelOf(row.RepoKey),
+                Target = target,
                 Staged = ToRel(stagedAbsPath),
                 Md5 = RepoClient.Md5Of(stagedAbsPath), // 清理器执行侧对 staged 本件强校验（T2 实测语义）
             },
@@ -193,8 +187,7 @@ public static class PendingWriter
         if (!string.IsNullOrEmpty(row.Guid)
             && string.Equals(row.Guid, ModCenterPlugin.Guid, StringComparison.OrdinalIgnoreCase))
         {
-            var targetAbs = Path.Combine(Paths.BepInExRootPath,
-                RepoDecision.DllRelOf(row.RepoKey).Replace('/', '\\'));
+            var targetAbs = Path.Combine(Paths.BepInExRootPath, target.Replace('/', '\\'));
             // 写预置失败不抛：pending op 已落盘，下次启动 CleanupRunner 会重试补写（代价=多一次重启）。
             if (!CleanupRunner.WriteSelfUpdateFlag(stagedAbsPath, RepoClient.Md5Of(stagedAbsPath), targetAbs))
                 ModCenterPlugin.Log("warn 自更新预置写入失败（pending op 已落盘，下次启动重试）");

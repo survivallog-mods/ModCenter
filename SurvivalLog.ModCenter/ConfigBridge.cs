@@ -26,13 +26,14 @@ namespace SurvivalLog.ModCenter;
 /// v4：行内 ⟳ 徽标退役，待生效只经底条呈现；Pump 每 2s 巡检，摘要变化推 MC_PENDING_SUMMARY。
 /// v2 生命周期任务 8：更新链——触发点两处（作者拍板，替代旧"面板打开自动查"）：启动 +10s
 /// 预检一轮（Pump _bootDone，面板没开也跑）+ MC_CHK 手动刷新（60 秒冷却；MC_REPO_GET{force}
-/// 保留兼容）→ 后台 fetch（v2.0.6 起索引优先：index 仓 suite.json 1 次 API；缺行逐仓补/
-/// 不可用回退/403 收轮——v2.0.11 起 403 带 X-RateLimit-Reset 换算的"约 N 分钟后重置"提示，
-/// 见 RepoClient.FetchSuite）+ RepoDecision.Build（主线程收割推 MC_REPO_DATA +
-/// 快照侧栏 ↑黄/⚠橙 徽标）；MC_UPD/MC_INST 确认后走**串行**下载链（后台：下载（进度
-/// 250ms 节流推 MC_DL）→ zip MD5 对 update.json → 解包 BepInEx/plugins/*.dll 暂存 → 主线程
-/// PendingWriter.AddUpdate）→ 快照刷新（可动作徽标消失、底条出现该项）。GitHub 匿名 60 次/h：一轮
-/// 12 次，绝不后台轮询（每靴只预检一轮，余量全给手动）。
+/// 保留兼容）→ 后台 fetch（v2.4.0 名单驱动 COS-only：1 次拉桶根 suite.json；成功按新名单
+/// SuiteRoster.BuildRows 建行 + 收割时 ApplyFromFetch 更名单缓存；失败用缓存名单重建 +
+/// FetchFailed"使用上次结果"——逐仓 GitHub 补查/403 限流分支随名单单源退役，见
+/// RepoClient.FetchSuite）+ RepoDecision.Build（主线程收割推 MC_REPO_DATA +
+/// 快照侧栏 ↑黄 徽标）；MC_UPD/MC_INST 确认后走**串行**下载链（后台：下载（进度
+/// 250ms 节流推 MC_DL）→ zip MD5 对名单行 → 解包 BepInEx/plugins/*.dll 暂存 → 主线程
+/// PendingWriter.AddUpdate）→ 快照刷新（可动作徽标消失、底条出现该项）。COS 公有读无
+/// 匿名限额：每靴只预检一轮，绝不后台轮询，手动按冷却。
 /// v2 生命周期任务 9：加载排序模式——MC_ORDER_GET（组装生效序：pending.order 命中项按序
 /// 前置 + 其余 GUID 字母序，与清理器 OrderReorder 语义一致）→ 推 MC_ORDER_DATA
 /// {guids[],rows[],def[]}；MC_ORDER_SAVE 校验（白名单=当前 Plugins 键、元素不重不漏=与可排序
@@ -50,11 +51,11 @@ namespace SurvivalLog.ModCenter;
 /// 扩含 delete（卸载意图吃掉 ↑黄/⚠橙 可动作徽标）；HandleOrderSave 体内兜底异常→MC_ORDER_FAIL（防保存钮
 /// 在途卡死）；待生效条 order 覆盖档分"已保存未重启/生效中"（首拍 order 有效序相同或
 /// pending.json mtime 早于本进程启动 = 本靴已应用 → 中性标签不计入计数）。
-/// v2 生命周期任务 11：冲突体检 L1/L3——BuildSnapshot 时把 Chainloader 插件投影为 CfRow
-/// （GUID/显示名/dll 文件名/L1 命中/功能域），按 Meta.KnownConflicts（GUID 优先、dll 文件名兜底）
-/// 与 Meta.Domains（同域 ≥2 登记 mod）给每行挂 ics（red/gray，click=cf）；MC_CF {guid} →
-/// MC_CF_DATA {guid,cards[]}（L1 cards + L3 同域卡，面板照原型 cfHtml 渲染）。快照 ics 与
-/// 弹窗卡片共用 EntriesFor/DomainMates，杜绝两处口径漂移。
+/// v2 生命周期任务 11：冲突体检 L1——BuildSnapshot 时把 Chainloader 插件投影为 CfRow
+/// （GUID/dll 文件名/L1 命中），按 Meta.KnownConflicts（GUID 优先、dll 文件名兜底）
+/// 给每行挂 ics（red/orange，click=cf）；MC_CF {guid} →
+/// MC_CF_DATA {guid,cards[]}（L1 cards + L2 碰撞卡，面板照原型 cfHtml 渲染）。快照 ics 与
+/// 弹窗卡片共用 EntriesFor，杜绝两处口径漂移（L3 同域提示随静态域表退役删除，v2.4.0）。
 /// 线程纪律：全部 cfg 读写与分发都在 Ticker 主线程（Pump）；outbox 回调线程只入队；
 /// 仓库 fetch/下载在后台 Task，结果经 RepoQueue 回主线程收割（PendingWriter 主线程唯一写者）。
 /// </summary>
@@ -97,7 +98,9 @@ internal static class ConfigBridge
     {
         public int Kind;                          // 1=fetch 完成 2=下载进度 3=单仓链结果 4=链收尾 5=fetch 异常收尾（T9 顺手修）
         public List<RepoRow> Rows;                // 1
-        public Dictionary<string, RepoClient.UpdateInfo> Infos; // 1
+        public Dictionary<string, RepoClient.UpdateInfo> Infos; // 1（repoKey → 名单行；下载链直用）
+        public List<RepoClient.UpdateInfo> Entries; // 1：本轮名单条目（成功=新拉，成功轮 ApplyFromFetch；失败轮 null 不动缓存）
+        public bool FetchFailed;                  // 1：suite.json 拉取失败（行=缓存名单重建，"使用上次结果"）
         public bool Manual;                       // 1：v2.2.0 手动检查轮（收割后推 MC_UPDATES_READY）；预检 false
         public string RepoKey;                    // 2/3
         public int Pct;                           // 2
@@ -107,9 +110,6 @@ internal static class ConfigBridge
         public RepoRow Row;                       // 3 ok（主线程 AddUpdate 用）
         public RepoClient.UpdateInfo Info;        // 3 ok
         public string Staged;                     // 3 ok（staging 内 dll 绝对路径）
-        public int RateLimited;                   // 1：本轮 HTTP 403 仓数（T16/D 限流提示）
-        public int OkCount;                       // 1：本轮成功拿到 update.json 的仓数
-        public long ResetUnix;                    // 1：403 限流重置时刻（Unix 秒；0=响应未带头）
     }
 
     private static readonly ConcurrentQueue<RepoUi> RepoQueue = new();
@@ -119,8 +119,7 @@ internal static class ConfigBridge
     private static bool _repoFetching;           // 后台 fetch 在跑（面板行"检查中…"）
     private static bool _repoChain;              // 下载链串行闸（一次一仓，绝不并发）
     private static readonly HashSet<string> _chainGuids = new(StringComparer.OrdinalIgnoreCase); // 当前链覆盖的 guid（卸载竞态闸，必修 1）
-    private static string _repoFetchError;       // 上一轮 fetch 异常（Kind5）；Kind1 清（入口卡失败态，必修 8）
-    private static bool _repoRateLimited;        // 上一轮含 HTTP 403（T16/D：入口卡/行内专门提示）
+    private static string _repoFetchError;       // 上一轮 fetch 异常（Kind5）/拉取失败（Kind1 FetchFailed）；成功轮清（入口卡失败态，必修 8）
     private static string _dlKey;                // 当前下载链仓键；null=空闲（推送体 dl 字段）
     private static int _dlPct;
     private static string _dlStage;
@@ -150,7 +149,7 @@ internal static class ConfigBridge
         var snap = new Snapshot
         {
             // v2.0.4：自身行也挂仓库态徽标——仓库页 v3 退役后 ↑黄 徽标是更新唯一入口，而自身
-            // 既不在 Meta.Mods（无配置页）又被 TpExempt 排除在 tp 外，只能经 self.ics 落到
+            // 不出套件配置页（名单成员才有页）又被 TpExempt 排除在 tp 外，只能经 self.ics 落到
             // 面板自身行（panel.js SELF_GUID 路由 → MC_UPD('ModCenter') 自更新链）。
             Self = new SelfInfo { Ver = ModCenterPlugin.Version, Ics = RepoIcsOf(ModCenterPlugin.Guid, repoPend) },
             // T16 I-2：缺壳 → 面板顶部告警（更新/卸载/排序/停用全部不会执行）
@@ -161,20 +160,20 @@ internal static class ConfigBridge
         foreach (var orig in EnumeratePageMods())
         {
             var cfg = CfgOf(orig.Guid);
-            // mcSpec 2 路由①/②/③（spec 2026-11-15 §4.2/§4.4）：
+            // mcSpec 2 路由①/②/③（spec 2026-11-15 §4.2/§4.4；v2.4.0 页面枚举/roster 均 SuiteRoster 单源）：
             // ① dll 在链上且有有效清单 → 清单投影表（配置变更零接触 ModCenter）；
-            // ② dll 在链上无清单 → orig 原样（Meta 冻结兜底，行为不变）；
-            // ③ dll 不在且在 roster → 最小行（名字+简介+去仓库安装直达，无置灰配置页——作者确认的退化形态；
-            //    DailySurprise 不在 roster → 落回②的 Missing 形态=现行 Meta 灰页）。
+            // ② dll 在链上无清单 → orig 原样（名单合成基线兜底，行为不变）；
+            // ③ dll 不在链上 → 最小行（名字+简介+去仓库安装直达，无置灰配置页——作者确认的退化形态）。
             ModInfo mi;
             MetaMod mm;
             ThirdParty.McManifest man = null;
-            if (cfg == null && Meta.RosterOf(orig.Guid) is { } rosterHit)
+            if (cfg == null && SuiteRoster.TryGetByGuid(orig.Guid, out var rosterHit))
             {
                 mm = orig; // ics 公共段沿用 orig.Guid
                 mi = new ModInfo
                 {
-                    Guid = rosterHit.Guid, Name = rosterHit.Name, En = rosterHit.En, Desc = rosterHit.Desc,
+                    Guid = orig.Guid, Name = SuiteRoster.DisplayOf(rosterHit), En = rosterHit.Mod,
+                    Desc = rosterHit.Summary ?? "",
                     Enabled = false, Missing = true, // Ver=null（PluginVerOf 对缺席插件本就 null）
                 };
             }
@@ -230,18 +229,40 @@ internal static class ConfigBridge
         return snap;
     }
 
-    /// <summary>套件页面迭代源：Meta.Mods（冻结表）+ roster 增量（guid 不在 Meta 的迁移成员——
-    /// 阶段 3 Meta 九表删除后 roster 合成基线成为在链清单页的唯一入口；同 guid Meta 优先去重）。</summary>
+    /// <summary>套件页面迭代源：SuiteRoster.Entries（suite.json 名单单源，v2.4.0）——每条产
+    /// 合成基线 MetaMod。名单未就绪（spec §4 降级）时按清单 <c>suite:true</c> 补偿（任务 9）：
+    /// 链上插件清单自报套件且 GUID 未被产出 → 补一行（display/en/summary 取清单，缺项回退
+    /// 插件名；分组专用，不产安装/更新条目，快照侧经 EffectOf 照常投影配置页）。spec §7：自身
+    /// （ModCenterPlugin.Guid，名单行在场）不进套件页——与面板 __self 行重复，且自身按设计
+    /// 永无清单，进枚举还会触发 EffectOf 的"清单缺失"误报日志。</summary>
     private static IEnumerable<MetaMod> EnumeratePageMods()
     {
-        foreach (var mm in Meta.Mods) yield return mm;
-        foreach (var r in Meta.Roster)
+        var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var e in SuiteRoster.Entries)
         {
-            var inMeta = false;
-            foreach (var mm in Meta.Mods)
-                if (string.Equals(mm.Guid, r.Guid, StringComparison.OrdinalIgnoreCase)) { inMeta = true; break; }
-            if (!inMeta)
-                yield return new MetaMod { Guid = r.Guid, Name = r.Name, En = r.En, Desc = r.Desc };
+            if (e == null || string.IsNullOrEmpty(e.Mod)) continue;
+            var guid = SuiteRoster.GuidOf(e);
+            if (string.Equals(guid, ModCenterPlugin.Guid, StringComparison.OrdinalIgnoreCase)) continue;
+            seen.Add(guid);
+            yield return new MetaMod { Guid = guid, Name = SuiteRoster.DisplayOf(e), En = e.Mod, Desc = e.Summary ?? "" };
+        }
+        if (SuiteRoster.Ready) yield break; // 名单就绪 = 唯一成员源，绝不做清单补偿（spec §4）
+        foreach (var info in LoadedPlugins())
+        {
+            var md = info?.Metadata;
+            if (md == null || string.IsNullOrEmpty(md.GUID) || info.Instance == null) continue;
+            if (string.Equals(md.GUID, ModCenterPlugin.Guid, StringComparison.OrdinalIgnoreCase)) continue;
+            if (IsProbeName(md.Name)) continue;
+            if (!ThirdParty.DeclaresSuite(info)) continue;
+            if (!seen.Add(md.GUID)) continue; // 名单行/本轮已产出过 → 去重
+            var man = ThirdParty.ManifestOf(info); // DeclaresSuite 命中 ⇒ 同缓存非空
+            yield return new MetaMod
+            {
+                Guid = md.GUID,
+                Name = string.IsNullOrEmpty(man.Display) ? md.Name : man.Display,
+                En = string.IsNullOrEmpty(man.En) ? md.Name : man.En,
+                Desc = man.Summary ?? "",
+            };
         }
     }
 
@@ -456,10 +477,8 @@ internal static class ConfigBridge
 
     // ============ Tier 0 第三方通用页（任务 14，接入协议 docs/modcenter-integration-guide.md §二） ============
 
-    // 第一方 GUID 前缀：Meta 已登记套件（现 11 个页面，含 CabinetBurden）/ ModCenter 自身 / 探针三件
-    // / 其他本仓 mod 全在此族——一律不进第三方分组。
-    private const string FirstPartyPrefix = "com.local.survivallog.";
-    // 探针豁免名（BepInPlugin.Name 含其一即豁免；GUID 前缀已覆盖现役三件，此为改名/换族双保险）
+    // 探针豁免名（BepInPlugin.Name 含其一即豁免；v2.4.0 起套件判定走 SuiteRoster 名单，
+    // GUID 前缀族豁免退役——名单外的 com.local.* 测试 mod 按第三方进 tp 页）
     private static readonly string[] TpProbeNames = { "ActionProbe", "ViewportProbe", "ConfigDumpProbe" };
 
     /// <summary>
@@ -490,6 +509,9 @@ internal static class ConfigBridge
                 var md = info?.Metadata;
                 if (md == null || string.IsNullOrEmpty(md.GUID) || info.Instance == null) continue;
                 if (TpExempt(md.GUID, md.Name)) continue;
+                // 任务 9：名单不可用时自报套件的 mod 由 EnumeratePageMods 补偿进套件区（spec §4 降级分流排他），
+                // 此处只跳过三方区显示——不改 TpExempt（FindTp 复用它做写路由，豁免会让补偿行 set/toggle 无处落键）
+                if (!SuiteRoster.Ready && ThirdParty.DeclaresSuite(info)) continue;
                 snap.Tp.Add(BuildTpMod(info, cfRows));
             }
             catch (Exception e) { Log("warn tp 构建跳过 " + (info?.Metadata?.GUID ?? "?") + ": " + e.Message); }
@@ -513,15 +535,14 @@ internal static class ConfigBridge
             Log("tp 快照: " + snap.Tp.Count + " 个第三方条目（" + string.Join(", ", snap.Tp.Select(m => m.En)) + "）");
     }
 
-    /// <summary>豁免判定：Meta 登记（套件页面）/ ModCenter 自身 / 第一方 GUID 族 / 探针名。</summary>
+    /// <summary>豁免判定：套件名单命中（SuiteRoster）/ ModCenter 自身 / 探针名。
+    /// v2.4.0：GUID 前缀族豁免删除——名单外的第一方前缀 mod 按第三方进 tp 页（名单是唯一成员源）。</summary>
     private static bool TpExempt(string guid, string name)
     {
         if (!string.IsNullOrEmpty(guid))
         {
-            foreach (var mm in Meta.Mods)
-                if (string.Equals(mm.Guid, guid, StringComparison.OrdinalIgnoreCase)) return true;
+            if (SuiteRoster.TryGetByGuid(guid, out _)) return true;
             if (string.Equals(guid, ModCenterPlugin.Guid, StringComparison.OrdinalIgnoreCase)) return true;
-            if (guid.StartsWith(FirstPartyPrefix, StringComparison.OrdinalIgnoreCase)) return true;
         }
         if (!string.IsNullOrEmpty(name))
             foreach (var p in TpProbeNames)
@@ -723,32 +744,26 @@ internal static class ConfigBridge
         catch { return null; }
     }
 
-    /// <summary>guid 或短名解析（完整 GUID / En / GUID 尾段，大小写不敏感；'RobotSpeed'、'robotspeed' 均可）。</summary>
+    /// <summary>guid 或短名解析（完整 GUID / En=仓键 / GUID 尾段，大小写不敏感；'RobotSpeed'、
+    /// 'robotspeed' 均可；v2.4.0 名单单源——只查 SuiteRoster，未就绪=null 落第三方路由）。</summary>
     private static MetaMod Resolve(string guidOrName)
     {
         if (string.IsNullOrEmpty(guidOrName)) return null;
-        foreach (var mm in Meta.Mods)
+        foreach (var e in SuiteRoster.Entries)
         {
-            if (string.Equals(mm.Guid, guidOrName, StringComparison.OrdinalIgnoreCase)) return EffectiveOf(mm);
-            if (string.Equals(mm.En, guidOrName, StringComparison.OrdinalIgnoreCase)) return EffectiveOf(mm);
-            var tail = mm.Guid.Substring(mm.Guid.LastIndexOf('.') + 1);
-            if (string.Equals(tail, guidOrName, StringComparison.OrdinalIgnoreCase)) return EffectiveOf(mm);
-        }
-        // mcSpec 2 阶段 3：Meta 表仅剩临时登记——迁移成员经 roster 合成基线路由（投影同源；
-        // 短名/尾段匹配语义与上方 Meta 循环一致）
-        foreach (var r in Meta.Roster)
-        {
-            if (string.Equals(r.Guid, guidOrName, StringComparison.OrdinalIgnoreCase)) return EffectiveOf(RosterBase(r));
-            if (string.Equals(r.En, guidOrName, StringComparison.OrdinalIgnoreCase)) return EffectiveOf(RosterBase(r));
-            var tail = r.Guid.Substring(r.Guid.LastIndexOf('.') + 1);
-            if (string.Equals(tail, guidOrName, StringComparison.OrdinalIgnoreCase)) return EffectiveOf(RosterBase(r));
+            if (e == null || string.IsNullOrEmpty(e.Mod)) continue;
+            var guid = SuiteRoster.GuidOf(e);
+            if (string.Equals(guid, guidOrName, StringComparison.OrdinalIgnoreCase)) return EffectiveOf(RosterBase(e));
+            if (string.Equals(e.Mod, guidOrName, StringComparison.OrdinalIgnoreCase)) return EffectiveOf(RosterBase(e));
+            var tail = guid.Substring(guid.LastIndexOf('.') + 1);
+            if (string.Equals(tail, guidOrName, StringComparison.OrdinalIgnoreCase)) return EffectiveOf(RosterBase(e));
         }
         return null;
     }
 
-    /// <summary>roster 行 → 合成基线 MetaMod（在链走清单投影的入口；未安装时仅供路由键）。</summary>
-    private static MetaMod RosterBase(Meta.RosterEntry r) =>
-        new() { Guid = r.Guid, Name = r.Name, En = r.En, Desc = r.Desc };
+    /// <summary>名单条目 → 合成基线 MetaMod（在链走清单投影的入口；未安装时仅供路由键）。</summary>
+    private static MetaMod RosterBase(RepoClient.UpdateInfo e) =>
+        new() { Guid = SuiteRoster.GuidOf(e), Name = SuiteRoster.DisplayOf(e), En = e.Mod, Desc = e.Summary ?? "" };
 
     /// <summary>mcSpec 2：写路径与快照同源投影——TrySet/SetModEnabled 的白名单/启停键随清单生效
     /// （有清单=清单键集；无=Meta 冻结表原样）。主线程（HandleSet/SetModEnabled 均 Pump 上下文）。</summary>
@@ -1015,15 +1030,12 @@ internal static class ConfigBridge
         return null;
     }
 
-    /// <summary>guid → 显示名：Meta 九表中文名优先，其次链上插件自报名，最后 GUID 尾段（如 modcenter）。</summary>
+    /// <summary>guid → 显示名：套件名单中文名优先，其次链上插件自报名，最后 GUID 尾段（如 modcenter）。</summary>
     private static string PendDisplayName(string guidLower)
     {
-        foreach (var mm in Meta.Mods)
-            if (string.Equals(mm.Guid, guidLower, StringComparison.OrdinalIgnoreCase)) return mm.Name;
-        var pr = Meta.RosterOf(guidLower); // mcSpec 2 阶段 3：未安装成员的待生效明细显示名（roster 补位）
-        if (pr != null) return pr.Name;
+        if (SuiteRoster.TryGetByGuid(guidLower, out var re)) return SuiteRoster.DisplayOf(re); // 未安装成员的待生效明细显示名
         if (string.Equals(guidLower, ModCenterPlugin.Guid, StringComparison.OrdinalIgnoreCase))
-            return "Mod 管理中心"; // 与 HandleOrderGet 的自身显示名一致
+            return Meta.SelfName; // 与 HandleOrderGet 的自身显示名一致
         foreach (var p in LoadedPlugins())
             if (string.Equals(p?.Metadata?.GUID, guidLower, StringComparison.OrdinalIgnoreCase)
                 && !string.IsNullOrEmpty(p.Metadata?.Name)) return p.Metadata.Name;
@@ -1279,23 +1291,16 @@ internal static class ConfigBridge
         return true;
     }
 
-    /// <summary>403 限流等待文案（v2.0.11）：X-RateLimit-Reset（Unix 秒）换算"约 N 分钟后重置"，
-    /// 分钟向上取整、已过期钳到 1；头缺失/0 回空串（调用方回退"请稍后再试"）。</summary>
-    private static string RateWaitText(long resetUnix)
-    {
-        if (resetUnix <= 0) return "";
-        var mins = (int)((resetUnix * 1000 - NowMs + 59999) / 60000); // ceil((reset-now)/60s)
-        if (mins < 1) mins = 1;
-        return "约 " + mins + " 分钟后重置";
-    }
-
-    /// <summary>起一轮后台 fetch：本地快照/游戏基线主线程取好（IL2CPP/文件通道契约），
-    /// _repoFetching 置位即推 checking 快照（fetch 期间 _repoRows 保持旧值，后台改自己的副本，
+    /// <summary>起一轮后台 fetch：本地版本捕获/名单行/游戏基线主线程取好（IL2CPP/文件通道契约），
+    /// _repoFetching 置位即推 checking 快照（fetch 期间 _repoRows 保持旧值，后台建自己的行集，
     /// 完成后主线程整体替换——零跨线程行读写）。异常路径经 Kind 5 收尾复位检查锁（T8 遗留修①）。
-    /// v2.2.0：manual=手动检查轮（收割后推 MC_UPDATES_READY 可用更新列表）；预检传 false。</summary>
+    /// v2.4.0 名单驱动（COS-only）：后台 1 次 FetchSuite 拉桶根 suite.json——成功按新名单建行
+    /// （Entries 随队列回主线程 ApplyFromFetch）；失败用 SuiteRoster 缓存名单重建（无缓存=空表）
+    /// 并标 FetchFailed（"使用上次结果"）。v2.2.0：manual=手动检查轮（收割后推 MC_UPDATES_READY
+    /// 可用更新列表）；预检传 false。</summary>
     private static void StartRepoFetch(bool manual)
     {
-        var rows = RepoDecision.SnapshotLocal(); // 主线程（IL2CPPChainloader 契约）
+        var localVers = RepoDecision.CaptureLocalVersions(); // 主线程（IL2CPPChainloader 契约）
         var local = GameVersion.ReadCached() ?? GameVersion.ReadLocal(); // 文件通道线程无关，结果缓存
         _repoFetching = true;
         PushRepoData();
@@ -1303,45 +1308,24 @@ internal static class ConfigBridge
         {
             try
             {
-                var infos = new Dictionary<string, RepoClient.UpdateInfo>(StringComparer.Ordinal);
-                var rateLimited = 0;
-                var resetUnix = 0L; // v2.0.11：403 重置时刻（多源取最晚——同一匿名池，任一 403 响应带的都有效）
-                // v2.0.6：索引优先（spec 单轮检查）——1 次 API 拉 index 仓 suite.json 覆盖 13 仓；
-                // 索引缺行（发版后没跑 publish-index）逐仓补查；索引不可用整体回退逐仓旧路径；
-                // 索引 403 = 匿名池空——逐仓必同 403，直接按限流收轮不白烧 13 次。
                 var suite = await RepoClient.FetchSuite();
-                if (suite.Status == 403) resetUnix = suite.ResetUnix;
-                Dictionary<string, RepoClient.UpdateInfo> byMod = null;
-                if (suite.Suite != null)
-                {
-                    byMod = new Dictionary<string, RepoClient.UpdateInfo>(StringComparer.OrdinalIgnoreCase);
-                    foreach (var i in suite.Suite) byMod[i.Mod] = i;
-                    Log("repo fetch: 索引轮 " + byMod.Count + " 行（1 次 API）");
-                }
-                else if (suite.Status == 403) Log("repo fetch: 索引轮 403 限流（不回退逐仓）");
-                else Log("repo fetch: 索引不可用（status=" + suite.Status + "），回退逐仓 13 次");
-                foreach (var r in rows)
-                {
-                    if (byMod != null && byMod.TryGetValue(r.RepoKey, out var hit))
-                    {
-                        r.HttpStatus = 200; r.Remote = hit.Version; r.Gamekb = hit.Gamekb;
-                        infos[r.RepoKey] = hit;
-                        continue;
-                    }
-                    if (suite.Status == 403) // 限流收轮：全部行 Remote=null + HttpStatus=403（面板行内限流文案）
-                    { r.HttpStatus = 403; rateLimited = 1; r.Remote = null; r.Gamekb = null; continue; }
-                    var res = await RepoClient.FetchLatestEx(r.RepoKey); // T16/D：带 HTTP 状态（403 限流）
-                    r.HttpStatus = res.Status;
-                    if (res.Status == 403) { rateLimited++; if (res.ResetUnix > resetUnix) resetUnix = res.ResetUnix; }
-                    var info = res.Info;
-                    if (info == null) { r.Remote = null; r.Gamekb = null; } // 失败留痕已在 RepoClient warn
-                    else { r.Remote = info.Version; r.Gamekb = info.Gamekb; infos[r.RepoKey] = info; }
-                }
+                var failed = suite.Suite == null; // CosBase 未配/网络/解析/零行（warn 已留 RepoClient）
+                // 失败兜底 = SuiteRoster 缓存名单快照（无缓存=空表；拷贝防枚举中名单被收割侧换掉），
+                // 行/Infos 全由本轮 entries 重建（成功=新名单，失败=缓存名单，同一 BuildRows 纯函数）。
+                var entries = failed
+                    ? new List<RepoClient.UpdateInfo>(SuiteRoster.Entries)
+                    : suite.Suite;
+                if (failed) Log("repo fetch: 失败（status=" + suite.Status + "），缓存名单 " + entries.Count + " 行兜底");
+                else Log("repo fetch: 名单 " + entries.Count + " 行");
+                var rows = SuiteRoster.BuildRows(entries, localVers);
+                var infos = new Dictionary<string, RepoClient.UpdateInfo>(StringComparer.Ordinal);
+                foreach (var e in entries) infos[e.Mod] = e; // 名单行即下载链数据源（AssetUrl 已是桶内直连）
                 RepoDecision.Build(rows, local); // 纯函数，后台可调
                 RepoQueue.Enqueue(new RepoUi
                 {
-                    Kind = 1, Rows = rows, Infos = infos, Manual = manual,
-                    RateLimited = rateLimited, OkCount = infos.Count, ResetUnix = resetUnix,
+                    Kind = 1, Rows = rows, Infos = infos,
+                    Entries = failed ? null : entries, // 失败轮不动缓存（收割侧只对成功轮 ApplyFromFetch）
+                    FetchFailed = failed, Manual = manual,
                 });
             }
             catch (Exception e) // T8 遗留修①：异常也收尾——Kind 5 回主线程复位 _repoFetching（防永久"检查中"）
@@ -1527,23 +1511,18 @@ internal static class ConfigBridge
         switch (ui.Kind)
         {
             case 1:
+                // v2.4.0：成功轮先整体替换名单缓存（ApplyFromFetch 落 suite-cache.json）；
+                // 失败轮（FetchFailed）传 null 不覆盖——保留旧缓存等下次成功。
+                if (!ui.FetchFailed)
+                    SuiteRoster.ApplyFromFetch(ui.Entries);
                 _repoRows = ui.Rows;
                 _repoInfos.Clear();
                 if (ui.Infos != null)
                     foreach (var kv in ui.Infos) _repoInfos[kv.Key] = kv.Value;
                 _repoLastCheck = NowMs;
                 _repoFetching = false;
-                _repoFetchError = null; // 本轮 fetch 正常收尾（入口卡失败态复位）
-                _repoRateLimited = ui.RateLimited > 0;
-                if (_repoRateLimited)
-                {
-                    // T16/D：403 不显示成普通"检查失败"——一次专门 toast（v4 白话）。
-                    // v2.0.11：带 X-RateLimit-Reset 换算的"约 N 分钟后重置"（头缺失回退旧文案）。
-                    var wait = RateWaitText(ui.ResetUnix);
-                    if (ui.OkCount == 0)
-                        _repoFetchError = wait.Length > 0 ? "GitHub 限流（HTTP 403），" + wait : "GitHub 限流（HTTP 403），请稍后再试";
-                    McToast("检查太频繁（GitHub 限流）", "err", wait.Length > 0 ? wait + "，到点再试" : "等几分钟再试");
-                }
+                _repoFetchError = ui.FetchFailed ? "检查失败，使用上次结果" : null; // 失败轮入口卡可重试（必修 8 语义）
+                if (ui.FetchFailed) McToast("检查失败", "err", "使用上次结果");
                 PushRender(BuildSnapshot().ToJson()); // 侧栏 ↑黄 徽标（快照协议承载；v2.2.0 ⚠橙 随 gamekb 门退役）
                 PushRepoData();
                 // v2.2.0：手动检查完成且有可更新行 → 推可用更新列表（面板弹勾选弹窗）。
@@ -1551,7 +1530,8 @@ internal static class ConfigBridge
                 // 预检轮不推（只标行，现状不变）——弹窗被关/面板未开事件被 PushJs 丢弃可接受，
                 // 再入口 = 仓库页「检查更新」60s 冷却重查。下载链进行中不推（终审判定：弹窗会
                 // 顶掉进度弹窗，勾选也会被链闸弹回——检查数据本身照常生效，只让位弹窗）。
-                if (ui.Manual && ui.OkCount > 0 && !_repoChain)
+                // v2.4.0：失败轮（用上次结果）不推。
+                if (ui.Manual && !ui.FetchFailed && !_repoChain)
                 {
                     var pend = RepoPendingGuids();
                     var upd = new UpdatesReady();
@@ -1584,7 +1564,7 @@ internal static class ConfigBridge
                         // 兜底——HandleUninstDo 已拒绝在链仓，但卸载可能先于链尾落盘；命中则
                         // 丢弃本次下载并清暂存，绝不把 replace 追加在 delete 之后（D2 复活）。
                         RefreshPending(true); // 磁盘意图为准（卸载路径即时落盘）
-                        if (HasDeleteIntentFor(ui.Row.RepoKey))
+                        if (HasDeleteIntentFor(ui.Row.Dll))
                         {
                             try { System.IO.File.Delete(ui.Staged); } catch { }
                             Log("repo 下载丢弃：检测到卸载意图 " + ui.Row.RepoKey + "（暂存已清理）");
@@ -1647,7 +1627,6 @@ internal static class ConfigBridge
         {
             LastCheck = _repoLastCheck,
             Checking = _repoFetching,
-            RateLimited = _repoRateLimited,
             Mirror = string.IsNullOrEmpty(ModCenterPlugin.NetworkMirrorPrefix?.Value) ? "直连" : "镜像",
         };
         if (_repoRows != null)
@@ -1676,11 +1655,12 @@ internal static class ConfigBridge
         PushEvent(d.ToJson());
     }
 
-    /// <summary>该仓在 pending 里是否已有 delete 意图（必修 1 下载链尾兜底）。</summary>
-    private static bool HasDeleteIntentFor(string repoKey)
+    /// <summary>该目标 dll 在 pending 里是否已有 delete 意图（必修 1 下载链尾兜底；
+    /// dllRel = RepoRow.Dll——v2.4.0 目标路径统一走名单 dll 字段，不再由仓键推导）。</summary>
+    private static bool HasDeleteIntentFor(string dllRel)
     {
-        if (string.IsNullOrEmpty(repoKey)) return false;
-        var target = NormOpRel(RepoDecision.DllRelOf(repoKey));
+        if (string.IsNullOrEmpty(dllRel)) return false;
+        var target = NormOpRel(dllRel);
         foreach (var op in _pendOps)
             if (op.Type == McPending.TypeDelete
                 && string.Equals(NormOpRel(op.Target), target, StringComparison.OrdinalIgnoreCase))
@@ -1782,8 +1762,8 @@ internal static class ConfigBridge
             if (!seen.Contains(g)) effective.Add(g);
 
         var nameOf = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
-        foreach (var mm in Meta.Mods) nameOf[mm.Guid] = mm.Name;
-        foreach (var r in Meta.Roster) nameOf[r.Guid] = r.Name; // mcSpec 2 阶段 3：roster 补位（未安装行也进排序名单）
+        foreach (var e in SuiteRoster.Entries) // 名单行显示名（未安装行也进排序名单）
+            if (e != null && !string.IsNullOrEmpty(e.Mod)) nameOf[SuiteRoster.GuidOf(e)] = SuiteRoster.DisplayOf(e);
         var plugins = LoadedPlugins();
 
         var sb = new StringBuilder(2048);
@@ -1837,8 +1817,8 @@ internal static class ConfigBridge
     private static string ResolveOrderRowName(string guid, Dictionary<string, string> metaNames,
         List<BepInEx.PluginInfo> plugins)
     {
-        if (metaNames.TryGetValue(guid, out var n) && !string.IsNullOrEmpty(n)) return n; // Meta 中文名
-        if (string.Equals(guid, ModCenterPlugin.Guid, StringComparison.OrdinalIgnoreCase)) return "Mod 管理中心";
+        if (metaNames.TryGetValue(guid, out var n) && !string.IsNullOrEmpty(n)) return n; // 名单中文名
+        if (string.Equals(guid, ModCenterPlugin.Guid, StringComparison.OrdinalIgnoreCase)) return Meta.SelfName;
         foreach (var p in plugins)
             if (string.Equals(p?.Metadata?.GUID, guid, StringComparison.OrdinalIgnoreCase)
                 && !string.IsNullOrEmpty(p.Metadata?.Name)) return p.Metadata.Name;
@@ -1927,7 +1907,7 @@ internal static class ConfigBridge
         // ① ModCenter 自身
         if (string.Equals(guid, ModCenterPlugin.Guid, StringComparison.OrdinalIgnoreCase))
         {
-            var self = new UninstInfo { Name = "Mod 管理中心", Self = true, Loaded = true };
+            var self = new UninstInfo { Name = Meta.SelfName, Self = true, Loaded = true };
             var info = PluginOfGuid(ModCenterPlugin.Guid);
             self.DllBaseRel = info != null ? DllDisabler.DllRelOf(info) : "SurvivalLog.ModCenter.dll";
             try
@@ -2135,17 +2115,15 @@ internal static class ConfigBridge
         catch { return null; }
     }
 
-    // ============ 冲突体检（v2 任务 11：L1 已知冲突库 / L3 功能域标注） ============
+    // ============ 冲突体检（v2 任务 11：L1 已知冲突库；L3 功能域标注 v2.4.0 随静态域表删除） ============
 
-    /// <summary>已装插件的一轮体检投影：GUID/显示名/dll 文件名/L1 命中（GUID 优先→dll 兜底）/功能域。
-    /// 数据源=IL2CPPChainloader.Instance.Plugins（与 BuildSnapshot 同源）+ Meta 两张静态表。
+    /// <summary>已装插件的一轮体检投影：GUID/dll 文件名/L1 命中（GUID 优先→dll 兜底）。
+    /// 数据源=IL2CPPChainloader.Instance.Plugins（与 BuildSnapshot 同源）+ Meta.KnownConflicts。
     /// 快照 ics 与 MC_CF 卡片共用本投影，保证行内图标与弹窗内容永远同源。</summary>
     private sealed class CfRow
     {
         public string Guid;
-        public string Name;
         public ConflictEntry Entry; // L1 命中（null=未收录）
-        public string Domain;       // L3 功能域（null=未登记）
     }
 
     private static List<CfRow> InstalledCfRows()
@@ -2157,29 +2135,16 @@ internal static class ConfigBridge
             if (md == null || string.IsNullOrEmpty(md.GUID)) continue;
             var dllRel = DllDisabler.DllRelOf(p);
             var dllName = string.IsNullOrEmpty(dllRel) ? null : Path.GetFileName(dllRel);
-            var mm = MetaOfGuid(md.GUID);
-            list.Add(new CfRow
-            {
-                Guid = md.GUID,
-                // T11 M5：CabinetBurden/ModCenter（Meta 九表外）走附加中文名表，L3 who 不再露英文自报名
-                Name = mm != null ? mm.Name
-                    : (Meta.ExtraNameOf(md.GUID) ?? (string.IsNullOrEmpty(md.Name) ? md.GUID : md.Name)),
-                Entry = Meta.MatchL1(md.GUID, dllName),
-                Domain = Meta.DomainOf(md.GUID),
-            });
+            list.Add(new CfRow { Guid = md.GUID, Entry = Meta.MatchL1(md.GUID, dllName) });
         }
         return list;
     }
 
-    /// <summary>Meta 套件精确 GUID 查找（不用 Resolve 的 En/尾段宽松匹配——第三方 GUID 尾段
+    /// <summary>套件名单精确 GUID 查找（不用 Resolve 的 En/尾段宽松匹配——第三方 GUID 尾段
     /// 撞名（如某 mod 尾段恰为 BackpackExpand）时不得被误当套件行做冲突扩散）。</summary>
     private static MetaMod MetaOfGuid(string guid)
     {
-        if (string.IsNullOrEmpty(guid)) return null;
-        foreach (var mm in Meta.Mods)
-            if (string.Equals(mm.Guid, guid, StringComparison.OrdinalIgnoreCase)) return mm;
-        var r = Meta.RosterOf(guid); // mcSpec 2 阶段 3：冲突行中文名/Who 匹配 En——roster 合成基线补位
-        return r != null ? RosterBase(r) : null;
+        return SuiteRoster.TryGetByGuid(guid, out var e) ? RosterBase(e) : null; // 名单命中 → 合成基线（冲突行中文名/Who 匹配 En）
     }
 
     /// <summary>该行应展示的 L1 条目：①本行自身命中（GUID→dll 兜底，见 Meta.MatchL1）；
@@ -2206,23 +2171,10 @@ internal static class ConfigBridge
         return list.OrderBy(e => e.Level == "red" ? 0 : 1).ToList(); // v3 两级：red→orange 稳定排序
     }
 
-    /// <summary>同域已装集合（按显示名稳定排序）；未登记域=空表。</summary>
-    private static List<CfRow> DomainMates(CfRow row, List<CfRow> all)
-    {
-        var mates = new List<CfRow>();
-        if (row.Domain == null) return mates;
-        foreach (var x in all)
-            if (x.Domain != null && string.Equals(x.Domain, row.Domain, StringComparison.Ordinal))
-                mates.Add(x);
-        return mates.OrderBy(x => x.Name, StringComparer.OrdinalIgnoreCase).ToList();
-    }
-
     /// <summary>行内冲突 ics（BuildSnapshot/BuildTp 共用）：L1 每条一图标（红=严重 ⚠ / 橙=叠加
-    /// 小黄叹号 !，click=cf），随后 L2 碰撞橙标（每 mod 聚合一枚小黄叹号，click=cf），末尾 L3
-    /// 叠加橙标 !（域内已装
-    /// ≥2 且均为域表登记项——第三方未登记不计入，防盲目误报）。
-    /// T11 M3：L1 已有卡片的 mod 跳过 L3 叠加标——避免"红+!/双!"噪音（expandedstorage
-    /// 只出 L1 橙卡）。未加载行（套件 dll 缺失/缺席行）不产冲突标。无命中=空表。</summary>
+    /// 小黄叹号 !，click=cf），随后 L2 碰撞橙标（每 mod 聚合一枚小黄叹号，click=cf）。
+    /// （L3 同域叠加标随静态域表 v2.4.0 删除。）未加载行（套件 dll 缺失/缺席行）不产冲突标。
+    /// 无命中=空表。</summary>
     private static List<IcInfo> CfIcsFor(List<CfRow> all, string guid)
     {
         var list = new List<IcInfo>();
@@ -2236,21 +2188,7 @@ internal static class ConfigBridge
         // v2 任务 12：L2 运行时碰撞（只统计可归属已装 mod 的组；未知来源只进扫描汇总，裁定 3）
         var l2 = PatchScan.IcsFor(guid);
         if (l2 != null) list.Add(l2);
-        if (row.Domain != null && entries.Count == 0) // T11 M3：L1 已有卡片 → 不再叠 L3 灰标
-        {
-            var mates = DomainMates(row, all);
-            if (mates.Count >= 2 && HasExternalMate(mates)) list.Add(DomainIc(row, mates)); // v3.3：域内涉套件外才标
-        }
         return list;
-    }
-
-    /// <summary>L3 外部门槛（v3.3 冲突裁定）：域内存在套件外成员才标注——套件同域叠加=
-    /// 组织内协同设计，默认兼容不报告。</summary>
-    private static bool HasExternalMate(List<CfRow> mates)
-    {
-        foreach (var m in mates)
-            if (!Meta.IsSuiteGuid(m.Guid)) return true;
-        return false;
     }
 
     /// <summary>T11 M7：停用套件行的冲突/碰撞/同域徽标保留但弱化（面板降透明度）+ tip 前缀
@@ -2278,20 +2216,9 @@ internal static class ConfigBridge
         };
     }
 
-    /// <summary>行内 L3 叠加图标（v4 ⚠橙小号；tip 一句白话，不再列名单）。</summary>
-    private static IcInfo DomainIc(CfRow row, List<CfRow> mates)
-    {
-        return new IcInfo
-        {
-            K = "orange",
-            Click = "cf",
-            Tip = "和同类 mod 叠着用，效果可能乱，点击查看",
-        };
-    }
-
     /// <summary>MC_CF {guid} → MC_CF_DATA {guid,cards[]}：卡片顺序与行内 ics 同源（L1 色级序 →
-    /// L2 碰撞卡（v2 任务 12；v3.2 起全部碰撞一张卡）→ L3 同域卡；T11 M3：L1 已有卡片则不出
-    /// L3 卡）。未在链上/缺席行 → 空 cards（面板给空态壳，不误报）。</summary>
+    /// L2 碰撞卡（v2 任务 12；v3.2 起全部碰撞一张卡）。（L3 同域卡随静态域表 v2.4.0 删除。）
+    /// 未在链上/缺席行 → 空 cards（面板给空态壳，不误报）。</summary>
     private static void HandleCf(string guid)
     {
         var rows = InstalledCfRows();
@@ -2306,11 +2233,6 @@ internal static class ConfigBridge
             foreach (var e in entries) data.Cards.Add(EntryCard(e));
             var cols = PatchScan.CollisionsFor(row.Guid);
             if (cols.Count > 0) data.Cards.Add(PatchCard(cols, row.Guid)); // T12 L2（v3.2：全部碰撞一张卡）
-            if (row.Domain != null && entries.Count == 0) // T11 M3：L1 已有卡片 → 不再叠 L3 灰卡
-            {
-                var mates = DomainMates(row, rows);
-                if (mates.Count >= 2 && HasExternalMate(mates)) data.Cards.Add(DomainCard(row, mates)); // v3.3：域内涉套件外才出卡
-            }
         }
         PushEvent(data.ToJson());
         Log("cf " + guid + " → " + data.Cards.Count + " 卡片" + (row == null ? "（不在链上/缺席行）" : ""));
@@ -2355,22 +2277,6 @@ internal static class ConfigBridge
         card.Tips.Add("一般不用管");
         card.Tips.Add("出现异常就停用其中一个，或试试「去调序」");
         return card;
-    }
-
-    /// <summary>L3 叠加卡（v3：并入橙；tag=功能叠加；一句话结论 + 单条建议；who=域内全部已装
-    /// 登记 mod，含本行）。"原因"段不再单列。</summary>
-    private static CfCardInfo DomainCard(CfRow row, List<CfRow> mates)
-    {
-        var c = new CfCardInfo
-        {
-            Lv = "orange",
-            Tag = "功能叠加",
-            Title = "这几个 mod 都在改" + row.Domain + "数值，效果会叠加，可能超出预期。",
-            Reason = "",
-        };
-        foreach (var x in mates) c.Who.Add(x.Name);
-        c.Tips.Add("介意叠加就只留一个");
-        return c;
     }
 
     /// <summary>MC_SCAN（v2 任务 12）：手动刷新 L2 补丁碰撞——重扫（主线程）→ 推新快照

@@ -56,7 +56,7 @@ public sealed class ModCenterPlugin : BasePlugin
     internal static ConfigEntry<int> NetworkDownloadTimeoutMs; // 默认 60000
 
     // v2 任务 5：网络自诊断探针开关（默认关，仿 Debug.Probe）。true 时启动 10s 后对
-    // survivallog-mods/RobotSpeed 跑一轮 fetch+下载+MD5+清理（后台 Task，Ticker 主线程收割），
+    // RobotSpeed 跑一轮名单拉取+下载+MD5+清理（后台 Task，Ticker 主线程收割），
     // 证据落 BepInEx/ModCenter_netspeed.txt（硬规则 9：不依赖 LogOutput）。
     internal static ConfigEntry<bool> DebugNetSelfTest;
 
@@ -88,26 +88,26 @@ public sealed class ModCenterPlugin : BasePlugin
             "对 api.github.com 与 github.com 的 release 资产 URL 生效（<前缀>/https://github.com/... 形态）。\n" +
             "直连可用就不要填；镜像服务会迁移失效，换了只改这里不改代码。");
         NetworkCheckTimeoutMs = Config.Bind("Network", "CheckTimeoutMs", 5000,
-            "检查更新（latest 元数据 + update.json 两跳）的单次超时，毫秒。超时即判失败降级，不重试。");
-        // v2.1.0：COS 主源（国内直连、无匿名限额）；检查/下载先走 COS，失败自动回退 GitHub 旧链路。
-        // 玩家一般不用动；将来桶迁移/换 CDN 域名只改这里不改代码。留空 = 完全走 GitHub。
+            "检查更新（拉取 suite.json 名单）的单次超时，毫秒。超时即判失败降级，不重试。");
+        // v2.1.0：COS 主源（国内直连、无匿名限额）；v2.4.0 起检查/下载唯一源（桶根 suite.json 名单 + 桶内 zip）。
+        // 玩家一般不用动；将来桶迁移/换 CDN 域名只改这里不改代码。留空 = 无更新源（检查失败按缓存名单降级）。
         NetworkCosBase = Config.Bind("Network", "CosBase",
             "https://survival-log-1302318873.cos.ap-shanghai.myqcloud.com",
-            "更新源 COS 基址（主源）。检查更新与下载 zip 优先走这里（桶内 suite.json 与 mods/<mod>/update.json），\n" +
-            "失败自动回退 GitHub。形如 'https://<bucket>.cos.<region>.myqcloud.com'；换 CDN 域名时改这里。");
+            "更新源 COS 基址。检查更新（桶根 suite.json 名单）与下载 zip 都走这里，\n" +
+            "拉取失败时用上次结果。形如 'https://<bucket>.cos.<region>.myqcloud.com'；换 CDN 域名时改这里。");
         NetworkDownloadTimeoutMs = Config.Bind("Network", "DownloadTimeoutMs", 60000,
             "下载 zip 资产的超时，毫秒。超时即失败降级（半成品 .part 会被清理），不重试。");
 
         DebugNetSelfTest = Config.Bind("Debug", "NetSelfTest", false,
-            "网络自诊断探针（默认关，仅供开发验证）。true 时启动 10 秒后对 survivallog-mods/RobotSpeed\n" +
-            "跑一轮：fetch latest（版本/md5/gamekb + 耗时）→ 下载 zip 到 ModCenter\\staging → 校验 MD5 → 删 zip 不留残留。\n" +
+            "网络自诊断探针（默认关，仅供开发验证）。true 时启动 10 秒后对 RobotSpeed\n" +
+            "跑一轮：拉 suite.json 取该 mod 行（版本/md5/gamekb + 耗时）→ 下载 zip 到 ModCenter\\staging → 校验 MD5 → 删 zip 不留残留。\n" +
             "全程后台线程（不卡面板/主线程），证据写 BepInEx/ModCenter_netspeed.txt。验完请改回 false。");
 
         DebugRepoSelfTest = Config.Bind("Debug", "RepoSelfTest", false,
             "仓库决策层自诊断探针（默认关，仅供开发验证）。true 时启动 10 秒后跑一轮（仅此一轮）：\n" +
-            "①游戏版本通道四候选 dump（证据 ModCenter_gamever.txt）→ ②后台 fetch 全部 12 仓 → 五态决策\n" +
+            "①游戏版本通道四候选 dump（证据 ModCenter_gamever.txt）→ ②后台 1 次拉 suite.json 全名单 → 五态决策\n" +
             "（真基线轮 + 强制通道失败轮 + 合成分支自证轮）→ ③PendingWriter 合并语义对临时文件自证（验后即删）。\n" +
-            "证据写 BepInEx/ModCenter_reposelftest.txt。一轮消耗 12 次 GitHub 匿名 API 请求，验完请改回 false。");
+            "证据写 BepInEx/ModCenter_reposelftest.txt。一轮 1 次 COS 请求（无 GitHub 限额消耗），验完请改回 false。");
 
         DebugPatchScan = Config.Bind("Debug", "PatchScan", false,
             "L2 补丁碰撞探针（默认关，仅供开发验证）。true 时启动 10 秒后跑一轮（仅此一轮）：\n" +
@@ -133,6 +133,8 @@ public sealed class ModCenterPlugin : BasePlugin
         var go = new GameObject("ModCenter.Ticker");
         Object.DontDestroyOnLoad(go);
         go.AddComponent<ModCenterTicker>();
+
+        SuiteRoster.LoadCache(); // v2.4.0：套件名单缓存（主线程；只读文件不碰 Chainloader，失败只 warn）
 
         Log("loaded");
         Trace($"loaded v{Version}（配置桥：Meta 九表+快照/写/消息协议/Save 防抖；面板 UI 待任务 7）"
@@ -488,9 +490,9 @@ internal static class BridgeProbe
 
 /// <summary>
 /// v2 任务 5 网络自诊断探针（cfg Debug.NetSelfTest 门控，Ticker 10s 后拉起，一轮即终态）。
-/// 靶：survivallog-mods/RobotSpeed（真实在线仓）。后台 Task 跑：fetch latest（版本/md5/gamekb
-/// + 耗时）→ 下载 zip 到 StagingDir → MD5 对 update.json → **删 zip 不留残留**；失败场景
-/// （如 MirrorPrefix 指向不可达地址）记录失败耗时（应秒级 &lt; CheckTimeout 上限）。
+/// 靶：RobotSpeed（真实在线名单行）。后台 Task 跑：拉 suite.json 取该 mod 行（版本/md5/gamekb
+/// + 耗时）→ 下载 zip 到 StagingDir → MD5 对名单行 → **删 zip 不留残留**；失败场景
+/// （如 CosBase 指向不可达地址）记录失败耗时（应秒级 &lt; CheckTimeout 上限）。
 /// 证据追加 BepInEx/ModCenter_netspeed.txt（硬规则 9）；Ticker 主线程只收割 Done 旗打印。
 /// </summary>
 internal static class NetProbe
@@ -526,12 +528,13 @@ internal static class NetProbe
         var watch = System.Diagnostics.Stopwatch.StartNew();
         try
         {
-            // ① fetch：latest → update.json → 五字段（失败=null 秒级返回，不抛）
-            var info = await RepoClient.FetchLatest(TargetRepo);
+            // ① fetch：suite.json 1 次直拉 → 取 RobotSpeed 名单行（失败=null 秒级返回，不抛）
+            var suite = await RepoClient.FetchSuite();
+            var info = suite.Suite?.Find(i => string.Equals(i.Mod, TargetRepo, StringComparison.OrdinalIgnoreCase));
             var fetchMs = watch.ElapsedMilliseconds;
             if (info == null)
             {
-                P($"FAIL fetch=null（网络/解析/资产缺失降级）耗时 {fetchMs}ms");
+                P($"FAIL fetch=null（网络/解析/名单缺行降级）耗时 {fetchMs}ms");
                 Summary = $"fetch FAIL {fetchMs}ms（探针一轮终态）";
                 return;
             }
@@ -575,12 +578,13 @@ internal static class NetProbe
 
 /// <summary>
 /// v2 任务 6 仓库决策层自诊断探针（cfg Debug.RepoSelfTest 门控，Ticker 10s 后拉起，一轮即终态）。
-/// 主线程段：gamekb 通道四候选 dump（GameVersion.ProbeRead → ModCenter_gamever.txt）+ 12 仓本地
-/// 插件快照（SnapshotLocal）。后台段（HTTP 全在后台，裁定 1）：一轮 12 仓 fetch（顺序温和，
-/// 匿名限流预算内）→ 三档决策自证——A 真仓真基线 / B 强制通道失败（D8 Step 4：不误报 Warn +
-/// "未校验"标注）/ C 合成分支自证（五态各至少一行，走同一 Build 代码路径，不碰本机枚举与网络）
-/// → D PendingWriter 合并语义对临时文件自证（真 pending.json 绝不写入假意图）。证据
-/// BepInEx/ModCenter_reposelftest.txt（硬规则 9）；Ticker 主线程只收割 Done 旗打印。
+/// 主线程段：gamekb 通道四候选 dump（GameVersion.ProbeRead → ModCenter_gamever.txt）+ 名单行构建
+/// （SuiteRoster.BuildRows × CaptureLocalVersions，v2.4.0 名单单源）。后台段（HTTP 全在后台，裁定 1）：
+/// 1 次 FetchSuite 拉桶根 suite.json 按 Mod 回填 Remote/Gamekb → 三档决策自证——A 真仓真基线 /
+/// B 强制通道失败（D8 Step 4：不误报 Warn + "未校验"标注）/ C 合成分支自证（五态各至少一行，
+/// 走同一 Build 代码路径，不碰本机枚举与网络）→ D PendingWriter 合并语义对临时文件自证
+/// （真 pending.json 绝不写入假意图）。证据 BepInEx/ModCenter_reposelftest.txt（硬规则 9）；
+/// Ticker 主线程只收割 Done 旗打印。
 /// </summary>
 internal static class RepoProbe
 {
@@ -588,7 +592,7 @@ internal static class RepoProbe
     internal static string Summary = "";
 
     private static GameVersion.Local _local;   // 主线程读好，后台只读
-    private static List<RepoRow> _rows;        // 主线程构造（SnapshotLocal），后台附 Remote/Gamekb
+    private static List<RepoRow> _rows;        // 主线程构建（BuildRows，缓存名单），后台附最新 Remote/Gamekb
 
     private static string EvidencePath => System.IO.Path.Combine(Paths.BepInExRootPath, "ModCenter_reposelftest.txt");
 
@@ -606,14 +610,14 @@ internal static class RepoProbe
         try { if (System.IO.File.Exists(EvidencePath)) System.IO.File.Delete(EvidencePath); } catch { }
         var mirror = ModCenterPlugin.NetworkMirrorPrefix?.Value ?? "";
         var check = ModCenterPlugin.NetworkCheckTimeoutMs?.Value ?? 5000;
-        P($"probe start: {RepoDecision.RepoKeys.Length} 仓 mirror='{mirror}' checkTimeout={check}ms（一轮 12 次 API 请求）");
+        P($"probe start: 名单 {SuiteRoster.Entries.Count} 行 mirror='{mirror}' checkTimeout={check}ms（1 次 COS 请求）");
 
         // ① gamekb 通道探针（主线程：interop 候选）；证据双写 gamever.txt + 本文件摘要
         _local = GameVersion.ProbeRead(line => P("gamever | " + line));
         P($"本地基线: baseline='{_local.Baseline}' display='{_local.Display}' channel='{_local.Channel}' note='{_local.Note}'");
 
-        // ② 本地插件快照（主线程：IL2CPPChainloader）
-        _rows = RepoDecision.SnapshotLocal();
+        // ② 本地版本捕获 + 名单行构建（主线程：IL2CPPChainloader；名单=SuiteRoster 缓存）
+        _rows = SuiteRoster.BuildRows(SuiteRoster.Entries, RepoDecision.CaptureLocalVersions());
         foreach (var r in _rows)
             P($"local {r.RepoKey}: {(r.Local ?? "未安装")} (guid={r.Guid})");
 
@@ -625,27 +629,38 @@ internal static class RepoProbe
         var pass = true;
         try
         {
-            // ---- fetch 轮（一轮 12 仓，顺序执行——温和限流，不连环多轮）----
+            // ---- fetch 轮（suite.json 1 次直拉，按 Mod 回填名单行）----
             var fetchFail = 0;
             var watch = System.Diagnostics.Stopwatch.StartNew();
-            foreach (var r in _rows)
+            var suite = await RepoClient.FetchSuite();
+            if (suite.Suite == null)
             {
-                var info = await RepoClient.FetchLatest(r.RepoKey);
-                if (info == null)
+                fetchFail = _rows.Count;
+                foreach (var r in _rows) { r.Remote = null; r.Gamekb = null; }
+                P("fetch FAIL suite.json 拉取失败（warn 已留 LogOutput；决策降级 Remote=null 不虚报）");
+            }
+            else
+            {
+                var byMod = new Dictionary<string, RepoClient.UpdateInfo>(StringComparer.OrdinalIgnoreCase);
+                foreach (var i in suite.Suite) byMod[i.Mod] = i;
+                foreach (var r in _rows)
                 {
-                    r.Remote = null; r.Gamekb = null; fetchFail++;
-                    P($"fetch FAIL {r.RepoKey}（warn 已留 LogOutput；决策降级 Remote=null 不虚报）");
-                }
-                else
-                {
-                    r.Remote = info.Version; r.Gamekb = info.Gamekb;
-                    P($"fetch OK {r.RepoKey}: remote={info.Version} gamekb={info.Gamekb}");
+                    if (byMod.TryGetValue(r.RepoKey, out var info))
+                    {
+                        r.Remote = info.Version; r.Gamekb = info.Gamekb;
+                        P($"fetch OK {r.RepoKey}: remote={info.Version} gamekb={info.Gamekb}");
+                    }
+                    else
+                    {
+                        r.Remote = null; r.Gamekb = null; fetchFail++;
+                        P($"fetch FAIL {r.RepoKey}（suite.json 缺行）");
+                    }
                 }
             }
-            P($"fetch 轮完: {watch.ElapsedMilliseconds}ms 12 仓 fail={fetchFail}");
+            P($"fetch 轮完: {watch.ElapsedMilliseconds}ms {_rows.Count} 行 fail={fetchFail}");
 
             // ---- A 真仓真基线 ----
-            P("--- A 真仓真基线（本机 12 行） ---");
+            P($"--- A 真仓真基线（本机 {_rows.Count} 行） ---");
             RepoDecision.Build(_rows, _local);
             foreach (var r in _rows) P(RowLine(r));
             var dist = Distribution(_rows);

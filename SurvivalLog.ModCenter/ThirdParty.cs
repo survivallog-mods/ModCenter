@@ -51,6 +51,7 @@ internal static class ThirdParty
         internal string Id, Display, Summary;
         internal int Spec;   // 实际解析版本（日志口径；1/2）
         internal bool SoftDisable;
+        internal bool Suite;                    // 顶层 suite:true（任务 4）——名单不可用时套件页补偿分组判据（任务 9）
         internal string En;                    // mcSpec 2：内部短名（En 路由兼容）
         internal McUsage Usage;                // mcSpec 2：使用说明（panel USAGE 表退役的数据源）
         internal McEnabled Enabled;            // mcSpec 2：启停键声明（缺省 General/Enabled；"none"=无总开关）
@@ -169,6 +170,11 @@ internal static class ThirdParty
     internal static string BadgeOf(string guid, string displayK) =>
         displayK != null && Cache.TryGetValue(guid ?? "", out var m) && m != null
             && m.Badges.TryGetValue(displayK, out var b) ? b : null;
+
+    /// <summary>清单是否自报套件（顶层 <c>suite:true</c>，任务 4 字段；spec 2026-11-21 §4）——
+    /// 名单不可用（<see cref="SuiteRoster.Ready"/>=false）时套件页补偿分组的判据；
+    /// 名单就绪时名单是唯一成员源，调用方不做补偿。</summary>
+    internal static bool DeclaresSuite(BepInEx.PluginInfo info) => ManifestOf(info)?.Suite == true;
 
     // ============ Tier 2 深度对接（任务 16；指南 §四，Contracts 见 Contracts/ModCenterIntegration.cs） ============
 
@@ -340,8 +346,11 @@ internal static class ThirdParty
         if (man == null)
         {
             // 阶段 3（spec §5）：在链套件无清单 = 旧版 dll——页面退化为仅启停；一次性日志防刷屏
-            // （本方法只在主线程调用）。DailySurprise 等临时登记不在 roster，不误报。
-            if (Meta.RosterOf(mm.Guid) != null && NoManifestLog.Add(mm.Guid))
+            // （本方法只在主线程调用）。名单未就绪/非名单成员不误报；ModCenter 自身按设计永无
+            // 清单（spec §7 自身不进套件页），名单行在场也不报。
+            if (SuiteRoster.TryGetByGuid(mm.Guid, out _)
+                && !string.Equals(mm.Guid, ModCenterPlugin.Guid, StringComparison.OrdinalIgnoreCase)
+                && NoManifestLog.Add(mm.Guid))
                 Log($"清单缺失 {mm.En}：在链但无有效 modcenter.json（旧版 dll？）——面板退化为仅启停，更新该 mod 获得配置页");
             return mm;
         }
@@ -420,9 +429,11 @@ internal static class ThirdParty
         return m;
     }
 
-    private static McManifest ManifestOf(BepInEx.PluginInfo info)
+    /// <summary>取插件的有效清单（命中缓存/触发发现；无 = null）。internal：任务 9 补偿行需
+    /// 读清单 display/en/summary（ConfigBridge.EnumeratePageMods，与 DeclaresSuite 同缓存同实例）。</summary>
+    internal static McManifest ManifestOf(BepInEx.PluginInfo info)
     {
-        var guid = info.Metadata?.GUID;
+        var guid = info?.Metadata?.GUID;
         if (string.IsNullOrEmpty(guid)) return null;
         if (Cache.TryGetValue(guid, out var hit)) return hit;
         if (None.Contains(guid)) return null;
@@ -502,6 +513,7 @@ internal static class ThirdParty
                 Display = GetS(root, "display"),
                 Summary = GetS(root, "summary"),
                 SoftDisable = root.TryGetProperty("softDisable", out var sd) && sd.ValueKind == JsonValueKind.True,
+                Suite = root.TryGetProperty("suite", out var s) && s.ValueKind == JsonValueKind.True,
             };
             if (v2)
             {
@@ -509,9 +521,8 @@ internal static class ThirdParty
                 man.Usage = ParseUsage(root, guid);
                 man.Enabled = ParseEnabled(root, guid);
                 ParseLists(root, guid, man.Lists);
-                if (!Meta.IsSuiteGuid(guid) && Meta.RosterOf(guid) == null && HasExtFields(root))
-                    // 套件判定=IsSuiteGuid ∪ roster（spec §约束"IsSuiteGuid/roster 判定"——SuiteGuids
-                    // 为基线存量表，roster 是迁移名单真值；并集防 savemgr 类漏登误报搁置日志）
+                if (!SuiteRoster.TryGetByGuid(guid, out _) && HasExtFields(root))
+                    // 套件判定=SuiteRoster 名单命中（v2.4.0 单源；名单未就绪视为非套件——不误报搁置日志）
                     Log($"清单(tp) {guid}: mcSpec 2 扩展字段仅套件清单生效，本清单按 Tier 1 字段集对待（解析保留、消费搁置）");
             }
             if (!root.TryGetProperty("groups", out var gsEl) || gsEl.ValueKind != JsonValueKind.Array)
