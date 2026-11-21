@@ -412,6 +412,52 @@ public sealed class RepoData
 }
 
 /// <summary>
+/// 版本台账数据（spec 2026-11-21 §6 版本自由选择，MC_VER_GET {repoKey} → MC_VER_DATA 推送体，
+/// __mcEvent 通道）：current=本地版本（_repoRows 该仓 Local；null=未安装，JSON null 同
+/// <see cref="RepoRowInfo"/>.Local 口径），versions=台账全集（<see cref="RepoClient.FetchVersions"/>
+/// 原序返回，发布侧最新在前；date/notes 可选字段缺失=null，面板降级不显示）。序列化手写
+/// StringBuilder（AOT 零反射纪律，同 <see cref="RepoData"/>）。
+/// </summary>
+public sealed class VerListData
+{
+    public string RepoKey;
+    public string Current;  // 本地版本；null = 未安装
+    public List<VerRowInfo> Versions = new();
+
+    public string ToJson()
+    {
+        var sb = new StringBuilder(2048);
+        sb.Append("{\"type\":\"MC_VER_DATA\",\"repoKey\":").Append(JsonW.Str(RepoKey))
+          .Append(",\"current\":").Append(Current == null ? "null" : JsonW.Str(Current))
+          .Append(",\"versions\":[");
+        for (var i = 0; i < Versions.Count; i++)
+        {
+            if (i > 0) sb.Append(',');
+            Versions[i].Write(sb);
+        }
+        sb.Append("]}");
+        return sb.ToString();
+    }
+}
+
+/// <summary>版本台账行（MC_VER_DATA.versions 元素）：v=版本号（台账主键，解析侧强制非空）、
+/// date=发布日期、notes=该版发版说明（可选字段缺失=null，面板降级不显示）。</summary>
+public sealed class VerRowInfo
+{
+    public string V;
+    public string Date;
+    public string Notes;
+
+    internal void Write(StringBuilder sb)
+    {
+        sb.Append("{\"v\":").Append(JsonW.Str(V))
+          .Append(",\"date\":").Append(Date == null ? "null" : JsonW.Str(Date))
+          .Append(",\"notes\":").Append(Notes == null ? "null" : JsonW.Str(Notes))
+          .Append('}');
+    }
+}
+
+/// <summary>
 /// 冲突详情卡片（v2 任务 11，MC_CF_DATA.cards 元素；面板照原型 cfHtml 渲染）：
 /// lv=色级（red|orange|gray，决定图标色/字形）、tag=标签（冲突|碰撞|同域）、title=卡片副标题、
 /// who=冲突对象（显示名，面板以"、"连接加粗）、reason=原因全文、tips=处置建议（面板编号列表）。

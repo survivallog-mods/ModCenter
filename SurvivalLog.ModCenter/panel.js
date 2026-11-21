@@ -52,6 +52,11 @@
  * 待生效操作。未保存的对局进度会丢失。"，取消/确认重启）→ 确认后 MC_RESTART → C# 拉分离
  * 进程并延迟退出本进程；结果 toast 一律 C# 回推（"正在重启游戏…"=已请求重启，拉起失败报错
  * 且游戏不退出——不假装成功）。
+ * 套件名单单源任务 13 = 版本选择弹窗：详情页维护区「版本」按钮（名单内、非自身）与安装/
+ * 更新确认弹窗「选择版本」→ MC_VER_GET {repoKey} → MC_VER_DATA {repoKey,current,versions}
+ * （台账发布侧最新在前，照序渲染 v/date/notes 摘要；v===current 标「使用中」）→ 每行
+ * 「安装此版本」→ MC_UPD_VER {repoKey,version}（低于 current 先降级红字二次确认；发送后
+ * 弹窗就地转 MC_DL 进度态，同 openRepoModal 更新链）；C# 未回包 5s 超时兜底。
  *
  * 注入落点：Root 文档（C# WebBridge.ExecuteJavaScript 上下文）。__McInstalled 守卫幂等。
  * 全局契约（C# Ticker / MenuEntryInjector 对齐）：__McInstalled / __mcOutbox / __mcDrain /
@@ -119,11 +124,13 @@
    * ordRows=最近 MC_ORDER_DATA（含 rows 显示元数据与 def 默认序）；ordSaving=保存
    * 回执（MC_ORDER_OK/FAIL）在途防连点。ORD.src=DnD 源行 guid（拖拽会话期；T10 带出①）。 */
   var S = { host: null, root: null, side: null, cfg: null, sub: null, toastEl: null, patchBtn: null, pendEl: null, pendTx: null, mbg: null, mdl: null, mdlRepoKey: null };
-  var ST = { snap: null, sel: null, pend: null, repoData: null, dl: null, chkWaiting: false, ord: false, order: null, ordRows: null, ordSaving: false, uninstGuid: null, cfGuid: null, scan: null, patchOpen: false, scanWait: false };
+  var ST = { snap: null, sel: null, pend: null, repoData: null, dl: null, chkWaiting: false, ord: false, order: null, ordRows: null, ordSaving: false, uninstGuid: null, cfGuid: null, scan: null, patchOpen: false, scanWait: false, verKey: null };
   var ORD = { src: null }; // v2 任务 9：拖拽源 guid（null=无拖拽会话；T10 带出①：改存 guid 防拖拽中键盘重排错位）
   var TH = Object.create(null); // 滑条 100ms 节流句柄表
   var uninstTimer = null;       // v2 任务 10：MC_UNINST_DATA 等待超时句柄
   var cfTimer = null;           // v2 任务 11：MC_CF_DATA 等待超时句柄
+  var verTimer = null;          // 套件名单单源任务 13：MC_VER_DATA 等待超时句柄
+  var verData = null;           // 任务 13：最近版本台账 {repoKey,name,current,versions}（降级确认「返回」重渲列表用）
   var chkTimer = null;          // v3.3：MC_CHK 检查超时兜底句柄（busy 复位）
 
   var CSS = ''
@@ -1305,6 +1312,13 @@
           + '<span style="font-size:11px;color:#8a90a0;flex:1">' + nl.map(esc).join('<br>') + '</span></div>';
       }
     }
+    /* 套件名单单源任务 13：版本选择入口——名单内（r 在场）且非自身（自身不提供该入口，
+     * brief 拍板）；未安装行的版本入口在安装确认弹窗内（openRepoModal「选择版本」）。 */
+    if (r && m.guid !== SELF_GUID) {
+      h += '<div class="__mc-kv"><span class="__mc-kk">\u7248\u672c</span>'
+        + '<button type="button" class="__mc-btn __mc-btn-mini" data-act="ver" data-guid="' + esc(m.guid) + '">\u7248\u672c</button>'
+        + '<span style="font-size:11px;color:#6b7180">\u67e5\u770b\u5e76\u9009\u62e9\u5386\u53f2\u7248\u672c</span></div>';
+    }
     if (!m.missing) {
       h += '<div class="__mc-kv"><span class="__mc-kk">\u5378\u8f7d</span>'
         + '<button type="button" class="__mc-btn __mc-btn-danger __mc-btn-mini" data-act="uninst" data-guid="' + esc(m.guid) + '">\u5378\u8f7d\u2026</button>'
@@ -1734,7 +1748,12 @@
     if (isInst) h += usageIntroHtml(r.guid);
     else if (r.notes) h += notesSecHtml(r.notes);
     h += '<div class="__mc-m-sec"><div class="__mc-m-txt">\u4e0b\u8f7d\u5e76\u6821\u9a8c\u540e\u6682\u5b58\uff0c<b style="color:#e8e6e0">\u91cd\u542f\u6e38\u620f</b>\u65f6\u81ea\u52a8\u66ff\u6362\uff08\u4e0d\u4fdd\u7559\u65e7\u7248\uff09\u3002</div></div>'
-      + '<div class="__mc-m-acts"><button type="button" class="__mc-btn __mc-btn-mini" data-mact="close">\u53d6\u6d88</button>'
+      /* 任务 13：次级「选择版本」入口（自身不提供——brief 拍板；未安装行由此装指定版本） */
+      + '<div class="__mc-m-acts">'
+      + (r.guid && r.guid !== SELF_GUID
+        ? '<button type="button" class="__mc-btn __mc-btn-mini" data-mact="versel">\u9009\u62e9\u7248\u672c</button>'
+        : '')
+      + '<button type="button" class="__mc-btn __mc-btn-mini" data-mact="close">\u53d6\u6d88</button>'
       + '<button type="button" class="__mc-btn ' + (isInst ? '__mc-btn-blue' : '__mc-btn-pri')
       + '" data-mact="doupd" data-repo="' + esc(r.repoKey) + '">'
       + esc(verb === '\u5b89\u88c5' ? '\u5b89\u88c5 ' : verb + '\u5230 ') + esc(r.remote) + '</button></div>';
@@ -1871,6 +1890,12 @@
     openModal(updModalRealHtml(r));
     if (!S.mdl) return;
     S.mdlRepoKey = r.repoKey;
+    /* 任务 13：「选择版本」→ 版本弹窗（openModal 复用同一弹窗壳，mdlRepoKey 随 openModal 清） */
+    var vs = S.mdl.querySelector('[data-mact="versel"]');
+    if (vs) vs.addEventListener('click', function (e) {
+      e.stopPropagation();
+      openVerModal(r);
+    });
     var go = S.mdl.querySelector('[data-mact="doupd"]');
     if (!go) return;
     go.addEventListener('click', function (e) {
@@ -1886,6 +1911,157 @@
         if (tx) tx.textContent = '\u51c6\u5907\u4e0b\u8f7d\u2026';
       }
     });
+  }
+
+  /* ================= 套件名单单源任务 13：版本选择弹窗（spec 2026-11-21 §6） =================
+   * MC_VER_GET {repoKey} → MC_VER_DATA {repoKey,current,versions:[{v,date,notes}]}（台账发布侧
+   * 最新在前，照收到的顺序渲染；current=null=未安装，无「使用中」标记）。每行「安装此版本」→
+   * MC_UPD_VER {repoKey,version}（version=台账行 v 原文，同版重装/安装旧版/装新版皆可）；
+   * 低于 current（verCmp 语义比较，任一不可解析=不判方向直发）先降级红字二次确认；发送后弹窗
+   * 就地转下载进度态（S.mdlRepoKey 置归属，MC_DL 就地更新——同 openRepoModal 链）。
+   * 5s 未回包 → 「版本列表读取失败」壳；C# 拉取失败路径只推 MC_TOAST（Kind 6），超时兜底
+   * 覆盖消息丢失场景。自身（SELF_GUID）不提供该入口（brief 拍板）。 */
+  function verCmp(a, b) {
+    if (!a || !b) return null;
+    var pa = String(a).split('.'), pb = String(b).split('.');
+    var n = Math.max(pa.length, pb.length);
+    for (var i = 0; i < n; i++) {
+      var x = pa[i] || '0', y = pb[i] || '0';
+      if (!/^\d+$/.test(x) || !/^\d+$/.test(y)) return null; // 非纯数字段（预发布等）不判方向
+      if (x !== y) return +x < +y ? -1 : 1;
+    }
+    return 0;
+  }
+
+  function clearVerTimer() {
+    if (verTimer != null) { clearTimeout(verTimer); verTimer = null; }
+  }
+
+  /* notes 摘要：首个非空行（长说明只留一句占行） */
+  function verNoteOf(notes) {
+    if (!notes) return '';
+    var ls = String(notes).split(/\r?\n/);
+    for (var i = 0; i < ls.length; i++) { var s = ls[i].trim(); if (s) return s; }
+    return '';
+  }
+
+  function verLoadingHtml(name) {
+    return '<h3>' + chipHtml('blue', icSvg('up')) + '\u7248\u672c \u00b7 ' + esc(name) + '</h3>'
+      + '<div class="__mc-m-sub">\u8bfb\u53d6\u7248\u672c\u5217\u8868\u2026</div>'
+      + '<div class="__mc-m-acts"><button type="button" class="__mc-btn __mc-btn-mini" data-mact="close">\u53d6\u6d88</button></div>';
+  }
+
+  function verErrHtml(name) {
+    return '<h3>' + chipHtml('red', icSvg('warn')) + '\u7248\u672c \u00b7 ' + esc(name) + '</h3>'
+      + '<div class="__mc-m-sub">\u7248\u672c\u5217\u8868\u8bfb\u53d6\u5931\u8d25\uff0c\u7a0d\u540e\u518d\u8bd5</div>'
+      + '<div class="__mc-m-acts"><button type="button" class="__mc-btn __mc-btn-mini" data-mact="close">\u5173\u95ed</button></div>';
+  }
+
+  function verListHtml(d) {
+    var h = '<h3>' + chipHtml('blue', icSvg('up')) + '\u7248\u672c \u00b7 ' + esc(d.name) + '</h3>'
+      + '<div class="__mc-m-sub">\u9009\u62e9\u8981\u5b89\u88c5\u7684\u7248\u672c\uff1b\u4f4e\u4e8e\u5f53\u524d\u7248\u672c\u9700\u4e8c\u6b21\u786e\u8ba4\uff0c\u4e0b\u8f7d\u5b8c\u91cd\u542f\u6e38\u620f\u540e\u751f\u6548\u3002</div>'
+      + '<div class="__mc-m-sec">';
+    if (!d.versions.length) return h + '<div class="__mc-m-txt">\u6682\u65e0\u7248\u672c\u8bb0\u5f55\u3002</div></div>'
+      + '<div class="__mc-m-acts"><button type="button" class="__mc-btn __mc-btn-mini" data-mact="close">\u5173\u95ed</button></div>';
+    for (var i = 0; i < d.versions.length; i++) {
+      var it = d.versions[i] || {};
+      var note = verNoteOf(it.notes);
+      h += '<div style="padding:6px 0;border-bottom:1px solid rgba(255,255,255,.06)">'
+        + '<div style="display:flex;align-items:center;gap:8px">'
+        + '<b style="color:#e8e6e0">v' + esc(it.v) + '</b>'
+        + (it.date ? '<span style="color:#6b7180;font-size:11px">' + esc(it.date) + '</span>' : '')
+        + (d.current != null && String(it.v).toLowerCase() === String(d.current).toLowerCase()
+          ? '<span style="color:#4ade80;font-size:11px">\u2713 \u4f7f\u7528\u4e2d</span>' : '')
+        + '<span style="flex:1"></span>'
+        + '<button type="button" class="__mc-btn __mc-btn-blue __mc-btn-mini" data-ver="' + esc(it.v) + '">\u5b89\u88c5\u6b64\u7248\u672c</button>'
+        + '</div>'
+        + (note ? '<div style="font-size:11px;color:#8a90a0;padding:3px 0 0">' + esc(note) + '</div>' : '')
+        + '</div>';
+    }
+    return h + '</div>'
+      + '<div class="__mc-m-acts"><button type="button" class="__mc-btn __mc-btn-mini" data-mact="close">\u5173\u95ed</button></div>';
+  }
+
+  function renderVerList() {
+    if (!verData) return;
+    if (!setModal(verListHtml(verData))) return;
+    var btns = S.mdl.querySelectorAll('[data-ver]');
+    for (var i = 0; i < btns.length; i++)
+      btns[i].addEventListener('click', function (e) {
+        e.stopPropagation();
+        verPick(this.getAttribute('data-ver'));
+      });
+  }
+
+  function verPick(v) {
+    if (!verData || !v) return;
+    /* 低于当前版本先二次确认（旧版写档兼容风险）；同版=修复重装、更高/未安装=直发 */
+    if (verData.current != null && verCmp(v, verData.current) < 0) { showVerConfirm(v); return; }
+    verSend(v);
+  }
+
+  /* 降级确认（红字文案 brief 逐字口径）；「返回」回列表可重选，「仍要安装」直发（C# 只过链闸） */
+  function showVerConfirm(v) {
+    if (!setModal('<h3>' + chipHtml('red', icSvg('warn')) + '\u5b89\u88c5\u65e7\u7248\u672c \u00b7 ' + esc(verData.name) + '</h3>'
+      + '<div class="__mc-kv" style="padding:2px 0 0"><span class="__mc-kvv">' + esc(verData.current || '?') + '</span>'
+      + '<span style="color:#6b7180">\u2193</span>'
+      + '<span class="__mc-kvv" style="color:#f87171;font-size:14px">' + esc(v) + '</span></div>'
+      + '<div class="__mc-risk">\u65e7\u7248\u672c\u53ef\u80fd\u4e0d\u9002\u914d\u5f53\u524d\u6e38\u620f\u7248\u672c\uff0c\u5b58\u6863\u7531\u65b0\u7248\u5199\u8fc7\uff0c\u5efa\u8bae\u5148\u5907\u4efd\u5b58\u6863</div>'
+      + '<div class="__mc-m-sec"><div class="__mc-m-txt">\u4e0b\u8f7d\u5e76\u6821\u9a8c\u540e\u6682\u5b58\uff0c<b style="color:#e8e6e0">\u91cd\u542f\u6e38\u620f</b>\u65f6\u81ea\u52a8\u66ff\u6362\u3002</div></div>'
+      + '<div class="__mc-m-acts"><button type="button" class="__mc-btn __mc-btn-mini" data-mact="verback">\u8fd4\u56de</button>'
+      + '<button type="button" class="__mc-btn __mc-btn-danger" data-mact="vergo">\u4ecd\u8981\u5b89\u88c5 v' + esc(v) + '</button></div>')) return;
+    var back = S.mdl.querySelector('[data-mact="verback"]');
+    var go = S.mdl.querySelector('[data-mact="vergo"]');
+    if (back) back.addEventListener('click', function (e) { e.stopPropagation(); renderVerList(); });
+    if (go) go.addEventListener('click', function (e) { e.stopPropagation(); verSend(v); });
+  }
+
+  /* 发送 MC_UPD_VER：version=台账行 v 原文；发送后弹窗就地转下载进度态（MC_DL 接管）。
+   * 行查不到（repoData 已变，理论不可达——入口即要求仓行在场）→ 只发消息并收弹窗。 */
+  function verSend(v) {
+    if (!verData) return;
+    var key = verData.repoKey;
+    window.__mcOutbox.push({ type: 'MC_UPD_VER', repoKey: key, version: v });
+    ST.verKey = null; clearVerTimer(); verData = null;
+    var row = repoRowOf(key);
+    S.mdlRepoKey = key;
+    if (row && setModal(updModalDlHtml(row, null))) {
+      var tx = S.mdl.querySelector('#__mc_dltx');
+      if (tx) tx.textContent = '\u51c6\u5907\u4e0b\u8f7d\u2026';
+    } else closeModal();
+  }
+
+  /* 版本弹窗入口（m=mod 行或仓库行——统一按 guid 对照 repoRowOfGuid 取仓键；自身拒绝） */
+  function openVerModal(m) {
+    if (!m || m.guid === SELF_GUID) return;
+    var r = repoRowOfGuid(m.guid);
+    if (!r) return;
+    var name = r.name || m.name || r.repoKey;
+    ST.verKey = r.repoKey; verData = null;
+    openModal(verLoadingHtml(name));
+    window.__mcOutbox.push({ type: 'MC_VER_GET', repoKey: r.repoKey });
+    clearVerTimer();
+    verTimer = setTimeout(function () {
+      verTimer = null;
+      if (ST.verKey !== r.repoKey) return; // 已换目标/已收包/已关弹窗
+      ST.verKey = null; verData = null;
+      if (modalOpen() && S.mdl) setModal(verErrHtml(name));
+    }, 5000);
+  }
+
+  /* MC_VER_DATA 到达：陈旧包丢弃（verKey 已换/已关）；台账存 verData 供确认「返回」重渲 */
+  function onVerData(ev) {
+    if (ST.verKey == null || ev.repoKey !== ST.verKey) return;
+    ST.verKey = null; clearVerTimer();
+    if (!modalOpen() || !S.mdl) return; // 用户已关弹窗：只清状态
+    var row = repoRowOf(ev.repoKey);
+    verData = {
+      repoKey: ev.repoKey,
+      name: (row && row.name) || ev.repoKey,
+      current: ev.current || null,
+      versions: ev.versions || [],
+    };
+    renderVerList();
   }
 
   function setModal(html) {
@@ -1907,6 +2083,7 @@
     if (S.mbg) S.mbg.className = '__mc-modal-bg';
     ST.cfGuid = null; clearCfTimer(); // v2 任务 11：关弹窗=放弃未到的冲突详情（防陈旧回包误渲染）
     ST.patchOpen = false; ST.scanWait = false; // v2 任务 12：碰撞汇总弹窗态随关清
+    ST.verKey = null; clearVerTimer(); verData = null; // 任务 13：版本列表等待随关清（防陈旧回包误渲染）
   }
 
   function modalOpen() {
@@ -2103,6 +2280,9 @@
       /* v2.0.9：使用说明按钮 → 静态弹窗（清单 usage / USAGE 表） */
       var us = t.closest('[data-act="usage"]');
       if (us) { e.stopPropagation(); openUsageModal(us.getAttribute('data-guid')); return; }
+      /* 套件名单单源任务 13：维护区「版本」按钮 → 版本选择弹窗（openVerModal 按 guid 对照仓行） */
+      var vb = t.closest('[data-act="ver"]');
+      if (vb) { e.stopPropagation(); openVerModal(findMod(vb.getAttribute('data-guid'))); return; }
       var m = curMod();
       if (!m) return;
       /* bool 开关 */
@@ -2554,6 +2734,8 @@
     if (event && event.type === 'MC_UPDATES_READY') openUpdListModal(event.rows);
     /* v2 任务 10：卸载明细（MC_UNINST_DATA）→ 占位壳换真值确认弹窗 */
     if (event && event.type === 'MC_UNINST_DATA') onUninstData(event);
+    /* 套件名单单源任务 13：版本台账（MC_VER_DATA）→ 占位壳换版本列表 */
+    if (event && event.type === 'MC_VER_DATA') onVerData(event);
     /* v2 任务 11：冲突详情（MC_CF_DATA）→ 占位壳换真卡片（L1 卡片 + L3 同域卡） */
     if (event && event.type === 'MC_CF_DATA') onCfData(event);
     /* v2 任务 12：L2 补丁碰撞扫描数据（MC_SCAN_DATA）→ 侧栏汇总行 + 汇总弹窗就地重绘 */
@@ -2606,6 +2788,7 @@
     S.pendEl = null; S.pendTx = null; S.mbg = null; S.mdl = null; S.mdlRepoKey = null; // v2 任务 7/8：弹窗/待生效条随面板拆
     ST.uninstGuid = null; clearUninstTimer(); // v2 任务 10：卸载明细等待随面板拆终止
     ST.cfGuid = null; clearCfTimer();         // v2 任务 11：冲突详情等待随面板拆终止
+    ST.verKey = null; clearVerTimer(); verData = null; // 任务 13：版本列表等待随面板拆终止
     ST.patchOpen = false; ST.scanWait = false; // v2 任务 12：碰撞汇总弹窗态随面板拆清
     ORD.src = null; // v2 任务 9：面板拆=拖拽会话终止（重开面板需重新 dragstart）
     if (el.isConnected && el.parentNode) el.parentNode.removeChild(el);
@@ -2648,6 +2831,7 @@
     S.pendEl = null; S.pendTx = null; S.mbg = null; S.mdl = null; S.mdlRepoKey = null; // v2 任务 7/8
     ST.uninstGuid = null; clearUninstTimer(); // v2 任务 10
     ST.cfGuid = null; clearCfTimer();         // v2 任务 11
+    ST.verKey = null; clearVerTimer(); verData = null; // 任务 13
     ST.patchOpen = false; ST.scanWait = false; // v2 任务 12
     ORD.src = null; // v2 任务 9
     for (var id in TH) if (TH[id] && TH[id].timer != null) clearTimeout(TH[id].timer);

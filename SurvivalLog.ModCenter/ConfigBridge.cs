@@ -56,6 +56,12 @@ namespace SurvivalLog.ModCenter;
 /// 给每行挂 ics（red/orange，click=cf）；MC_CF {guid} →
 /// MC_CF_DATA {guid,cards[]}（L1 cards + L2 碰撞卡，面板照原型 cfHtml 渲染）。快照 ics 与
 /// 弹窗卡片共用 EntriesFor，杜绝两处口径漂移（L3 同域提示随静态域表退役删除，v2.4.0）。
+/// 版本自由选择（spec 2026-11-21 §6）：MC_VER_GET {repoKey} → 版本台账缓存（VersionCatalog，
+/// 任务 11）命中即回 MC_VER_DATA（current=_repoRows 该仓 Local），未命中后台 FetchVersions
+/// 拉 versions.json，成功 Put 后主线程回推（失败 toast，不炸）；MC_UPD_VER {repoKey,version}
+/// 台账必须命中（未命中="版本列表过期，重新打开"）+ 行取 _repoRows + 只过 RepoBlocked（待生效/
+/// 链闸——显式版本允许降级/同版重装，方向闸不参与）→ StartRepoChainJobs 显式 job
+///（VersionCatalog.ToUpdateInfo，AssetUrl=桶内 zip 直连，COS 唯一来源）复用整条下载链。
 /// 线程纪律：全部 cfg 读写与分发都在 Ticker 主线程（Pump）；outbox 回调线程只入队；
 /// 仓库 fetch/下载在后台 Task，结果经 RepoQueue 回主线程收割（PendingWriter 主线程唯一写者）。
 /// </summary>
@@ -96,7 +102,8 @@ internal static class ConfigBridge
     // ---- v2 任务 8：仓库页状态（全部主线程持有/变更；后台任务只经 RepoQueue 回传） ----
     private sealed class RepoUi
     {
-        public int Kind;                          // 1=fetch 完成 2=下载进度 3=单仓链结果 4=链收尾 5=fetch 异常收尾（T9 顺手修）
+        public int Kind;                          // 1=fetch 完成 2=下载进度 3=单仓链结果 4=链收尾 5=fetch 异常收尾（T9 顺手修） 6=版本台账拉取结果（MC_VER_GET 后台）
+        public List<VersionInfo> Versions;        // 6（spec 2026-11-21 §6：成功=台账全集；null=失败，收割侧只 toast）
         public List<RepoRow> Rows;                // 1
         public Dictionary<string, RepoClient.UpdateInfo> Infos; // 1（repoKey → 名单行；下载链直用）
         public List<RepoClient.UpdateInfo> Entries; // 1：本轮名单条目（成功=新拉，成功轮 ApplyFromFetch；失败轮 null 不动缓存）
@@ -1392,30 +1399,106 @@ internal static class ConfigBridge
         StartRepoChain(targets);
     }
 
-    /// <summary>下载链启动（单仓/批量共用，v2.2.0 从 HandleRepoUpd 抽出）：闸置位 + 卸载竞态闸
-    /// （必修 1）+ jobs 组装 + 后台串行链（RunRepoChainAsync：下载/MD5/解包/pending 写入全复用）。</summary>
+    /// <summary>版本列表拉取（spec 2026-11-21 §6，MC_VER_GET {repoKey}）：<see cref="VersionCatalog"/>
+    /// 命中即回 MC_VER_DATA（current 取 _repoRows 该仓 Local）；未命中后台 <see cref="RepoClient.FetchVersions"/>
+    /// （versions.json 1 次直拉，线程纪律同 FetchSuite），Kind 6 回主线程 Put + 回推（失败 toast，不炸不重试）。</summary>
+    private static void HandleVerGet(string repoKey)
+    {
+        if (string.IsNullOrEmpty(repoKey)) return;
+        if (VersionCatalog.TryGet(repoKey, out var cached)) { PushVerData(repoKey, cached); return; }
+        System.Threading.Tasks.Task.Run(async () =>
+        {
+            try
+            {
+                var versions = await RepoClient.FetchVersions(repoKey); // 内部全 catch，失败=null
+                RepoQueue.Enqueue(new RepoUi { Kind = 6, RepoKey = repoKey, Versions = versions });
+            }
+            catch (Exception e) // 理论不可达（FetchVersions 不抛）；兜底防任务孤儿（面板重开可重试）
+            {
+                Log("warn fetch versions 异常: " + repoKey + " " + e.GetType().Name + ": " + e.Message);
+                RepoQueue.Enqueue(new RepoUi { Kind = 6, RepoKey = repoKey });
+            }
+        });
+    }
+
+    /// <summary>显式版本安装/回退（spec 2026-11-21 §6，MC_UPD_VER {repoKey, version}）：台账缓存
+    /// 必须命中（面板打开时拉的表——未命中/查无该版本=会话内无数据，同步拒"版本列表过期，
+    /// 重新打开"）；行取 _repoRows（行不在=没检查过更新，dll/guid 就绪才有得装）；只过
+    /// <see cref="RepoBlocked"/>（待生效/链闸）——显式版本允许降级/同版重装（方向闸不参与，
+    /// 与常规更新路径唯一差别）；job 用 <see cref="VersionCatalog.ToUpdateInfo"/> 构造
+    /// （AssetUrl=桶内 zip 直连，COS 唯一来源），<see cref="StartRepoChainJobs"/> 复用整条下载链。</summary>
+    private static void HandleUpdVer(string repoKey, string version)
+    {
+        if (!VersionCatalog.TryGet(repoKey, out var versions))
+        {
+            McToast("版本列表过期了", "info", "重新打开版本列表再选");
+            return;
+        }
+        VersionInfo ver = null;
+        if (!string.IsNullOrEmpty(version))
+            foreach (var v in versions)
+                if (string.Equals(v.Version, version, StringComparison.OrdinalIgnoreCase)) { ver = v; break; }
+        if (ver == null) { McToast("版本列表过期了", "info", "重新打开版本列表再选"); return; }
+        if (_repoRows == null) { McToast("还没检查过更新", "info", "先点「检查更新」"); return; }
+        RepoRow row = null;
+        foreach (var r in _repoRows)
+            if (string.Equals(r.RepoKey, repoKey, StringComparison.OrdinalIgnoreCase)) { row = r; break; }
+        if (row == null) { Log("repo upd-ver 拒绝：未知仓键 " + repoKey); McToast("没找到 " + repoKey, "info", "先点「检查更新」"); return; }
+        if (!RepoBlocked(row, RepoPendingGuids(), out var why))
+        {
+            McToast(row.Name + " 现在不能装", "info", why);
+            return;
+        }
+        StartRepoChainJobs(new List<(RepoRow row, RepoClient.UpdateInfo info)>
+        {
+            (row, VersionCatalog.ToUpdateInfo(repoKey, ver)),
+        });
+    }
+
+    /// <summary>下载链启动（常规单仓/批量共用，v2.2.0 从 HandleRepoUpd 抽出）：按 _repoInfos 组 jobs
+    /// 后委托 <see cref="StartRepoChainJobs"/>。</summary>
     private static void StartRepoChain(List<RepoRow> targets)
+    {
+        var jobs = new List<(RepoRow row, RepoClient.UpdateInfo info)>();
+        foreach (var t in targets) jobs.Add((t, _repoInfos[t.RepoKey]));
+        StartRepoChainJobs(jobs);
+    }
+
+    /// <summary>下载链启动本体（常规 MC_UPD/批量与显式版本 MC_UPD_VER 共用，spec 2026-11-21 §6）：
+    /// 闸置位 + 卸载竞态闸（必修 1，_chainGuids 在此统一收录）+ 后台串行链（RunRepoChainAsync：
+    /// 下载/MD5/解包/pending 写入全复用）。显式版本路径的 info 由 VersionCatalog.ToUpdateInfo
+    /// 构造（不走 _repoInfos），下载/校验照用 job 的 AssetUrl/Md5。</summary>
+    private static void StartRepoChainJobs(List<(RepoRow row, RepoClient.UpdateInfo info)> jobs)
     {
         _repoChain = true;
         _chainGuids.Clear();
-        foreach (var t in targets)
-            if (!string.IsNullOrEmpty(t.Guid)) _chainGuids.Add(t.Guid); // 卸载竞态闸（必修 1）
-        var jobs = new List<(RepoRow row, RepoClient.UpdateInfo info)>();
-        foreach (var t in targets) jobs.Add((t, _repoInfos[t.RepoKey]));
+        foreach (var t in jobs)
+            if (!string.IsNullOrEmpty(t.row.Guid)) _chainGuids.Add(t.row.Guid); // 卸载竞态闸（必修 1）
         Log("repo 下载链启动: " + string.Join(", ", jobs.ConvertAll(j => j.row.RepoKey + " " + j.row.Local + "→" + j.info.Version)));
         System.Threading.Tasks.Task.Run(() => RunRepoChainAsync(jobs));
+    }
+
+    /// <summary>行阻塞判定（spec 2026-11-21 §6 从 RepoActionable 拆出，只查"动不了"硬闸）：
+    /// 链闸（_repoChain 串行——常规入口已前置自查，对本路径恒空过）+ 待生效意图（install/
+    /// replace/delete，pend 集含卸载）。显式版本路径只过本闸（降级/同版重装合法）。</summary>
+    private static bool RepoBlocked(RepoRow r, HashSet<string> pend, out string why)
+    {
+        why = null;
+        if (_repoChain) { why = "已有下载在进行，一次只处理一个，下完再点"; return false; }
+        if (pend.Contains(r.Guid.ToLowerInvariant())) { why = "它已有排队中的操作，重启游戏后应用"; return false; }
+        return true;
     }
 
     /// <summary>行可动作判定：fetch 成功（Remote/信息在）且无待生效意图，且 tag 方向成立——
     /// v4.1 作者拍板：只做 release tag 版本比较，本地比 tag 高（超前构建）一律拒，杜绝变相
     /// 降级入口；v2.2.0 gamekb 门退役：同版本也拒（旧"更新到同版本"是 ⚠橙 行修复路径，
-    /// 该行不复存在，同版本覆盖 = 同 zip 反复下载，无意义）。</summary>
+    /// 该行不复存在，同版本覆盖 = 同 zip 反复下载，无意义）。链闸/待生效硬闸见
+    /// <see cref="RepoBlocked"/>（常规入口调用前已自查 _repoChain，行为不变）。</summary>
     private static bool RepoActionable(RepoRow r, HashSet<string> pend, out string why)
     {
-        why = null;
+        if (!RepoBlocked(r, pend, out why)) return false;
         if (string.IsNullOrEmpty(r.Remote)) { why = "上次没查到它的版本，先重新检查更新"; return false; }
         if (!_repoInfos.ContainsKey(r.RepoKey)) { why = "版本信息过期了，先重新检查更新"; return false; }
-        if (pend.Contains(r.Guid.ToLowerInvariant())) { why = "它已有排队中的操作，重启游戏后应用"; return false; }
         if (r.Local != null
             && RepoDecision.CompareVersions(r.Local, r.Remote) is >= 0)
         {
@@ -1616,6 +1699,15 @@ internal static class ConfigBridge
                 PushRepoData();
                 McToast("检查失败", "err", (ui.Err ?? "网络或仓库问题") + "，稍后再试");
                 break;
+            case 6: // 版本台账后台拉取收割（spec 2026-11-21 §6，MC_VER_GET）：成功 Put 进会话缓存
+                //（面板下次打开即缓存命中）+ 回推 MC_VER_DATA；失败只 toast（面板重开版本列表可重试），不炸不重试
+                if (ui.Versions != null)
+                {
+                    VersionCatalog.Put(ui.RepoKey, ui.Versions);
+                    PushVerData(ui.RepoKey, ui.Versions);
+                }
+                else McToast("版本列表没拿到", "err", "网络或仓库问题，稍后再试");
+                break;
         }
     }
 
@@ -1652,6 +1744,19 @@ internal static class ConfigBridge
         }
         if (_repoFetchError != null) d.FailAll = true; // 首轮 fetch 异常（_repoRows 仍 null）也要暴露失败态
         if (_dlKey != null) { d.DlKey = _dlKey; d.DlPct = _dlPct; d.DlStage = _dlStage; }
+        PushEvent(d.ToJson());
+    }
+
+    /// <summary>推 MC_VER_DATA（__mcEvent 通道，spec 2026-11-21 §6）：repoKey + current（_repoRows
+    /// 该仓 Local，null=未安装——行不在/从未查过同为 null）+ versions（台账全集，发布侧最新在前）。</summary>
+    private static void PushVerData(string repoKey, List<VersionInfo> versions)
+    {
+        var d = new VerListData { RepoKey = repoKey };
+        if (_repoRows != null)
+            foreach (var r in _repoRows)
+                if (string.Equals(r.RepoKey, repoKey, StringComparison.OrdinalIgnoreCase)) { d.Current = r.Local; break; }
+        foreach (var v in versions)
+            d.Versions.Add(new VerRowInfo { V = v.Version, Date = v.Date, Notes = v.Notes });
         PushEvent(d.ToJson());
     }
 
@@ -2426,6 +2531,14 @@ internal static class ConfigBridge
                             break;
                         case "MC_INST":
                             HandleRepoUpd(GetStr(el, "repoKey"));
+                            break;
+                        // 版本自由选择（spec 2026-11-21 §6）：版本列表拉取（缓存命中即回/后台拉台账）/
+                        // 指定版本安装（显式 job 走同一下载链，允许降级/同版重装）
+                        case "MC_VER_GET":
+                            HandleVerGet(GetStr(el, "repoKey"));
+                            break;
+                        case "MC_UPD_VER":
+                            HandleUpdVer(GetStr(el, "repoKey"), GetStr(el, "version"));
                             break;
                         // v2 任务 9：加载排序模式（进模式拉序 / 保存顺序覆盖——校验+整替在专门节）
                         case "MC_ORDER_GET":

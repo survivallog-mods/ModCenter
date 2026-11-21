@@ -177,6 +177,56 @@ public static class RepoClient
         return list.Count == 0 ? null : new SuiteResult { Suite = list, Status = 200 };
     }
 
+    // ============ 版本台账（spec 2026-11-21 §6 版本自由选择） ============
+
+    /// <summary>拉取单仓版本台账：GET &lt;CosBase&gt;/mods/&lt;repoKey&gt;/versions.json（1 次直拉，
+    /// 无 API 消耗）→ 解析 versions 数组，按数组原顺序返回（发布侧已最新在前，且按桶内实际
+    /// zip 过滤——台账列出的版本 = 桶里能下载的版本，客户端不探测）。任何失败（CosBase 未
+    /// 配置/网络/JSON 坏/结构不符/零行）→ null + 一行 warn，不抛；类内零重试（同款纪律）。
+    /// 后台线程调用（线程纪律同 <see cref="FetchSuite"/>），结果入 VersionCatalog 会话缓存
+    /// 供主线程消费。</summary>
+    public static async Task<List<VersionInfo>> FetchVersions(string repoKey)
+    {
+        try
+        {
+            var json = await GetString(CosBase + "/mods/" + repoKey + "/versions.json", CheckTimeoutMs);
+            var parsed = ParseVersionsJson(json);
+            if (parsed != null) return parsed;
+            ModCenterPlugin.Log($"warn fetch versions 解析不符（零行/结构坏）: {repoKey}");
+        }
+        catch (Exception e)
+        {
+            ModCenterPlugin.Log($"warn fetch versions 失败: {repoKey} {e.GetType().Name} {e.Message}");
+        }
+        return null;
+    }
+
+    /// <summary>解析 versions.json：versions 数组逐行六字段，version/asset/md5 缺失丢行
+    /// （该版本不可选），date/notes/gamekb 可选；保持数组原顺序（发布侧已最新在前）。
+    /// 结构不符（非对象/无 versions 数组）或零行返回 null；JSON 语法坏抛 JsonException
+    /// 由调用方 catch。</summary>
+    private static List<VersionInfo> ParseVersionsJson(string json)
+    {
+        using var doc = JsonDocument.Parse(json);
+        if (!doc.RootElement.TryGetProperty("versions", out var versions) || versions.ValueKind != JsonValueKind.Array)
+            return null;
+        var list = new List<VersionInfo>();
+        foreach (var r in versions.EnumerateArray())
+        {
+            if (r.ValueKind != JsonValueKind.Object) continue;
+            var info = new VersionInfo
+            {
+                Version = GetStr(r, "version"), Date = GetStr(r, "date"), Notes = GetStr(r, "notes"),
+                Asset = GetStr(r, "asset"), Md5 = GetStr(r, "md5"), Gamekb = GetStr(r, "gamekb"),
+            };
+            if (string.IsNullOrEmpty(info.Version) || string.IsNullOrEmpty(info.Asset) ||
+                string.IsNullOrEmpty(info.Md5))
+                continue; // 行契约不完整：丢行（该版本不进台账）
+            list.Add(info);
+        }
+        return list.Count == 0 ? null : list;
+    }
+
     /// <summary>
     /// 下载 zip 资产到 StagingDir（BepInEx\ModCenter\staging\，T2 契约目录）：先落
     /// <c>&lt;asset&gt;.part</c> 临时名，成功后原子落位为 <c>&lt;asset&gt;</c> 并返回该绝对路径
@@ -267,4 +317,18 @@ public static class RepoClient
 
     private static string GetStr(JsonElement e, string prop) =>
         e.TryGetProperty(prop, out var v) && v.ValueKind == JsonValueKind.String ? v.GetString() : null;
+}
+
+/// <summary>版本台账行（COS mods/&lt;repo&gt;/versions.json，发布侧 sync-cos.ps1 每次发版维护
+/// 并按桶内实际 zip 过滤）。与 <see cref="RepoClient.UpdateInfo"/> 五字段同构但独立成型：台账
+/// 是历史版本全集（最新在前），UpdateInfo 是单次更新动作描述；date/notes/gamekb 可选（旧台账
+/// 缺失 = null，面板降级不显示），version/asset/md5 由解析侧强制非空。</summary>
+public sealed class VersionInfo
+{
+    public string Version; // 版本号（如 "1.7.1"，台账主键）
+    public string Date;    // 发布日期（可选：面板版本列表显示）
+    public string Notes;   // 该版发版说明（可选：版本弹窗显示，多行 markdown）
+    public string Asset;   // zip 资产文件名（如 "SurvivalLog.RobotSpeed_v1.7.0.zip"）
+    public string Md5;     // zip 的 MD5（小写十六进制；校验属调用方）
+    public string Gamekb;  // 构建依据的 gamekb 快照版本（可选："适配到此"，降级确认参考）
 }
